@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Input Jurnal — Internal Accounting</title>
+  <link rel="stylesheet" href="./css/style.css">
+</head>
+<body>
+  <div class="container">
+    <div class="topbar">
+      <h1>Input Jurnal</h1>
+      <button class="btn btn-danger" id="logoutBtn">Keluar</button>
+    </div>
+
+    <nav class="nav">
+      <a href="./dashboard.html">Dashboard</a>
+      <a href="./master.html">Master</a>
+      <a href="./journal.html" class="active">Jurnal</a>
+    </nav>
+
+    <!-- ============ FORM JURNAL ============ -->
+    <div class="card">
+      <h3 style="margin-top:0;font-size:16px;">Jurnal Baru</h3>
+      <form id="form-journal">
+        <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(150px,1fr));">
+          <div class="form-row">
+            <label>Tanggal</label>
+            <input type="date" name="journal_date" required>
+          </div>
+          <div class="form-row">
+            <label>Deskripsi</label>
+            <input name="description" placeholder="mis. Penjualan tunai" required>
+          </div>
+          <div class="form-row">
+            <label>No. Referensi</label>
+            <input name="ref_no" placeholder="opsional">
+          </div>
+          <div class="form-row">
+            <label>Mata Uang</label>
+            <select name="currency_code" id="currencySelect">
+              <option value="IDR">IDR</option>
+            </select>
+          </div>
+          <div class="form-row" id="rateRow" style="display:none;">
+            <label>Kurs ke IDR</label>
+            <input name="exchange_rate" type="number" step="0.000001" placeholder="16000">
+          </div>
+        </div>
+
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;">
+          <label style="font-size:13px;font-weight:500;">Baris Jurnal</label>
+          <button type="button" class="btn btn-secondary" id="addLineBtn">+ Tambah Baris</button>
+        </div>
+
+        <div class="journal-lines" id="journalLines"></div>
+
+        <div class="journal-summary">
+          <div>
+            Debit: <span id="totalDebit">Rp 0</span> &nbsp;|&nbsp;
+            Kredit: <span id="totalCredit">Rp 0</span>
+          </div>
+          <div id="balanceStatus" class="balance-bad">Belum balance</div>
+        </div>
+
+        <div class="form-actions">
+          <button type="submit" class="btn btn-primary" id="saveBtn" disabled>Simpan Jurnal</button>
+          <button type="button" class="btn btn-secondary" id="resetBtn">Reset</button>
+        </div>
+      </form>
+    </div>
+
+    <!-- ============ DAFTAR JURNAL ============ -->
+    <div class="card">
+      <h3 style="margin-top:0;font-size:16px;">Jurnal Terakhir</h3>
+      <div id="journalList"></div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script type="module" src="./js/journal-form.js"></script>
+</body>
+</html>
