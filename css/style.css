@@ -158,3 +158,35 @@ tbody tr:hover { background: #f9fafb; }
     grid-column: 1 / -1; width: 100%; height: 32px;
   }
 }
+
+/* ==== Reports ==== */
+.report-header {
+  display: flex; justify-content: space-between; align-items: center;
+  gap: 12px; flex-wrap: wrap; margin-bottom: 12px;
+}
+.report-header h3 { margin: 0; font-size: 16px; }
+
+.filter-row {
+  display: flex; gap: 8px; flex-wrap: wrap; align-items: end;
+  margin-bottom: 16px;
+}
+.filter-row .form-row { margin: 0; flex: 1; min-width: 140px; }
+
+.num { text-align: right; font-variant-numeric: tabular-nums; }
+.num.neg { color: #dc2626; }
+.num.pos { color: #059669; }
+
+.report-total {
+  font-weight: 700; background: #f9fafb;
+}
+.report-total td { border-top: 2px solid #d0d5dd; }
+
+.badge-type {
+  display: inline-block; padding: 2px 8px; border-radius: 4px;
+  font-size: 11px; font-weight: 600; text-transform: uppercase;
+}
+.badge-asset     { background: #dbeafe; color: #1e40af; }
+.badge-liability { background: #fee2e2; color: #991b1b; }
+.badge-equity    { background: #fef3c7; color: #92400e; }
+.badge-revenue   { background: #d1fae5; color: #065f46; }
+.badge-expense   { background: #fce7f3; color: #9f1239; }
