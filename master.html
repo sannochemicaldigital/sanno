@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Master Data — Internal Accounting</title>
+  <link rel="stylesheet" href="./css/style.css">
+</head>
+<body>
+  <div class="container">
+    <div class="topbar">
+      <h1>Master Data</h1>
+      <button class="btn btn-danger" id="logoutBtn">Keluar</button>
+    </div>
+
+    <nav class="nav">
+      <a href="./dashboard.html">Dashboard</a>
+      <a href="./master.html" class="active">Master</a>
+      <a href="./journal.html">Jurnal</a>
+    </nav>
+
+    <div class="tabs">
+      <button data-tab="coa" class="active">Chart of Accounts</button>
+      <button data-tab="partner">Partner</button>
+      <button data-tab="item">Item</button>
+    </div>
+
+    <!-- TAB COA -->
+    <section id="tab-coa" class="tab-panel">
+      <div class="card">
+        <h3 style="margin-top:0;font-size:16px;">Tambah Akun</h3>
+        <form id="form-account">
+          <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(140px,1fr));">
+            <div class="form-row">
+              <label>Kode</label>
+              <input name="code" placeholder="1-1500" required>
+            </div>
+            <div class="form-row">
+              <label>Nama</label>
+              <input name="name" placeholder="Nama akun" required>
+            </div>
+            <div class="form-row">
+              <label>Tipe</label>
+              <select name="type" required>
+                <option value="">— pilih —</option>
+                <option value="asset">Asset</option>
+                <option value="liability">Liability</option>
+                <option value="equity">Equity</option>
+                <option value="revenue">Revenue</option>
+                <option value="expense">Expense</option>
+              </select>
+            </div>
+            <div class="form-row">
+              <label>Normal Balance</label>
+              <select name="normal_balance" required>
+                <option value="D">Debit (D)</option>
+                <option value="K">Kredit (K)</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-actions">
+            <button type="submit" class="btn btn-primary">Simpan Akun</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="card">
+        <h3 style="margin-top:0;font-size:16px;">Daftar Akun</h3>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Kode</th><th>Nama</th><th>Tipe</th><th>Normal</th></tr>
+            </thead>
+            <tbody id="tbody-accounts"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB PARTNER -->
+    <section id="tab-partner" class="tab-panel" style="display:none;">
+      <div class="card">
+        <h3 style="margin-top:0;font-size:16px;">Tambah Partner</h3>
+        <form id="form-partner">
+          <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(140px,1fr));">
+            <div class="form-row">
+              <label>Kode</label>
+              <input name="code" placeholder="C001 / V001 / T001">
+            </div>
+            <div class="form-row">
+              <label>Nama</label>
+              <input name="name" placeholder="Nama partner" required>
+            </div>
+            <div class="form-row">
+              <label>Tipe</label>
+              <select name="type" required>
+                <option value="">— pilih —</option>
+                <option value="customer">Customer</option>
+                <option value="vendor">Vendor</option>
+                <option value="third_party">Pihak Ketiga</option>
+              </select>
+            </div>
+            <div class="form-row">
+              <label>Telepon</label>
+              <input name="phone" placeholder="08xx">
+            </div>
+            <div class="form-row">
+              <label>Email</label>
+              <input name="email" type="email" placeholder="email@domain.com">
+            </div>
+          </div>
+          <div class="form-actions">
+            <button type="submit" class="btn btn-primary">Simpan Partner</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="card">
+        <h3 style="margin-top:0;font-size:16px;">Daftar Partner</h3>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Kode</th><th>Nama</th><th>Tipe</th><th>Telepon</th><th>Email</th></tr>
+            </thead>
+            <tbody id="tbody-partners"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB ITEM -->
+    <section id="tab-item" class="tab-panel" style="display:none;">
+      <div class="card">
+        <h3 style="margin-top:0;font-size:16px;">Tambah Item</h3>
+        <form id="form-item">
+          <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(140px,1fr));">
+            <div class="form-row">
+              <label>SKU</label>
+              <input name="sku" placeholder="SKU-001" required>
+            </div>
+            <div class="form-row">
+              <label>Nama</label>
+              <input name="name" placeholder="Nama barang" required>
+            </div>
+            <div class="form-row">
+              <label>Satuan</label>
+              <input name="unit" placeholder="pcs" value="pcs">
+            </div>
+            <div class="form-row">
+              <label>Min Stok</label>
+              <input name="min_stock" type="number" step="0.0001" value="0">
+            </div>
+          </div>
+          <div class="form-actions">
+            <button type="submit" class="btn btn-primary">Simpan Item</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="card">
+        <h3 style="margin-top:0;font-size:16px;">Daftar Item</h3>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>SKU</th><th>Nama</th><th>Satuan</th><th>Stok</th><th>Avg Cost</th></tr>
+            </thead>
+            <tbody id="tbody-items"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script type="module" src="./js/master.js"></script>
+</body>
+</html>
