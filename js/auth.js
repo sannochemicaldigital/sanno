@@ -38,3 +38,16 @@ export async function requireAuth() {
   }
   return user;
 }
+
+// Cek apakah user yang login ber-role admin
+export async function isAdmin() {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) return false;
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('role')
+    .eq('id', session.user.id)
+    .single();
+  if (error) return false;
+  return data?.role === 'admin';
+}

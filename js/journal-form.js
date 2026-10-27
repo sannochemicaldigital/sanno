@@ -1,53 +1,70 @@
 // js/journal-form.js
-import { requireAuth, logout } from './auth.js';
+import { requireAuth, logout, isAdmin } from './auth.js';
 import { listAccounts } from './accounts.js';
 import { listPartners } from './partners.js';
 import { listItems } from './items.js';
-import { createJournal, listJournals, getRate } from './journals.js';
+import {
+  createJournal, listJournals, getRate,
+  getJournal, updateJournal, deleteJournal
+} from './journals.js';
 import { supabase } from './supabase-client.js';
 
-// ---------- State ----------
+// ============================================================
+// STATE
+// ============================================================
 const state = {
   accounts: [],
   partners: [],
   items: [],
   accountsById: {},
-  lineCount: 0
+  lineCount: 0,
+  isAdminUser: false,
+  editingId: null   // null = mode create, angka = mode edit
 };
 
-// ---------- Utilitas ----------
+// ============================================================
+// UTILITAS
+// ============================================================
 function toast(msg, isError = false) {
   const el = document.getElementById('toast');
   el.textContent = msg;
   el.className = 'toast show' + (isError ? ' error' : '');
   setTimeout(() => el.className = 'toast', 2800);
 }
+
 function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, c => ({
-    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
   }[c]));
 }
-function fmt(n) { return 'Rp ' + Number(n || 0).toLocaleString('id-ID'); }
 
-// ---------- Init ----------
+function fmt(n) {
+  return 'Rp ' + Number(n || 0).toLocaleString('id-ID');
+}
+
+// ============================================================
+// INIT
+// ============================================================
 (async () => {
   const user = await requireAuth();
   if (!user) return;
+
   document.getElementById('logoutBtn').addEventListener('click', logout);
 
-  // Set tanggal default hari ini
-  const today = new Date().toISOString().slice(0, 10);
-  document.querySelector('[name=journal_date]').value = today;
+  // Cek role admin
+  state.isAdminUser = await isAdmin();
 
-  // Muat master
+  // Set tanggal default
+  document.querySelector('[name=journal_date]').value = new Date().toISOString().slice(0, 10);
+
+  // Muat master & currency
   await loadMaster();
-
-  // Isi dropdown currency (dari tabel currencies)
   await loadCurrencies();
 
   // Event handlers
   document.getElementById('addLineBtn').addEventListener('click', () => addLine());
   document.getElementById('resetBtn').addEventListener('click', resetForm);
+  document.getElementById('cancelEditBtn').addEventListener('click', resetForm);
   document.getElementById('currencySelect').addEventListener('change', onCurrencyChange);
   document.getElementById('form-journal').addEventListener('submit', onSubmit);
 
@@ -59,7 +76,9 @@ function fmt(n) { return 'Rp ' + Number(n || 0).toLocaleString('id-ID'); }
   await renderJournals();
 })();
 
-// ---------- Load master ----------
+// ============================================================
+// LOAD MASTER
+// ============================================================
 async function loadMaster() {
   const [accs, parts, its] = await Promise.all([
     listAccounts(), listPartners(), listItems()
@@ -73,8 +92,10 @@ async function loadMaster() {
 async function loadCurrencies() {
   try {
     const { data, error } = await supabase
-      .from('currencies').select('code, name, is_base')
-      .eq('is_active', true).order('is_base', { ascending: false });
+      .from('currencies')
+      .select('code, name, is_base')
+      .eq('is_active', true)
+      .order('is_base', { ascending: false });
     if (error) throw error;
     const sel = document.getElementById('currencySelect');
     sel.innerHTML = data.map(c =>
@@ -90,7 +111,9 @@ function onCurrencyChange(e) {
   document.getElementById('rateRow').style.display = isIDR ? 'none' : 'block';
 }
 
-// ---------- Baris jurnal ----------
+// ============================================================
+// BARIS JURNAL
+// ============================================================
 function addLine() {
   state.lineCount++;
   const id = state.lineCount;
@@ -118,14 +141,13 @@ function addLine() {
   `;
   wrap.appendChild(div);
 
-  // Events
   div.querySelector('.line-remove').addEventListener('click', () => {
     div.remove();
     recalcTotals();
   });
+
   div.querySelectorAll('input').forEach(inp => {
     inp.addEventListener('input', () => {
-      // kalau isi debit, kosongkan kredit, dan sebaliknya
       const field = inp.dataset.field;
       if (field === 'debit' && Number(inp.value) > 0) {
         div.querySelector('.line-credit').value = '';
@@ -136,8 +158,8 @@ function addLine() {
       recalcTotals();
     });
   });
+
   div.querySelector('.line-account').addEventListener('change', () => {
-    // auto-set partner wajib kalau akun piutang/hutang
     const accId = Number(div.querySelector('.line-account').value);
     const acc = state.accountsById[accId];
     const partnerSel = div.querySelector('.line-partner');
@@ -149,6 +171,7 @@ function addLine() {
       partnerSel.title = '';
     }
   });
+
   recalcTotals();
 }
 
@@ -160,7 +183,7 @@ function collectLines() {
     const partner_id = Number(r.querySelector('.line-partner').value) || null;
     const debit = Number(r.querySelector('.line-debit').value) || 0;
     const credit = Number(r.querySelector('.line-credit').value) || 0;
-    if (!account_id && !debit && !credit) return; // baris kosong, skip
+    if (!account_id && !debit && !credit) return;
     lines.push({ account_id, partner_id, debit, credit });
   });
   return lines;
@@ -198,23 +221,30 @@ function resetForm() {
   document.getElementById('journalLines').innerHTML = '';
   document.getElementById('rateRow').style.display = 'none';
   state.lineCount = 0;
+  state.editingId = null;
+  document.getElementById('formTitle').textContent = 'Jurnal Baru';
+  document.getElementById('saveBtn').textContent = 'Simpan Jurnal';
+  document.getElementById('cancelEditBtn').style.display = 'none';
   addLine();
   addLine();
 }
 
-// ---------- Submit ----------
+// ============================================================
+// SUBMIT (CREATE / UPDATE)
+// ============================================================
 async function onSubmit(e) {
   e.preventDefault();
   const f = e.target;
   const btn = document.getElementById('saveBtn');
+  const isEditing = state.editingId !== null;
   btn.disabled = true;
-  btn.textContent = 'Menyimpan...';
+  btn.textContent = isEditing ? 'Mengupdate...' : 'Menyimpan...';
 
   try {
     const lines = collectLines();
     if (lines.length < 2) throw new Error('Minimal 2 baris jurnal');
 
-    // Cek partner wajib untuk akun piutang/hutang
+    // Validasi partner wajib
     for (const l of lines) {
       const acc = state.accountsById[l.account_id];
       if (acc && (acc.code.startsWith('1-12') || acc.code.startsWith('2-11')) && !l.partner_id) {
@@ -228,27 +258,41 @@ async function onSubmit(e) {
       exchange_rate = Number(f.exchange_rate.value) || await getRate(currency_code, f.journal_date.value);
     }
 
-    const header = await createJournal({
-      journal_date: f.journal_date.value,
-      description: f.description.value.trim(),
-      ref_no: f.ref_no.value.trim() || null,
-      currency_code,
-      exchange_rate,
-      lines
-    });
+    if (isEditing) {
+      await updateJournal(state.editingId, {
+        journal_date: f.journal_date.value,
+        description: f.description.value.trim(),
+        ref_no: f.ref_no.value.trim() || null,
+        currency_code,
+        exchange_rate,
+        lines
+      });
+      toast('✓ Jurnal berhasil diupdate');
+    } else {
+      const header = await createJournal({
+        journal_date: f.journal_date.value,
+        description: f.description.value.trim(),
+        ref_no: f.ref_no.value.trim() || null,
+        currency_code,
+        exchange_rate,
+        lines
+      });
+      toast(`✓ Jurnal ${header.journal_no} tersimpan`);
+    }
 
-    toast(`✓ Jurnal ${header.journal_no} tersimpan`);
     resetForm();
     await renderJournals();
   } catch (err) {
     toast('Gagal simpan: ' + (err.message || err), true);
   } finally {
     btn.disabled = false;
-    btn.textContent = 'Simpan Jurnal';
+    btn.textContent = state.editingId !== null ? 'Update Jurnal' : 'Simpan Jurnal';
   }
 }
 
-// ---------- Daftar jurnal ----------
+// ============================================================
+// DAFTAR JURNAL
+// ============================================================
 async function renderJournals() {
   const wrap = document.getElementById('journalList');
   try {
@@ -257,12 +301,14 @@ async function renderJournals() {
       wrap.innerHTML = '<div style="color:#9ca3af;font-size:14px;">Belum ada jurnal.</div>';
       return;
     }
-    // Ambil total per jurnal (debit & credit) via query langsung
+
+    // Hitung total per jurnal
     const ids = list.map(j => j.id);
     const { data: sums } = await supabase
       .from('journal_lines')
       .select('journal_id, debit_base, credit_base')
       .in('journal_id', ids);
+
     const sumMap = {};
     (sums || []).forEach(r => {
       sumMap[r.journal_id] = sumMap[r.journal_id] || { d: 0, c: 0 };
@@ -273,15 +319,89 @@ async function renderJournals() {
     wrap.innerHTML = list.map(j => {
       const s = sumMap[j.id] || { d: 0, c: 0 };
       const cur = j.currency_code !== 'IDR' ? ` (${j.currency_code} @${j.exchange_rate})` : '';
+      const adminButtons = state.isAdminUser ? `
+        <div style="margin-top:6px;display:flex;gap:6px;">
+          <button class="btn btn-secondary" style="padding:4px 10px;font-size:12px;"
+                  data-edit="${j.id}">Edit</button>
+          <button class="btn btn-danger" style="padding:4px 10px;font-size:12px;"
+                  data-delete="${j.id}" data-no="${esc(j.journal_no)}">Hapus</button>
+        </div>` : '';
       return `
         <div class="journal-list-item">
           <div><b>${esc(j.journal_no)}</b> — ${esc(j.description || '')}</div>
           <div class="meta">
             ${j.journal_date}${cur} · Debit ${fmt(s.d)} · Kredit ${fmt(s.c)}
           </div>
+          ${adminButtons}
         </div>`;
     }).join('');
+
+    // Event Edit
+    wrap.querySelectorAll('[data-edit]').forEach(btn => {
+      btn.addEventListener('click', () => loadEdit(Number(btn.dataset.edit)));
+    });
+    // Event Hapus
+    wrap.querySelectorAll('[data-delete]').forEach(btn => {
+      btn.addEventListener('click', () => onDelete(Number(btn.dataset.delete), btn.dataset.no));
+    });
   } catch (err) {
     wrap.innerHTML = `<div style="color:#b91c1c;font-size:13px;">Gagal muat: ${esc(err.message)}</div>`;
+  }
+}
+
+// ============================================================
+// EDIT
+// ============================================================
+async function loadEdit(journalId) {
+  try {
+    const j = await getJournal(journalId);
+    state.editingId = journalId;
+
+    const f = document.getElementById('form-journal');
+    f.journal_date.value = j.journal_date;
+    f.description.value = j.description || '';
+    f.ref_no.value = j.ref_no || '';
+    f.currency_code.value = j.currency_code || 'IDR';
+    onCurrencyChange({ target: f.currency_code });
+    f.exchange_rate.value = j.currency_code !== 'IDR' ? j.exchange_rate : '';
+
+    // Kosongkan lines, isi ulang
+    document.getElementById('journalLines').innerHTML = '';
+    state.lineCount = 0;
+
+    for (const l of j.lines) {
+      addLine();
+      const row = document.querySelector(`#journalLines .line-row[data-line-id="${state.lineCount}"]`);
+      row.querySelector('.line-account').value = l.account_id;
+      if (l.partner_id) row.querySelector('.line-partner').value = l.partner_id;
+      if (Number(l.debit) > 0)  row.querySelector('.line-debit').value  = l.debit;
+      if (Number(l.credit) > 0) row.querySelector('.line-credit').value = l.credit;
+    }
+    recalcTotals();
+
+    // Ubah UI jadi mode edit
+    document.getElementById('formTitle').textContent = `Edit Jurnal — ${j.journal_no}`;
+    document.getElementById('saveBtn').textContent = 'Update Jurnal';
+    document.getElementById('cancelEditBtn').style.display = 'inline-block';
+
+    // Scroll ke form
+    f.scrollIntoView({ behavior: 'smooth' });
+  } catch (err) {
+    toast('Gagal memuat jurnal: ' + err.message, true);
+  }
+}
+
+// ============================================================
+// HAPUS
+// ============================================================
+async function onDelete(journalId, journalNo) {
+  if (!confirm(`Hapus jurnal ${journalNo}? Tindakan ini tidak bisa dibatalkan.`)) return;
+  try {
+    await deleteJournal(journalId);
+    toast(`✓ Jurnal ${journalNo} dihapus`);
+    if (state.editingId === journalId) resetForm();
+    await renderJournals();
+  } catch (err) {
+    toast('Gagal hapus: ' + (err.message || err), true);
   }
 }

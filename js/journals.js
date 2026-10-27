@@ -125,3 +125,92 @@ export async function deleteJournal(journalId) {
   const { error } = await supabase.from('journals').delete().eq('id', journalId);
   if (error) throw error;
 }
+
+// ============================================================
+// AMBIL SATU JURNAL + LINES (untuk edit)
+// ============================================================
+export async function getJournal(journalId) {
+  const { data: header, error: hErr } = await supabase
+    .from('journals')
+    .select('*')
+    .eq('id', journalId)
+    .single();
+  if (hErr) throw hErr;
+
+  const { data: lines, error: lErr } = await supabase
+    .from('journal_lines')
+    .select('*')
+    .eq('journal_id', journalId)
+    .order('id');
+  if (lErr) throw lErr;
+
+  return { ...header, lines };
+}
+
+// ============================================================
+// UPDATE JURNAL (hapus lines lama, insert ulang)
+// ============================================================
+export async function updateJournal(journalId, {
+  journal_date, description, ref_no = null,
+  currency_code = 'IDR', exchange_rate = null, lines
+}) {
+  if (!lines || lines.length === 0) {
+    throw new Error('Jurnal harus punya minimal 1 baris');
+  }
+
+  const rate = exchange_rate ?? await getRate(currency_code, journal_date);
+
+  let totalDebit = 0, totalCredit = 0;
+  const prepared = lines.map(l => {
+    const debit  = Number(l.debit  || 0);
+    const credit = Number(l.credit || 0);
+    if (debit > 0 && credit > 0) throw new Error('Baris tidak boleh debit & kredit sekaligus');
+    const debit_base  = +(debit  * rate).toFixed(2);
+    const credit_base = +(credit * rate).toFixed(2);
+    totalDebit  += debit_base;
+    totalCredit += credit_base;
+    return {
+      account_id: l.account_id,
+      partner_id: l.partner_id ?? null,
+      item_id:    l.item_id    ?? null,
+      debit, credit, debit_base, credit_base,
+      tax_code:   l.tax_code   ?? null,
+      memo:       l.memo       ?? null
+    };
+  });
+
+  if (Math.abs(totalDebit - totalCredit) > 0.01) {
+    throw new Error(`Jurnal tidak balance: debit ${totalDebit} vs kredit ${totalCredit}`);
+  }
+
+  // 1. Update header
+  const { error: hErr } = await supabase
+    .from('journals')
+    .update({
+      journal_date, description, ref_no,
+      currency_code, exchange_rate: rate,
+      updated_at: new Date().toISOString()
+    })
+    .eq('id', journalId);
+  if (hErr) throw hErr;
+
+  // 2. Hapus lines lama
+  const { error: dErr } = await supabase
+    .from('journal_lines').delete().eq('journal_id', journalId);
+  if (dErr) throw dErr;
+
+  // 3. Insert lines baru
+  const rows = prepared.map(p => ({ ...p, journal_id: journalId }));
+  const { error: lErr } = await supabase.from('journal_lines').insert(rows);
+  if (lErr) throw lErr;
+
+  return { id: journalId };
+}
+
+// ============================================================
+// HAPUS JURNAL (lines otomatis via ON DELETE CASCADE)
+// ============================================================
+export async function deleteJournal(journalId) {
+  const { error } = await supabase.from('journals').delete().eq('id', journalId);
+  if (error) throw error;
+}
