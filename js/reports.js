@@ -37,3 +37,155 @@ export async function piutangPerPelanggan() {
   }
   return Object.values(agg).filter(x => Math.abs(x.saldo) > 0.01);
 }
+
+// ============================================================
+// LAPORAN: TRIAL BALANCE
+// ============================================================
+export async function trialBalance({ from = null, to = null } = {}) {
+  // Ambil semua akun aktif
+  const { data: accounts, error: aErr } = await supabase
+    .from('accounts')
+    .select('id, code, name, type, normal_balance')
+    .eq('is_active', true)
+    .order('code');
+  if (aErr) throw aErr;
+
+  // Ambil semua journal_lines dalam periode (pakai join ke journals untuk filter tanggal)
+  let q = supabase
+    .from('journal_lines')
+    .select('account_id, debit_base, credit_base, journals!inner(journal_date)');
+  if (from) q = q.gte('journals.journal_date', from);
+  if (to)   q = q.lte('journals.journal_date', to);
+  const { data: lines, error: lErr } = await q;
+  if (lErr) throw lErr;
+
+  // Agregasi per akun
+  const agg = {};
+  for (const l of lines) {
+    const k = l.account_id;
+    agg[k] = agg[k] || { d: 0, c: 0 };
+    agg[k].d += Number(l.debit_base);
+    agg[k].c += Number(l.credit_base);
+  }
+
+  return accounts.map(a => {
+    const s = agg[a.id] || { d: 0, c: 0 };
+    const balance = a.normal_balance === 'D' ? (s.d - s.c) : (s.c - s.d);
+    return {
+      code: a.code,
+      name: a.name,
+      type: a.type,
+      normal_balance: a.normal_balance,
+      total_debit: s.d,
+      total_credit: s.c,
+      balance
+    };
+  });
+}
+
+// ============================================================
+// LAPORAN: CASHFLOW (mutasi akun kas & bank)
+// ============================================================
+export async function cashflow({ from = null, to = null } = {}) {
+  // Akun kas/bank = kode 1-10xx dan 1-11xx
+  const { data: accounts, error: aErr } = await supabase
+    .from('accounts')
+    .select('id, code, name')
+    .or('code.like.1-10%,code.like.1-11%')
+    .eq('is_active', true)
+    .order('code');
+  if (aErr) throw aErr;
+
+  const accIds = accounts.map(a => a.id);
+  if (accIds.length === 0) return { accounts: [], rows: [], summary: [] };
+
+  let q = supabase
+    .from('journal_lines')
+    .select('account_id, debit_base, credit_base, memo, journals!inner(id, journal_no, journal_date, description)')
+    .in('account_id', accIds);
+  if (from) q = q.gte('journals.journal_date', from);
+  if (to)   q = q.lte('journals.journal_date', to);
+  const { data: lines, error: lErr } = await q;
+  if (lErr) throw lErr;
+
+  const accMap = Object.fromEntries(accounts.map(a => [a.id, a]));
+
+  // Baris detail
+  const rows = lines.map(l => ({
+    journal_date:  l.journals.journal_date,
+    journal_no:    l.journals.journal_no,
+    description:   l.journals.description,
+    account_code:  accMap[l.account_id]?.code,
+    account_name:  accMap[l.account_id]?.name,
+    debit:         Number(l.debit_base),
+    credit:        Number(l.credit_base),
+    memo:          l.memo
+  })).sort((a, b) => a.journal_date.localeCompare(b.journal_date));
+
+  // Ringkasan per akun
+  const summary = accounts.map(a => {
+    const accLines = lines.filter(l => l.account_id === a.id);
+    const inflow  = accLines.reduce((s, l) => s + Number(l.debit_base), 0);
+    const outflow = accLines.reduce((s, l) => s + Number(l.credit_base), 0);
+    return {
+      code: a.code,
+      name: a.name,
+      inflow,
+      outflow,
+      net: inflow - outflow
+    };
+  });
+
+  return { accounts, rows, summary };
+}
+
+// ============================================================
+// LAPORAN: AGING PIUTANG PER PELANGGAN
+// ============================================================
+export async function agingPiutang({ asOf = null } = {}) {
+  const cutoff = asOf || new Date().toISOString().slice(0, 10);
+
+  // Ambil semua journal_lines yang menyentuh akun piutang (1-12xx) dan punya partner
+  const { data: lines, error } = await supabase
+    .from('journal_lines')
+    .select(`
+      partner_id,
+      debit_base,
+      credit_base,
+      journals!inner(journal_date),
+      accounts!inner(code),
+      partners!inner(name, type)
+    `)
+    .like('accounts.code', '1-12%')
+    .not('partner_id', 'is', null)
+    .lte('journals.journal_date', cutoff);
+  if (error) throw error;
+
+  // Filter hanya customer
+  const custLines = lines.filter(l => l.partners?.type === 'customer');
+
+  // Agregasi per partner + bucket umur
+  const buckets = {}; // { partner_id: { name, b0_30, b31_60, b60p, total } }
+  const today = new Date(cutoff);
+
+  for (const l of custLines) {
+    const key = l.partner_id;
+    if (!buckets[key]) {
+      buckets[key] = { name: l.partners.name, b0_30: 0, b31_60: 0, b60p: 0, total: 0 };
+    }
+    const net = Number(l.debit_base) - Number(l.credit_base);
+    const jDate = new Date(l.journals.journal_date);
+    const days = Math.floor((today - jDate) / (1000 * 60 * 60 * 24));
+
+    if (days <= 30)       buckets[key].b0_30  += net;
+    else if (days <= 60)  buckets[key].b31_60 += net;
+    else                  buckets[key].b60p   += net;
+
+    buckets[key].total += net;
+  }
+
+  // Hanya tampilkan yang saldo != 0
+  return Object.values(buckets)
+    .filter(b => Math.abs(b.total) > 0.01)
+    .sort((a, b) => b.total - a.total);
+}
