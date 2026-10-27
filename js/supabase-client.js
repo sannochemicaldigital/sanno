@@ -5,3 +5,4 @@ const SUPABASE_URL = 'https://ylssphgggpmirwiivbvw.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_pgXl15Ax0p-0236hTxSGcw_nIJCHMY6';
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+window.supabase = supabase;
