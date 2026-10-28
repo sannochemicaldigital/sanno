@@ -18,6 +18,7 @@
       <a href="./master.html">Master</a>
       <a href="./journal.html">Jurnal</a>
       <a href="./reports.html" class="active">Laporan</a>
+      <a href="./settings.html" id="navSettings" style="display:none;">Pengaturan</a>
     </nav>
 
     <!-- ===== FILTER ===== -->
@@ -181,5 +182,9 @@
   <div class="toast" id="toast"></div>
 
   <script type="module" src="./js/reports-page.js"></script>
+  import { hasRole } from './js/auth.js';
+if (await hasRole('admin')) {
+  document.getElementById('navSettings').style.display = '';
+}
 </body>
 </html>

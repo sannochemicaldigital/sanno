@@ -18,6 +18,7 @@
   <a href="./master.html">Master</a>
   <a href="./journal.html">Jurnal</a>
   <a href="./reports.html">Laporan</a>
+  <a href="./settings.html" id="navSettings" style="display:none;">Pengaturan</a>
 </nav>
 
     <div id="cards" class="grid"></div>
@@ -26,6 +27,10 @@
   <script type="module">
     import { requireAuth, logout } from './js/auth.js';
     import { dashboardBalances } from './js/reports.js';
+    import { hasRole } from './js/auth.js';
+if (await hasRole('admin')) {
+  document.getElementById('navSettings').style.display = '';
+}
 
     const fmt = n => 'Rp ' + Number(n).toLocaleString('id-ID');
 
