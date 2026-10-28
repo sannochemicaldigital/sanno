@@ -186,3 +186,73 @@ export async function deleteJournal(journalId) {
   const { error } = await supabase.from('journals').delete().eq('id', journalId);
   if (error) throw error;
 }
+
+// ============================================================
+// REVERSAL JURNAL (buat jurnal balik, tandai jurnal asli)
+// ============================================================
+export async function reverseJournal(journalId) {
+  // 1. Ambil jurnal asli + lines
+  const original = await getJournal(journalId);
+
+  if (original.reversed_by) {
+    throw new Error('Jurnal ini sudah pernah di-reversal');
+  }
+
+  // 2. Siapkan lines balik (debit ↔ kredit)
+  const reversedLines = original.lines.map(l => ({
+    account_id: l.account_id,
+    partner_id: l.partner_id,
+    item_id:    l.item_id,
+    debit:      Number(l.credit),
+    credit:     Number(l.debit),
+    debit_base: Number(l.credit_base),
+    credit_base: Number(l.debit_base),
+    tax_code:   l.tax_code,
+    memo:       `Reversal: ${l.memo || ''}`.trim()
+  }));
+
+  // 3. Generate nomor jurnal reversal
+  const today = new Date().toISOString().slice(0, 10);
+  const ym = today.slice(0, 7).replace('-', '');
+  const { count } = await supabase
+    .from('journals').select('*', { count: 'exact', head: true })
+    .like('journal_no', `JV-${ym}-%`);
+  const journal_no = `JV-${ym}-${String((count || 0) + 1).padStart(4, '0')}`;
+
+  // 4. User id
+  const { data: { session } } = await supabase.auth.getSession();
+  const userId = session?.user?.id ?? null;
+
+  // 5. Insert header reversal
+  const { data: header, error: hErr } = await supabase
+    .from('journals')
+    .insert({
+      journal_no,
+      journal_date: today,
+      description: `Reversal dari ${original.journal_no}: ${original.description || ''}`.trim(),
+      ref_no: original.ref_no,
+      currency_code: original.currency_code,
+      exchange_rate: original.exchange_rate,
+      created_by: userId,
+      reversal_of: journalId
+    })
+    .select().single();
+  if (hErr) throw hErr;
+
+  // 6. Insert lines balik
+  const rows = reversedLines.map(r => ({ ...r, journal_id: header.id }));
+  const { error: lErr } = await supabase.from('journal_lines').insert(rows);
+  if (lErr) {
+    await supabase.from('journals').delete().eq('id', header.id);
+    throw lErr;
+  }
+
+  // 7. Tandai jurnal asli sebagai reversed
+  const { error: uErr } = await supabase
+    .from('journals')
+    .update({ reversed_by: header.id })
+    .eq('id', journalId);
+  if (uErr) throw uErr;
+
+  return header;
+}

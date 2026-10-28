@@ -1,52 +1,59 @@
 // js/reports-page.js
 import { requireAuth, logout } from './auth.js';
-import { trialBalance, cashflow, agingPiutang } from './reports.js';
+import { trialBalance, cashflow, agingPiutang, labaRugi, neraca } from './reports.js';
 
-// ---------- State ----------
+// ============================================================
+// STATE
+// ============================================================
 const state = {
   from: null,
   to: null,
   activeTab: 'tb',
-  lastData: null // untuk export CSV
+  lastData: null
 };
 
-// ---------- Utilitas ----------
+// ============================================================
+// UTILITAS
+// ============================================================
 function toast(msg, isError = false) {
   const el = document.getElementById('toast');
   el.textContent = msg;
   el.className = 'toast show' + (isError ? ' error' : '');
   setTimeout(() => el.className = 'toast', 2500);
 }
+
 function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, c => ({
-    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
   }[c]));
 }
+
 function fmt(n) {
   const v = Number(n || 0);
   return v.toLocaleString('id-ID', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 }
-function fmtSigned(n) {
-  const v = Number(n || 0);
-  const cls = v < 0 ? 'neg' : (v > 0 ? 'pos' : '');
-  return `<span class="${cls}">${fmt(v)}</span>`;
-}
+
 function periodLabel(from, to) {
   if (!from && !to) return 'Semua periode';
   return `${from || '...'} s/d ${to || '...'}`;
 }
 
-// ---------- Init ----------
+// ============================================================
+// INIT
+// ============================================================
 (async () => {
   const user = await requireAuth();
   if (!user) return;
+
   document.getElementById('logoutBtn').addEventListener('click', logout);
 
-  // Tanggal default: awal bulan ini s/d hari ini
+  // Default: awal bulan ini s/d hari ini
   const today = new Date();
   const firstOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
   document.getElementById('filterFrom').value = firstOfMonth.toISOString().slice(0, 10);
   document.getElementById('filterTo').value = today.toISOString().slice(0, 10);
+  state.from = document.getElementById('filterFrom').value;
+  state.to = document.getElementById('filterTo').value;
 
   // Tabs
   document.querySelectorAll('.tabs button').forEach(btn => {
@@ -66,6 +73,7 @@ function periodLabel(from, to) {
     state.to   = document.getElementById('filterTo').value || null;
     loadActive();
   });
+
   document.getElementById('resetFilter').addEventListener('click', () => {
     document.getElementById('filterFrom').value = '';
     document.getElementById('filterTo').value = '';
@@ -73,20 +81,27 @@ function periodLabel(from, to) {
     state.to = null;
     loadActive();
   });
+
   document.getElementById('exportCsv').addEventListener('click', exportCsv);
 
   // Load awal
   await loadActive();
 })();
 
-// ---------- Dispatch ----------
+// ============================================================
+// DISPATCH
+// ============================================================
 async function loadActive() {
   if (state.activeTab === 'tb') await loadTrialBalance();
   else if (state.activeTab === 'cf') await loadCashflow();
   else if (state.activeTab === 'ar') await loadAging();
+  else if (state.activeTab === 'lr') await loadLabaRugi();
+  else if (state.activeTab === 'nc') await loadNeraca();
 }
 
-// ---------- Trial Balance ----------
+// ============================================================
+// TRIAL BALANCE
+// ============================================================
 async function loadTrialBalance() {
   const tbody = document.getElementById('tbody-tb');
   const tfoot = document.getElementById('tfoot-tb');
@@ -126,7 +141,9 @@ async function loadTrialBalance() {
   }
 }
 
-// ---------- Cashflow ----------
+// ============================================================
+// CASHFLOW
+// ============================================================
 async function loadCashflow() {
   const sumBody = document.getElementById('tbody-cf-summary');
   const detailBody = document.getElementById('tbody-cf-detail');
@@ -163,7 +180,9 @@ async function loadCashflow() {
   }
 }
 
-// ---------- Aging ----------
+// ============================================================
+// AGING PIUTANG
+// ============================================================
 async function loadAging() {
   const tbody = document.getElementById('tbody-ar');
   const tfoot = document.getElementById('tfoot-ar');
@@ -200,7 +219,99 @@ async function loadAging() {
   }
 }
 
-// ---------- Export CSV ----------
+// ============================================================
+// LABA RUGI
+// ============================================================
+async function loadLabaRugi() {
+  const tbody = document.getElementById('tbody-lr');
+  document.getElementById('lrPeriod').textContent = periodLabel(state.from, state.to);
+  tbody.innerHTML = '<tr><td style="text-align:center;color:#9ca3af;">Memuat...</td></tr>';
+  try {
+    const r = await labaRugi({ from: state.from, to: state.to });
+    const row = (label, val, cls = '') =>
+      `<tr class="${cls}"><td>${esc(label)}</td><td class="num">${fmt(val)}</td></tr>`;
+    const sectionTitle = t =>
+      `<tr><td colspan="2" class="report-section-title">${esc(t)}</td></tr>`;
+
+    let html = '';
+    html += sectionTitle('Pendapatan');
+    html += r.revenue.map(x => row(`${x.code} — ${x.name}`, x.balance)).join('');
+    html += row('Total Pendapatan', r.totalRevenue, 'report-subtotal');
+
+    html += sectionTitle('Harga Pokok Penjualan');
+    html += r.hpp.map(x => row(`${x.code} — ${x.name}`, x.balance)).join('');
+    html += row('Total HPP', r.totalHpp, 'report-subtotal');
+
+    html += row('LABA KOTOR', r.grossProfit, 'report-grandtotal');
+
+    html += sectionTitle('Beban Operasional');
+    html += r.opex.map(x => row(`${x.code} — ${x.name}`, x.balance)).join('');
+    html += row('Total Beban Operasional', r.totalOpex, 'report-subtotal');
+
+    html += row('LABA OPERASIONAL', r.operatingProfit, 'report-grandtotal');
+
+    if (r.otherExp.length) {
+      html += sectionTitle('Beban Lain-lain');
+      html += r.otherExp.map(x => row(`${x.code} — ${x.name}`, x.balance)).join('');
+      html += row('Total Beban Lain-lain', r.totalOtherExp, 'report-subtotal');
+    }
+
+    html += row('LABA BERSIH', r.netProfit, 'report-grandtotal');
+    tbody.innerHTML = html;
+
+    state.lastData = { type: 'lr', data: r };
+  } catch (err) {
+    tbody.innerHTML = `<tr><td style="color:#b91c1c;">${esc(err.message)}</td></tr>`;
+  }
+}
+
+// ============================================================
+// NERACA
+// ============================================================
+async function loadNeraca() {
+  const tbody = document.getElementById('tbody-nc');
+  const status = document.getElementById('ncStatus');
+  document.getElementById('ncPeriod').textContent = `Per ${state.to || new Date().toISOString().slice(0, 10)}`;
+  tbody.innerHTML = '<tr><td style="text-align:center;color:#9ca3af;">Memuat...</td></tr>';
+  status.innerHTML = '';
+  try {
+    const n = await neraca({ asOf: state.to || null });
+    const row = (label, val, cls = '') =>
+      `<tr class="${cls}"><td>${esc(label)}</td><td class="num">${fmt(val)}</td></tr>`;
+    const sectionTitle = t =>
+      `<tr><td colspan="2" class="report-section-title">${esc(t)}</td></tr>`;
+
+    let html = '';
+    html += sectionTitle('ASET');
+    html += n.asset.map(x => row(`${x.code} — ${x.name}`, x.balance)).join('');
+    html += row('TOTAL ASET', n.totalAsset, 'report-grandtotal');
+
+    html += sectionTitle('LIABILITAS');
+    html += n.liability.map(x => row(`${x.code} — ${x.name}`, x.balance)).join('');
+    html += row('Total Liabilitas', n.totalLiability, 'report-subtotal');
+
+    html += sectionTitle('EKUITAS');
+    html += n.equity.map(x => row(`${x.code} — ${x.name}`, x.balance)).join('');
+    html += row('Laba Tahun Berjalan', n.currentProfit);
+    html += row('TOTAL EKUITAS', n.totalEquity, 'report-subtotal');
+
+    html += row('TOTAL LIABILITAS + EKUITAS',
+      n.totalLiability + n.totalEquity, 'report-grandtotal');
+    tbody.innerHTML = html;
+
+    status.innerHTML = n.balanced
+      ? `<div class="balance-indicator ok">✓ Neraca Balance (Aset = Liabilitas + Ekuitas)</div>`
+      : `<div class="balance-indicator bad">⚠ Neraca Tidak Balance: selisih ${fmt(n.totalAsset - (n.totalLiability + n.totalEquity))}</div>`;
+
+    state.lastData = { type: 'nc', data: n };
+  } catch (err) {
+    tbody.innerHTML = `<tr><td style="color:#b91c1c;">${esc(err.message)}</td></tr>`;
+  }
+}
+
+// ============================================================
+// EXPORT CSV
+// ============================================================
 function exportCsv() {
   const d = state.lastData;
   if (!d) { toast('Tidak ada data untuk diexport', true); return; }
@@ -218,6 +329,36 @@ function exportCsv() {
     filename = 'aging-piutang';
     headers = ['Pelanggan', '0-30', '31-60', '60+', 'Total'];
     rows = d.rows.map(r => [r.name, r.b0_30, r.b31_60, r.b60p, r.total]);
+  } else if (d.type === 'lr') {
+    filename = 'laba-rugi';
+    headers = ['Keterangan', 'Nilai'];
+    const r = d.data;
+    rows = [
+      ...r.revenue.map(x => [`Pendapatan: ${x.name}`, x.balance]),
+      ['Total Pendapatan', r.totalRevenue],
+      ...r.hpp.map(x => [`HPP: ${x.name}`, x.balance]),
+      ['Total HPP', r.totalHpp],
+      ['LABA KOTOR', r.grossProfit],
+      ...r.opex.map(x => [`Beban: ${x.name}`, x.balance]),
+      ['Total Beban Operasional', r.totalOpex],
+      ['LABA OPERASIONAL', r.operatingProfit],
+      ...r.otherExp.map(x => [`Beban Lain: ${x.name}`, x.balance]),
+      ['LABA BERSIH', r.netProfit]
+    ];
+  } else if (d.type === 'nc') {
+    filename = 'neraca';
+    headers = ['Keterangan', 'Nilai'];
+    const n = d.data;
+    rows = [
+      ...n.asset.map(x => [`Aset: ${x.name}`, x.balance]),
+      ['TOTAL ASET', n.totalAsset],
+      ...n.liability.map(x => [`Liabilitas: ${x.name}`, x.balance]),
+      ['Total Liabilitas', n.totalLiability],
+      ...n.equity.map(x => [`Ekuitas: ${x.name}`, x.balance]),
+      ['Laba Tahun Berjalan', n.currentProfit],
+      ['TOTAL EKUITAS', n.totalEquity],
+      ['TOTAL LIABILITAS + EKUITAS', n.totalLiability + n.totalEquity]
+    ];
   }
 
   const escapeCsv = v => {
@@ -225,7 +366,6 @@ function exportCsv() {
     return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
   };
   const csv = [headers, ...rows].map(r => r.map(escapeCsv).join(',')).join('\n');
-
   const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');

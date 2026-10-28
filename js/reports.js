@@ -189,3 +189,61 @@ export async function agingPiutang({ asOf = null } = {}) {
     .filter(b => Math.abs(b.total) > 0.01)
     .sort((a, b) => b.total - a.total);
 }
+
+// ============================================================
+// LAPORAN: LABA RUGI
+// ============================================================
+export async function labaRugi({ from = null, to = null } = {}) {
+  const tb = await trialBalance({ from, to });
+
+  // Kelompokkan per tipe
+  const revenue  = tb.filter(r => r.type === 'revenue');
+  const expense  = tb.filter(r => r.type === 'expense');
+  const hpp      = expense.filter(r => r.code.startsWith('5-1')); // HPP
+  const opex     = expense.filter(r => !r.code.startsWith('5-1') && !r.code.startsWith('5-9'));
+  const otherExp = expense.filter(r => r.code.startsWith('5-9'));
+
+  const totalRevenue  = revenue.reduce((s, r) => s + r.balance, 0);
+  const totalHpp      = hpp.reduce((s, r) => s + r.balance, 0);
+  const totalOpex     = opex.reduce((s, r) => s + r.balance, 0);
+  const totalOtherExp = otherExp.reduce((s, r) => s + r.balance, 0);
+
+  const grossProfit = totalRevenue - totalHpp;
+  const operatingProfit = grossProfit - totalOpex;
+  const netProfit = operatingProfit - totalOtherExp;
+
+  return {
+    revenue, hpp, opex, otherExp,
+    totalRevenue, totalHpp, totalOpex, totalOtherExp,
+    grossProfit, operatingProfit, netProfit
+  };
+}
+
+// ============================================================
+// LAPORAN: NERACA
+// ============================================================
+export async function neraca({ asOf = null } = {}) {
+  const tb = await trialBalance({ from: null, to: asOf });
+
+  const asset     = tb.filter(r => r.type === 'asset');
+  const liability = tb.filter(r => r.type === 'liability');
+  const equity    = tb.filter(r => r.type === 'equity');
+
+  // Hitung laba berjalan (revenue - expense) untuk dimasukkan ke ekuitas
+  const revenue = tb.filter(r => r.type === 'revenue');
+  const expense = tb.filter(r => r.type === 'expense');
+  const totalRevenue = revenue.reduce((s, r) => s + r.balance, 0);
+  const totalExpense = expense.reduce((s, r) => s + r.balance, 0);
+  const currentProfit = totalRevenue - totalExpense;
+
+  const totalAsset     = asset.reduce((s, r) => s + r.balance, 0);
+  const totalLiability = liability.reduce((s, r) => s + r.balance, 0);
+  const totalEquity    = equity.reduce((s, r) => s + r.balance, 0) + currentProfit;
+
+  return {
+    asset, liability, equity,
+    totalAsset, totalLiability, totalEquity,
+    currentProfit,
+    balanced: Math.abs(totalAsset - (totalLiability + totalEquity)) < 0.01
+  };
+}

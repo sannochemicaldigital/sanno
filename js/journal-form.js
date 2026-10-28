@@ -5,7 +5,7 @@ import { listPartners } from './partners.js';
 import { listItems } from './items.js';
 import {
   createJournal, listJournals, getRate,
-  getJournal, updateJournal, deleteJournal
+  getJournal, updateJournal, reverseJournal
 } from './journals.js';
 import { supabase } from './supabase-client.js';
 
@@ -19,7 +19,7 @@ const state = {
   accountsById: {},
   lineCount: 0,
   isAdminUser: false,
-  editingId: null   // null = mode create, angka = mode edit
+  editingId: null
 };
 
 // ============================================================
@@ -51,28 +51,22 @@ function fmt(n) {
 
   document.getElementById('logoutBtn').addEventListener('click', logout);
 
-  // Cek role admin
   state.isAdminUser = await isAdmin();
 
-  // Set tanggal default
   document.querySelector('[name=journal_date]').value = new Date().toISOString().slice(0, 10);
 
-  // Muat master & currency
   await loadMaster();
   await loadCurrencies();
 
-  // Event handlers
   document.getElementById('addLineBtn').addEventListener('click', () => addLine());
   document.getElementById('resetBtn').addEventListener('click', resetForm);
   document.getElementById('cancelEditBtn').addEventListener('click', resetForm);
   document.getElementById('currencySelect').addEventListener('change', onCurrencyChange);
   document.getElementById('form-journal').addEventListener('submit', onSubmit);
 
-  // Baris awal
   addLine();
   addLine();
 
-  // Daftar jurnal
   await renderJournals();
 })();
 
@@ -244,7 +238,6 @@ async function onSubmit(e) {
     const lines = collectLines();
     if (lines.length < 2) throw new Error('Minimal 2 baris jurnal');
 
-    // Validasi partner wajib
     for (const l of lines) {
       const acc = state.accountsById[l.account_id];
       if (acc && (acc.code.startsWith('1-12') || acc.code.startsWith('2-11')) && !l.partner_id) {
@@ -302,7 +295,6 @@ async function renderJournals() {
       return;
     }
 
-    // Hitung total per jurnal
     const ids = list.map(j => j.id);
     const { data: sums } = await supabase
       .from('journal_lines')
@@ -319,16 +311,23 @@ async function renderJournals() {
     wrap.innerHTML = list.map(j => {
       const s = sumMap[j.id] || { d: 0, c: 0 };
       const cur = j.currency_code !== 'IDR' ? ` (${j.currency_code} @${j.exchange_rate})` : '';
-      const adminButtons = state.isAdminUser ? `
+      const isReversed = j.reversed_by !== null;
+      const isReversal = j.reversal_of !== null;
+      const badge = isReversed
+        ? `<span style="background:#fef3c7;color:#92400e;padding:2px 8px;border-radius:4px;font-size:11px;margin-left:6px;">REVERSED</span>`
+        : (isReversal
+          ? `<span style="background:#dbeafe;color:#1e40af;padding:2px 8px;border-radius:4px;font-size:11px;margin-left:6px;">REVERSAL</span>`
+          : '');
+      const adminButtons = state.isAdminUser && !isReversed && !isReversal ? `
         <div style="margin-top:6px;display:flex;gap:6px;">
           <button class="btn btn-secondary" style="padding:4px 10px;font-size:12px;"
                   data-edit="${j.id}">Edit</button>
           <button class="btn btn-danger" style="padding:4px 10px;font-size:12px;"
-                  data-delete="${j.id}" data-no="${esc(j.journal_no)}">Hapus</button>
+                  data-reverse="${j.id}" data-no="${esc(j.journal_no)}">Reversal</button>
         </div>` : '';
       return `
         <div class="journal-list-item">
-          <div><b>${esc(j.journal_no)}</b> — ${esc(j.description || '')}</div>
+          <div><b>${esc(j.journal_no)}</b>${badge} — ${esc(j.description || '')}</div>
           <div class="meta">
             ${j.journal_date}${cur} · Debit ${fmt(s.d)} · Kredit ${fmt(s.c)}
           </div>
@@ -336,13 +335,11 @@ async function renderJournals() {
         </div>`;
     }).join('');
 
-    // Event Edit
     wrap.querySelectorAll('[data-edit]').forEach(btn => {
       btn.addEventListener('click', () => loadEdit(Number(btn.dataset.edit)));
     });
-    // Event Hapus
-    wrap.querySelectorAll('[data-delete]').forEach(btn => {
-      btn.addEventListener('click', () => onDelete(Number(btn.dataset.delete), btn.dataset.no));
+    wrap.querySelectorAll('[data-reverse]').forEach(btn => {
+      btn.addEventListener('click', () => onReverse(Number(btn.dataset.reverse), btn.dataset.no));
     });
   } catch (err) {
     wrap.innerHTML = `<div style="color:#b91c1c;font-size:13px;">Gagal muat: ${esc(err.message)}</div>`;
@@ -365,7 +362,6 @@ async function loadEdit(journalId) {
     onCurrencyChange({ target: f.currency_code });
     f.exchange_rate.value = j.currency_code !== 'IDR' ? j.exchange_rate : '';
 
-    // Kosongkan lines, isi ulang
     document.getElementById('journalLines').innerHTML = '';
     state.lineCount = 0;
 
@@ -379,12 +375,10 @@ async function loadEdit(journalId) {
     }
     recalcTotals();
 
-    // Ubah UI jadi mode edit
     document.getElementById('formTitle').textContent = `Edit Jurnal — ${j.journal_no}`;
     document.getElementById('saveBtn').textContent = 'Update Jurnal';
     document.getElementById('cancelEditBtn').style.display = 'inline-block';
 
-    // Scroll ke form
     f.scrollIntoView({ behavior: 'smooth' });
   } catch (err) {
     toast('Gagal memuat jurnal: ' + err.message, true);
@@ -392,16 +386,20 @@ async function loadEdit(journalId) {
 }
 
 // ============================================================
-// HAPUS
+// REVERSAL
 // ============================================================
-async function onDelete(journalId, journalNo) {
-  if (!confirm(`Hapus jurnal ${journalNo}? Tindakan ini tidak bisa dibatalkan.`)) return;
+async function onReverse(journalId, journalNo) {
+  if (!confirm(
+    `Reversal jurnal ${journalNo}?\n\n` +
+    `Sistem akan membuat jurnal balik otomatis. Jurnal asli tetap tersimpan ` +
+    `dengan tanda REVERSED.`
+  )) return;
   try {
-    await deleteJournal(journalId);
-    toast(`✓ Jurnal ${journalNo} dihapus`);
+    const header = await reverseJournal(journalId);
+    toast(`✓ Reversal dibuat: ${header.journal_no}`);
     if (state.editingId === journalId) resetForm();
     await renderJournals();
   } catch (err) {
-    toast('Gagal hapus: ' + (err.message || err), true);
+    toast('Gagal reversal: ' + (err.message || err), true);
   }
 }
