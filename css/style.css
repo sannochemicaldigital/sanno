@@ -190,3 +190,21 @@ tbody tr:hover { background: #f9fafb; }
 .badge-equity    { background: #fef3c7; color: #92400e; }
 .badge-revenue   { background: #d1fae5; color: #065f46; }
 .badge-expense   { background: #fce7f3; color: #9f1239; }
+
+/* ==== Laba Rugi & Neraca ==== */
+.report-section-title {
+  font-weight: 700; background: #eef2ff; color: #1e40af;
+  padding: 10px 12px; font-size: 13px; text-transform: uppercase;
+}
+.report-subtotal {
+  font-weight: 600; background: #f9fafb;
+}
+.report-grandtotal {
+  font-weight: 700; background: #dbeafe; font-size: 15px;
+}
+.report-grandtotal td { padding: 12px; }
+.balance-indicator {
+  padding: 10px 14px; border-radius: 8px; font-weight: 600;
+}
+.balance-indicator.ok { background: #d1fae5; color: #065f46; }
+.balance-indicator.bad { background: #fee2e2; color: #991b1b; }
