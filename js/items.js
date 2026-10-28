@@ -10,7 +10,18 @@ export async function listItems() {
 
 export async function createItem({ sku, name, unit = 'pcs', min_stock = 0 }) {
   const { data, error } = await supabase
-    .from('items').insert({ sku, name, unit, min_stock }).select().single();
+    .from('items')
+    .insert({
+      sku,
+      name,
+      unit,
+      min_stock,
+      stock_qty: 0,       // WAJIB 0 untuk gudang
+      avg_cost: 0,        // WAJIB 0 untuk gudang
+      is_active: true
+    })
+    .select()
+    .single();
   if (error) throw error;
   return data;
 }
