@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pengaturan — Internal Accounting</title>
+  <link rel="stylesheet" href="./css/style.css">
+</head>
+<body>
+  <div class="container">
+    <div class="topbar">
+      <h1>Pengaturan</h1>
+      <button class="btn btn-danger" id="logoutBtn">Keluar</button>
+    </div>
+
+    <nav class="nav">
+      <a href="./dashboard.html">Dashboard</a>
+      <a href="./master.html">Master</a>
+      <a href="./journal.html">Jurnal</a>
+      <a href="./reports.html">Laporan</a>
+      <a href="./settings.html" class="active">Pengaturan</a>
+    </nav>
+
+    <div class="card">
+      <h3 style="margin-top:0;font-size:16px;">Pengaturan Sistem</h3>
+      <p style="font-size:13px;color:#6b7280;margin-top:0;">
+        Perubahan langsung berlaku. Hanya admin/superadmin yang bisa mengubah.
+      </p>
+      <form id="form-settings"></form>
+      <div class="form-actions" style="margin-top:16px;">
+        <button type="submit" form="form-settings" class="btn btn-primary" id="saveBtn">
+          Simpan Pengaturan
+        </button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-top:0;font-size:16px;">Pengaturan Sales ↔ Pelanggan</h3>
+      <p style="font-size:13px;color:#6b7280;margin-top:0;">
+        Tentukan pelanggan mana yang ditangani masing-masing sales.
+      </p>
+      <div id="salesPartnersList" style="margin-top:12px;"></div>
+      <button class="btn btn-secondary" id="addSalesPartnerBtn" style="margin-top:12px;">
+        + Tambah Relasi
+      </button>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script type="module" src="./js/settings-page.js"></script>
+</body>
+</html>
