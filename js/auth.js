@@ -2,9 +2,12 @@
 import { supabase } from './supabase-client.js';
 
 export async function login(email, password) {
+  let em = String(email || '').trim().toLowerCase();
+  // Auto domain internal
+  if (em && !em.includes('@')) em = em + '@sanno.local';
   const { data, error } = await supabase.auth.signInWithPassword({
-    email: email.trim().toLowerCase(),
-    password: password.trim()
+    email: em,
+    password: String(password || '').trim()
   });
   if (error) throw error;
   return data.user;

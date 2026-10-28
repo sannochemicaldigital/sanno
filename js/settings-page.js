@@ -1,6 +1,7 @@
 // js/settings-page.js
 import { requireAuth, logout, hasRole, getCurrentRole } from './auth.js';
 import { SETTING_DEFS, getAllSettings, updateSetting } from './settings.js';
+import { listUsers, createUser, updateUser, deleteUser, AVAILABLE_ROLES } from './users.js';
 import { supabase } from './supabase-client.js';
 
 function toast(msg, isError = false) {
@@ -9,20 +10,23 @@ function toast(msg, isError = false) {
   el.className = 'toast show' + (isError ? ' error' : '');
   setTimeout(() => el.className = 'toast', 2600);
 }
-
 function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, c => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
   }[c]));
 }
 
+let currentRole = null;
+
+// ============================================================
+// INIT
+// ============================================================
 (async () => {
   const user = await requireAuth();
   if (!user) return;
 
-  // Cek akses
-  const isAdminUser = await hasRole('admin');
-  if (!isAdminUser) {
+  currentRole = await getCurrentRole();
+  if (!['admin','superadmin'].includes(currentRole)) {
     alert('Halaman ini hanya untuk admin/superadmin.');
     window.location.href = './dashboard.html';
     return;
@@ -30,13 +34,42 @@ function esc(s) {
 
   document.getElementById('logoutBtn').addEventListener('click', logout);
 
-  await renderSettings();
-  await renderSalesPartners();
+  // Tabs
+  document.querySelectorAll('.tabs button').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.tabs button').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      document.querySelectorAll('.tab-panel').forEach(p => p.style.display = 'none');
+      document.getElementById('tab-' + btn.dataset.tab).style.display = 'block';
+    });
+  });
 
-  document.getElementById('form-settings').addEventListener('submit', onSave);
-  document.getElementById('addSalesPartnerBtn').addEventListener('click', onAddSalesPartner);
+  // Isi dropdown role
+  const roleSel = document.getElementById('newUserRole');
+  roleSel.innerHTML = AVAILABLE_ROLES
+    .filter(r => r.value !== 'superadmin' || currentRole === 'superadmin')
+    .map(r => `<option value="${r.value}">${r.label}</option>`).join('');
+
+  // Preview email dari username
+  const usernameEl = document.querySelector('#form-new-user [name=username]');
+  usernameEl.addEventListener('input', () => {
+    const v = usernameEl.value.trim() || 'username';
+    document.getElementById('emailPreview').textContent = `${v}@sanno.local`;
+  });
+
+  await Promise.all([
+    renderSettings(),
+    renderUsers(),
+    renderSalesPartners()
+  ]);
+
+  document.getElementById('form-settings').addEventListener('submit', onSaveSettings);
+  document.getElementById('form-new-user').addEventListener('submit', onCreateUser);
 })();
 
+// ============================================================
+// SETTINGS
+// ============================================================
 async function renderSettings() {
   const form = document.getElementById('form-settings');
   const current = await getAllSettings();
@@ -64,9 +97,9 @@ async function renderSettings() {
   }).join('');
 }
 
-async function onSave(e) {
+async function onSaveSettings(e) {
   e.preventDefault();
-  const btn = document.getElementById('saveBtn');
+  const btn = document.getElementById('saveSettingsBtn');
   btn.disabled = true;
   btn.textContent = 'Menyimpan...';
   try {
@@ -85,36 +118,133 @@ async function onSave(e) {
 }
 
 // ============================================================
+// USERS
+// ============================================================
+async function renderUsers() {
+  const tbody = document.getElementById('tbody-users');
+  tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#9ca3af;">Memuat...</td></tr>';
+  try {
+    const users = await listUsers();
+    tbody.innerHTML = users.map(u => {
+      const isSelf = u.email === (window.__me?.email || '');
+      const canEdit = currentRole === 'superadmin'
+        || (currentRole === 'admin' && u.role !== 'superadmin');
+      const canDelete = currentRole === 'superadmin' && u.role !== 'superadmin';
+      return `
+        <tr>
+          <td data-label="Email">${esc(u.email)}</td>
+          <td data-label="Nama">${esc(u.full_name || '—')}</td>
+          <td data-label="Role">
+            <select data-role-user="${u.id}" ${canEdit ? '' : 'disabled'}
+                    style="padding:4px 8px;border:1px solid #d0d5dd;border-radius:6px;font-size:13px;">
+              ${AVAILABLE_ROLES
+                .filter(r => r.value !== 'superadmin' || currentRole === 'superadmin')
+                .map(r => `<option value="${r.value}" ${r.value === u.role ? 'selected' : ''}>${r.label}</option>`)
+                .join('')}
+            </select>
+          </td>
+          <td data-label="Status">
+            <label style="display:flex;align-items:center;gap:6px;font-size:13px;">
+              <input type="checkbox" data-active-user="${u.id}" ${u.is_active ? 'checked' : ''} ${canEdit ? '' : 'disabled'}>
+              ${u.is_active ? 'Aktif' : 'Nonaktif'}
+            </label>
+          </td>
+          <td data-label="Aksi">
+            ${canEdit ? `<button class="btn btn-primary" style="padding:4px 10px;font-size:12px;"
+                          data-save-user="${u.id}">Simpan</button>` : ''}
+            ${canDelete ? `<button class="btn btn-danger" style="padding:4px 10px;font-size:12px;"
+                          data-del-user="${u.id}" data-email="${esc(u.email)}">Hapus</button>` : ''}
+          </td>
+        </tr>`;
+    }).join('') || '<tr><td colspan="5" style="text-align:center;color:#9ca3af;">Belum ada user</td></tr>';
+
+    // Event: simpan perubahan role/status
+    tbody.querySelectorAll('[data-save-user]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const uid = btn.dataset.saveUser;
+        const role = tbody.querySelector(`[data-role-user="${uid}"]`).value;
+        const isActive = tbody.querySelector(`[data-active-user="${uid}"]`).checked;
+        const row = btn.closest('tr');
+        const fullName = row.querySelector('[data-label="Nama"]').textContent.trim();
+        try {
+          await updateUser(uid, { full_name: fullName === '—' ? null : fullName, role, is_active: isActive });
+          toast('✓ User diupdate');
+          await renderUsers();
+        } catch (err) {
+          toast('Gagal: ' + (err.message || err), true);
+        }
+      });
+    });
+
+    // Event: hapus
+    tbody.querySelectorAll('[data-del-user]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        if (!confirm(`Hapus permanen user ${btn.dataset.email}?`)) return;
+        try {
+          await deleteUser(btn.dataset.delUser);
+          toast('✓ User dihapus');
+          await renderUsers();
+        } catch (err) {
+          toast('Gagal: ' + (err.message || err), true);
+        }
+      });
+    });
+  } catch (err) {
+    tbody.innerHTML = `<tr><td colspan="5" style="color:#b91c1c;">${esc(err.message)}</td></tr>`;
+  }
+}
+
+async function onCreateUser(e) {
+  e.preventDefault();
+  const f = e.target;
+  const btn = document.getElementById('createUserBtn');
+  btn.disabled = true;
+  btn.textContent = 'Membuat...';
+  try {
+    const username = f.username.value.trim();
+    if (!/^[a-zA-Z0-9._-]+$/.test(username)) {
+      throw new Error('Username hanya boleh huruf, angka, titik, underscore, strip');
+    }
+    await createUser({
+      username,
+      password: f.password.value,
+      full_name: f.full_name.value.trim(),
+      role: f.role.value
+    });
+    toast(`✓ User ${username} dibuat`);
+    f.reset();
+    document.getElementById('emailPreview').textContent = 'username@sanno.local';
+    await renderUsers();
+  } catch (err) {
+    toast('Gagal buat user: ' + (err.message || err), true);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Buat User';
+  }
+}
+
+// ============================================================
 // SALES ↔ PARTNER
 // ============================================================
 async function renderSalesPartners() {
   const wrap = document.getElementById('salesPartnersList');
   wrap.innerHTML = '<div style="color:#9ca3af;font-size:13px;">Memuat...</div>';
   try {
-    // Ambil semua user ber-role sales
     const { data: salesUsers, error: sErr } = await supabase
-      .from('profiles')
-      .select('id, email, full_name, role')
-      .eq('role', 'sales');
+      .from('profiles').select('id, email, full_name, role').eq('role', 'sales');
     if (sErr) throw sErr;
 
-    // Ambil semua customer
     const { data: customers, error: cErr } = await supabase
-      .from('partners')
-      .select('id, code, name')
-      .eq('type', 'customer')
-      .eq('is_active', true)
-      .order('name');
+      .from('partners').select('id, code, name')
+      .eq('type', 'customer').eq('is_active', true).order('name');
     if (cErr) throw cErr;
 
-    // Ambil relasi
     const { data: relations, error: rErr } = await supabase
-      .from('sales_partners')
-      .select('id, sales_id, partner_id');
+      .from('sales_partners').select('id, sales_id, partner_id');
     if (rErr) throw rErr;
 
     if (!salesUsers.length) {
-      wrap.innerHTML = '<div style="color:#9ca3af;font-size:13px;">Belum ada user ber-role sales.</div>';
+      wrap.innerHTML = '<div style="color:#9ca3af;font-size:13px;">Belum ada user ber-role sales. Tambah dulu di tab User.</div>';
       return;
     }
     if (!customers.length) {
@@ -143,7 +273,6 @@ async function renderSalesPartners() {
     }).join('') || '<tr><td colspan="3" style="padding:16px;text-align:center;color:#9ca3af;">Belum ada relasi</td></tr>';
     html += '</tbody></table>';
 
-    // Form tambah relasi
     html += `
       <div style="margin-top:16px;padding:12px;background:#f9fafb;border-radius:8px;">
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
@@ -161,7 +290,6 @@ async function renderSalesPartners() {
 
     wrap.innerHTML = html;
 
-    // Event hapus
     wrap.querySelectorAll('[data-del]').forEach(btn => {
       btn.addEventListener('click', async () => {
         if (!confirm('Hapus relasi ini?')) return;
@@ -172,7 +300,6 @@ async function renderSalesPartners() {
       });
     });
 
-    // Event tambah
     document.getElementById('saveRelationBtn').addEventListener('click', async () => {
       const salesId = document.getElementById('newSalesId').value;
       const partnerId = document.getElementById('newPartnerId').value;
