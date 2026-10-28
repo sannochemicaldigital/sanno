@@ -48,6 +48,8 @@
       <button data-tab="tb" class="active">Trial Balance</button>
       <button data-tab="cf">Cashflow</button>
       <button data-tab="ar">Aging Piutang</button>
+      <button data-tab="lr">Laba Rugi</button>
+      <button data-tab="nc">Neraca</button>
     </div>
 
     <!-- ===== TAB TRIAL BALANCE ===== -->
@@ -141,6 +143,37 @@
             <tfoot id="tfoot-ar"></tfoot>
           </table>
         </div>
+      </div>
+    </section>
+
+    <!-- ===== TAB LABA RUGI ===== -->
+    <section id="tab-lr" class="tab-panel" style="display:none;">
+      <div class="card">
+        <div class="report-header">
+          <h3>Laporan Laba Rugi</h3>
+          <span id="lrPeriod" style="font-size:13px;color:#6b7280;"></span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <tbody id="tbody-lr"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== TAB NERACA ===== -->
+    <section id="tab-nc" class="tab-panel" style="display:none;">
+      <div class="card">
+        <div class="report-header">
+          <h3>Neraca</h3>
+          <span id="ncPeriod" style="font-size:13px;color:#6b7280;"></span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <tbody id="tbody-nc"></tbody>
+          </table>
+        </div>
+        <div id="ncStatus" style="margin-top:12px;font-size:14px;"></div>
       </div>
     </section>
   </div>
