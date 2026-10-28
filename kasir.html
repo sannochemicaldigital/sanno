@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Kasir — Sanno Accounting</title>
+  <link rel="stylesheet" href="./css/style.css">
+</head>
+<body>
+  <div class="container">
+    <div class="topbar">
+      <h1>Kasir — Penjualan Tunai</h1>
+      <button class="btn btn-danger" id="logoutBtn">Keluar</button>
+    </div>
+
+    <nav class="nav" id="mainNav"></nav>
+
+    <div class="card">
+      <h3 style="margin-top:0;font-size:16px;">Transaksi Tunai Baru</h3>
+      <p style="font-size:13px;color:#6b7280;margin-top:0;">
+        Langsung posted tanpa approval. PPN otomatis dari pengaturan.
+      </p>
+      <form id="form-cash">
+        <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(150px,1fr));">
+          <div class="form-row">
+            <label>Tanggal</label>
+            <input type="date" name="cash_date" required>
+          </div>
+          <div class="form-row" style="grid-column: span 2;">
+            <label>Deskripsi (opsional)</label>
+            <input name="description" placeholder="mis. Penjualan tunai pagi">
+          </div>
+        </div>
+
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;">
+          <label style="font-size:13px;font-weight:500;">Baris Item</label>
+          <button type="button" class="btn btn-secondary" id="addLineBtn">+ Tambah Item</button>
+        </div>
+
+        <div class="journal-lines" id="cashLines"></div>
+
+        <div class="journal-summary">
+          <div>Total: <span id="totalAmount">Rp 0</span></div>
+          <div id="ppnInfo" style="font-size:13px;color:#6b7280;"></div>
+        </div>
+
+        <div class="form-actions">
+          <button type="submit" class="btn btn-primary" id="saveBtn">Simpan Transaksi</button>
+          <button type="button" class="btn btn-secondary" id="resetBtn">Reset</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-top:0;font-size:16px;">Transaksi Tunai Terakhir</h3>
+      <div id="cashList"></div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script type="module" src="./js/kasir-page.js"></script>
+</body>
+</html>
