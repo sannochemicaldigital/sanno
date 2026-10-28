@@ -82,10 +82,12 @@
 
   <div class="toast" id="toast"></div>
 
-  <script type="module" src="./js/journal-form.js"></script>
-  import { hasRole } from './js/auth.js';
+  <script type="module" src="./js/journal-form.js">
+     import { hasRole } from './js/auth.js';
 if (await hasRole('admin')) {
   document.getElementById('navSettings').style.display = '';
 }
+  </script>
+ 
 </body>
 </html>
