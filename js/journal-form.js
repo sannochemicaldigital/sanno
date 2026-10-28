@@ -1,57 +1,49 @@
 // js/journal-form.js
-import { requireAuth, logout, isAdmin } from './auth.js';
+import { requireAuth, logout, getCurrentRole, hasRole } from './auth.js';
+import { renderNav, requirePageAccess } from './access.js';
 import { listAccounts } from './accounts.js';
 import { listPartners } from './partners.js';
 import { listItems } from './items.js';
 import {
   createJournal, listJournals, getRate,
-  getJournal, updateJournal, reverseJournal
+  getJournal, updateJournal, reverseJournal, deleteJournal
 } from './journals.js';
 import { supabase } from './supabase-client.js';
 
-// ============================================================
-// STATE
-// ============================================================
 const state = {
   accounts: [],
   partners: [],
   items: [],
   accountsById: {},
   lineCount: 0,
-  isAdminUser: false,
+  role: null,
   editingId: null
 };
 
-// ============================================================
-// UTILITAS
-// ============================================================
 function toast(msg, isError = false) {
   const el = document.getElementById('toast');
   el.textContent = msg;
   el.className = 'toast show' + (isError ? ' error' : '');
   setTimeout(() => el.className = 'toast', 2800);
 }
-
 function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, c => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
   }[c]));
 }
-
 function fmt(n) {
   return 'Rp ' + Number(n || 0).toLocaleString('id-ID');
 }
 
-// ============================================================
-// INIT
-// ============================================================
 (async () => {
   const user = await requireAuth();
   if (!user) return;
 
-  document.getElementById('logoutBtn').addEventListener('click', logout);
+  state.role = await requirePageAccess('journal');
+  if (!state.role) return;
 
-  state.isAdminUser = await isAdmin();
+  document.getElementById('logoutBtn').addEventListener('click', logout);
+  await renderNav(document.getElementById('mainNav'), 'journal');
 
   document.querySelector('[name=journal_date]').value = new Date().toISOString().slice(0, 10);
 
@@ -70,9 +62,6 @@ function fmt(n) {
   await renderJournals();
 })();
 
-// ============================================================
-// LOAD MASTER
-// ============================================================
 async function loadMaster() {
   const [accs, parts, its] = await Promise.all([
     listAccounts(), listPartners(), listItems()
@@ -105,9 +94,6 @@ function onCurrencyChange(e) {
   document.getElementById('rateRow').style.display = isIDR ? 'none' : 'block';
 }
 
-// ============================================================
-// BARIS JURNAL
-// ============================================================
 function addLine() {
   state.lineCount++;
   const id = state.lineCount;
@@ -223,9 +209,6 @@ function resetForm() {
   addLine();
 }
 
-// ============================================================
-// SUBMIT (CREATE / UPDATE)
-// ============================================================
 async function onSubmit(e) {
   e.preventDefault();
   const f = e.target;
@@ -283,9 +266,6 @@ async function onSubmit(e) {
   }
 }
 
-// ============================================================
-// DAFTAR JURNAL
-// ============================================================
 async function renderJournals() {
   const wrap = document.getElementById('journalList');
   try {
@@ -308,6 +288,10 @@ async function renderJournals() {
       sumMap[r.journal_id].c += Number(r.credit_base);
     });
 
+    const canEdit     = await hasRole('admin');
+    const canReversal = await hasRole('supervisor');
+    const canDelete   = await hasRole('superadmin');
+
     wrap.innerHTML = list.map(j => {
       const s = sumMap[j.id] || { d: 0, c: 0 };
       const cur = j.currency_code !== 'IDR' ? ` (${j.currency_code} @${j.exchange_rate})` : '';
@@ -318,20 +302,31 @@ async function renderJournals() {
         : (isReversal
           ? `<span style="background:#dbeafe;color:#1e40af;padding:2px 8px;border-radius:4px;font-size:11px;margin-left:6px;">REVERSAL</span>`
           : '');
-      const adminButtons = state.isAdminUser && !isReversed && !isReversal ? `
-        <div style="margin-top:6px;display:flex;gap:6px;">
-          <button class="btn btn-secondary" style="padding:4px 10px;font-size:12px;"
-                  data-edit="${j.id}">Edit</button>
-          <button class="btn btn-danger" style="padding:4px 10px;font-size:12px;"
-                  data-reverse="${j.id}" data-no="${esc(j.journal_no)}">Reversal</button>
-        </div>` : '';
+
+      const showEdit     = canEdit     && !isReversed && !isReversal;
+      const showReversal = canReversal && !isReversed && !isReversal;
+      const showDelete   = canDelete   && !isReversal;
+
+      const buttons = [];
+      if (showEdit) buttons.push(
+        `<button class="btn btn-secondary" style="padding:4px 10px;font-size:12px;" data-edit="${j.id}">Edit</button>`
+      );
+      if (showReversal) buttons.push(
+        `<button class="btn btn-secondary" style="padding:4px 10px;font-size:12px;background:#fef3c7;color:#92400e;" data-reverse="${j.id}" data-no="${esc(j.journal_no)}">Reversal</button>`
+      );
+      if (showDelete) buttons.push(
+        `<button class="btn btn-danger" style="padding:4px 10px;font-size:12px;" data-delete="${j.id}" data-no="${esc(j.journal_no)}">Hapus</button>`
+      );
+
+      const buttonsHtml = buttons.length
+        ? `<div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap;">${buttons.join('')}</div>`
+        : '';
+
       return `
         <div class="journal-list-item">
           <div><b>${esc(j.journal_no)}</b>${badge} — ${esc(j.description || '')}</div>
-          <div class="meta">
-            ${j.journal_date}${cur} · Debit ${fmt(s.d)} · Kredit ${fmt(s.c)}
-          </div>
-          ${adminButtons}
+          <div class="meta">${j.journal_date}${cur} · Debit ${fmt(s.d)} · Kredit ${fmt(s.c)}</div>
+          ${buttonsHtml}
         </div>`;
     }).join('');
 
@@ -341,14 +336,14 @@ async function renderJournals() {
     wrap.querySelectorAll('[data-reverse]').forEach(btn => {
       btn.addEventListener('click', () => onReverse(Number(btn.dataset.reverse), btn.dataset.no));
     });
+    wrap.querySelectorAll('[data-delete]').forEach(btn => {
+      btn.addEventListener('click', () => onDelete(Number(btn.dataset.delete), btn.dataset.no));
+    });
   } catch (err) {
     wrap.innerHTML = `<div style="color:#b91c1c;font-size:13px;">Gagal muat: ${esc(err.message)}</div>`;
   }
 }
 
-// ============================================================
-// EDIT
-// ============================================================
 async function loadEdit(journalId) {
   try {
     const j = await getJournal(journalId);
@@ -378,16 +373,12 @@ async function loadEdit(journalId) {
     document.getElementById('formTitle').textContent = `Edit Jurnal — ${j.journal_no}`;
     document.getElementById('saveBtn').textContent = 'Update Jurnal';
     document.getElementById('cancelEditBtn').style.display = 'inline-block';
-
     f.scrollIntoView({ behavior: 'smooth' });
   } catch (err) {
     toast('Gagal memuat jurnal: ' + err.message, true);
   }
 }
 
-// ============================================================
-// REVERSAL
-// ============================================================
 async function onReverse(journalId, journalNo) {
   if (!confirm(
     `Reversal jurnal ${journalNo}?\n\n` +
@@ -401,5 +392,21 @@ async function onReverse(journalId, journalNo) {
     await renderJournals();
   } catch (err) {
     toast('Gagal reversal: ' + (err.message || err), true);
+  }
+}
+
+async function onDelete(journalId, journalNo) {
+  if (!confirm(
+    `HAPUS PERMANEN jurnal ${journalNo}?\n\n` +
+    `Tindakan ini tidak bisa dibatalkan. Untuk koreksi normal, gunakan Reversal.`
+  )) return;
+  if (!confirm(`Konfirmasi sekali lagi: hapus permanen ${journalNo}?`)) return;
+  try {
+    await deleteJournal(journalId);
+    toast(`✓ Jurnal ${journalNo} dihapus permanen`);
+    if (state.editingId === journalId) resetForm();
+    await renderJournals();
+  } catch (err) {
+    toast('Gagal hapus: ' + (err.message || err), true);
   }
 }

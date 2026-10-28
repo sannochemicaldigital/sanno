@@ -1,10 +1,8 @@
 // js/reports-page.js
 import { requireAuth, logout } from './auth.js';
+import { renderNav, requirePageAccess } from './access.js';
 import { trialBalance, cashflow, agingPiutang, labaRugi, neraca } from './reports.js';
 
-// ============================================================
-// STATE
-// ============================================================
 const state = {
   from: null,
   to: null,
@@ -12,42 +10,36 @@ const state = {
   lastData: null
 };
 
-// ============================================================
-// UTILITAS
-// ============================================================
 function toast(msg, isError = false) {
   const el = document.getElementById('toast');
   el.textContent = msg;
   el.className = 'toast show' + (isError ? ' error' : '');
   setTimeout(() => el.className = 'toast', 2500);
 }
-
 function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, c => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
   }[c]));
 }
-
 function fmt(n) {
   const v = Number(n || 0);
   return v.toLocaleString('id-ID', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 }
-
 function periodLabel(from, to) {
   if (!from && !to) return 'Semua periode';
   return `${from || '...'} s/d ${to || '...'}`;
 }
 
-// ============================================================
-// INIT
-// ============================================================
 (async () => {
   const user = await requireAuth();
   if (!user) return;
 
-  document.getElementById('logoutBtn').addEventListener('click', logout);
+  const role = await requirePageAccess('reports');
+  if (!role) return;
 
-  // Default: awal bulan ini s/d hari ini
+  document.getElementById('logoutBtn').addEventListener('click', logout);
+  await renderNav(document.getElementById('mainNav'), 'reports');
+
   const today = new Date();
   const firstOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
   document.getElementById('filterFrom').value = firstOfMonth.toISOString().slice(0, 10);
@@ -55,7 +47,6 @@ function periodLabel(from, to) {
   state.from = document.getElementById('filterFrom').value;
   state.to = document.getElementById('filterTo').value;
 
-  // Tabs
   document.querySelectorAll('.tabs button').forEach(btn => {
     btn.addEventListener('click', () => {
       document.querySelectorAll('.tabs button').forEach(b => b.classList.remove('active'));
@@ -67,13 +58,11 @@ function periodLabel(from, to) {
     });
   });
 
-  // Filter
   document.getElementById('applyFilter').addEventListener('click', () => {
     state.from = document.getElementById('filterFrom').value || null;
     state.to   = document.getElementById('filterTo').value || null;
     loadActive();
   });
-
   document.getElementById('resetFilter').addEventListener('click', () => {
     document.getElementById('filterFrom').value = '';
     document.getElementById('filterTo').value = '';
@@ -81,16 +70,11 @@ function periodLabel(from, to) {
     state.to = null;
     loadActive();
   });
-
   document.getElementById('exportCsv').addEventListener('click', exportCsv);
 
-  // Load awal
   await loadActive();
 })();
 
-// ============================================================
-// DISPATCH
-// ============================================================
 async function loadActive() {
   if (state.activeTab === 'tb') await loadTrialBalance();
   else if (state.activeTab === 'cf') await loadCashflow();
@@ -99,9 +83,6 @@ async function loadActive() {
   else if (state.activeTab === 'nc') await loadNeraca();
 }
 
-// ============================================================
-// TRIAL BALANCE
-// ============================================================
 async function loadTrialBalance() {
   const tbody = document.getElementById('tbody-tb');
   const tfoot = document.getElementById('tfoot-tb');
@@ -133,7 +114,6 @@ async function loadTrialBalance() {
         <td class="num">${fmt(sumC)}</td>
         <td class="num">${fmt(sumD - sumC)}</td>
       </tr>`;
-
     state.lastData = { type: 'tb', rows };
   } catch (err) {
     tbody.innerHTML = `<tr><td colspan="6" style="color:#b91c1c;">${esc(err.message)}</td></tr>`;
@@ -141,9 +121,6 @@ async function loadTrialBalance() {
   }
 }
 
-// ============================================================
-// CASHFLOW
-// ============================================================
 async function loadCashflow() {
   const sumBody = document.getElementById('tbody-cf-summary');
   const detailBody = document.getElementById('tbody-cf-detail');
@@ -180,9 +157,6 @@ async function loadCashflow() {
   }
 }
 
-// ============================================================
-// AGING PIUTANG
-// ============================================================
 async function loadAging() {
   const tbody = document.getElementById('tbody-ar');
   const tfoot = document.getElementById('tfoot-ar');
@@ -211,7 +185,6 @@ async function loadAging() {
         <td class="num">${fmt(t60)}</td>
         <td class="num">${fmt(tAll)}</td>
       </tr>`;
-
     state.lastData = { type: 'ar', rows };
   } catch (err) {
     tbody.innerHTML = `<tr><td colspan="5" style="color:#b91c1c;">${esc(err.message)}</td></tr>`;
@@ -219,9 +192,6 @@ async function loadAging() {
   }
 }
 
-// ============================================================
-// LABA RUGI
-// ============================================================
 async function loadLabaRugi() {
   const tbody = document.getElementById('tbody-lr');
   document.getElementById('lrPeriod').textContent = periodLabel(state.from, state.to);
@@ -237,37 +207,27 @@ async function loadLabaRugi() {
     html += sectionTitle('Pendapatan');
     html += r.revenue.map(x => row(`${x.code} — ${x.name}`, x.balance)).join('');
     html += row('Total Pendapatan', r.totalRevenue, 'report-subtotal');
-
     html += sectionTitle('Harga Pokok Penjualan');
     html += r.hpp.map(x => row(`${x.code} — ${x.name}`, x.balance)).join('');
     html += row('Total HPP', r.totalHpp, 'report-subtotal');
-
     html += row('LABA KOTOR', r.grossProfit, 'report-grandtotal');
-
     html += sectionTitle('Beban Operasional');
     html += r.opex.map(x => row(`${x.code} — ${x.name}`, x.balance)).join('');
     html += row('Total Beban Operasional', r.totalOpex, 'report-subtotal');
-
     html += row('LABA OPERASIONAL', r.operatingProfit, 'report-grandtotal');
-
     if (r.otherExp.length) {
       html += sectionTitle('Beban Lain-lain');
       html += r.otherExp.map(x => row(`${x.code} — ${x.name}`, x.balance)).join('');
       html += row('Total Beban Lain-lain', r.totalOtherExp, 'report-subtotal');
     }
-
     html += row('LABA BERSIH', r.netProfit, 'report-grandtotal');
     tbody.innerHTML = html;
-
     state.lastData = { type: 'lr', data: r };
   } catch (err) {
     tbody.innerHTML = `<tr><td style="color:#b91c1c;">${esc(err.message)}</td></tr>`;
   }
 }
 
-// ============================================================
-// NERACA
-// ============================================================
 async function loadNeraca() {
   const tbody = document.getElementById('tbody-nc');
   const status = document.getElementById('ncStatus');
@@ -285,33 +245,25 @@ async function loadNeraca() {
     html += sectionTitle('ASET');
     html += n.asset.map(x => row(`${x.code} — ${x.name}`, x.balance)).join('');
     html += row('TOTAL ASET', n.totalAsset, 'report-grandtotal');
-
     html += sectionTitle('LIABILITAS');
     html += n.liability.map(x => row(`${x.code} — ${x.name}`, x.balance)).join('');
     html += row('Total Liabilitas', n.totalLiability, 'report-subtotal');
-
     html += sectionTitle('EKUITAS');
     html += n.equity.map(x => row(`${x.code} — ${x.name}`, x.balance)).join('');
     html += row('Laba Tahun Berjalan', n.currentProfit);
     html += row('TOTAL EKUITAS', n.totalEquity, 'report-subtotal');
-
-    html += row('TOTAL LIABILITAS + EKUITAS',
-      n.totalLiability + n.totalEquity, 'report-grandtotal');
+    html += row('TOTAL LIABILITAS + EKUITAS', n.totalLiability + n.totalEquity, 'report-grandtotal');
     tbody.innerHTML = html;
 
     status.innerHTML = n.balanced
       ? `<div class="balance-indicator ok">✓ Neraca Balance (Aset = Liabilitas + Ekuitas)</div>`
       : `<div class="balance-indicator bad">⚠ Neraca Tidak Balance: selisih ${fmt(n.totalAsset - (n.totalLiability + n.totalEquity))}</div>`;
-
     state.lastData = { type: 'nc', data: n };
   } catch (err) {
     tbody.innerHTML = `<tr><td style="color:#b91c1c;">${esc(err.message)}</td></tr>`;
   }
 }
 
-// ============================================================
-// EXPORT CSV
-// ============================================================
 function exportCsv() {
   const d = state.lastData;
   if (!d) { toast('Tidak ada data untuk diexport', true); return; }

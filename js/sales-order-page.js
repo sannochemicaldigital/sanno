@@ -1,10 +1,9 @@
 // js/sales-order-page.js
-import { requireAuth, logout, getCurrentRole, hasRole, getSetting } from './auth.js';
+import { requireAuth, logout, getCurrentRole, getSetting } from './auth.js';
+import { renderNav, requirePageAccess } from './access.js';
 import { listPartners } from './partners.js';
 import { listItems } from './items.js';
-import {
-  createSO, editSO, submitSO, cancelSO, getSO, listSOs
-} from './sales-order.js';
+import { createSO, editSO, submitSO, cancelSO, getSO, listSOs } from './sales-order.js';
 import { supabase } from './supabase-client.js';
 
 const state = {
@@ -13,7 +12,8 @@ const state = {
   itemsById: {},
   lineCount: 0,
   editingId: null,
-  ppnRate: 11
+  ppnRate: 11,
+  role: null
 };
 
 function toast(msg, isError = false) {
@@ -29,51 +29,31 @@ function esc(s) {
 }
 function fmt(n) { return 'Rp ' + Number(n || 0).toLocaleString('id-ID'); }
 
-// ============================================================
-// INIT
-// ============================================================
 (async () => {
   const user = await requireAuth();
   if (!user) return;
 
-  const role = await getCurrentRole();
-  if (!['sales','admin','superadmin'].includes(role)) {
-    alert('Halaman ini hanya untuk sales/admin.');
-    window.location.href = './dashboard.html';
-    return;
-  }
+  state.role = await requirePageAccess('sales-order');
+  if (!state.role) return;
 
   document.getElementById('logoutBtn').addEventListener('click', logout);
+  await renderNav(document.getElementById('mainNav'), 'sales-order');
 
-  // Nav untuk role lain
-  if (await hasRole('supervisor')) document.getElementById('navApproval').style.display = '';
-  if (await hasRole('finance'))    document.getElementById('navApproval').style.display = '';
-  if (await hasRole('finance'))    document.getElementById('navJournal').style.display = '';
-  if (await hasRole('finance'))    document.getElementById('navReports').style.display = '';
-
-  // PPN rate
   const ppnStr = await getSetting('ppn_rate');
   state.ppnRate = Number(ppnStr) || 11;
 
-  // Load master
   await loadMaster();
 
-  // Date default
   document.querySelector('[name=so_date]').value = new Date().toISOString().slice(0, 10);
 
-  // Event
   document.getElementById('addLineBtn').addEventListener('click', () => addLine());
   document.getElementById('cancelBtn').addEventListener('click', resetForm);
   document.getElementById('form-so').addEventListener('submit', onSubmit);
 
   addLine();
-
   await renderSOList();
 })();
 
-// ============================================================
-// LOAD MASTER
-// ============================================================
 async function loadMaster() {
   const [parts, its] = await Promise.all([
     listPartners('customer'),
@@ -82,10 +62,8 @@ async function loadMaster() {
   state.items = its;
   state.itemsById = Object.fromEntries(its.map(i => [i.id, i]));
 
-  // Filter partner: kalau role sales, hanya yang ditangani
-  const role = await getCurrentRole();
   let visiblePartners = parts;
-  if (role === 'sales') {
+  if (state.role === 'sales') {
     const { data: { session } } = await supabase.auth.getSession();
     const { data: rel } = await supabase
       .from('sales_partners').select('partner_id').eq('sales_id', session.user.id);
@@ -101,9 +79,6 @@ async function loadMaster() {
     ).join('');
 }
 
-// ============================================================
-// BARIS
-// ============================================================
 function addLine() {
   state.lineCount++;
   const id = state.lineCount;
@@ -176,9 +151,6 @@ function resetForm() {
   addLine();
 }
 
-// ============================================================
-// SUBMIT (create/edit)
-// ============================================================
 async function onSubmit(e) {
   e.preventDefault();
   const f = e.target;
@@ -213,9 +185,6 @@ async function onSubmit(e) {
   }
 }
 
-// ============================================================
-// DAFTAR SO
-// ============================================================
 async function renderSOList() {
   const wrap = document.getElementById('soList');
   wrap.innerHTML = '<div style="color:#9ca3af;font-size:13px;">Memuat...</div>';
@@ -266,7 +235,6 @@ async function renderSOList() {
         </div>`;
     }).join('');
 
-    // Event handlers
     wrap.querySelectorAll('[data-edit]').forEach(btn => {
       btn.addEventListener('click', () => onEdit(Number(btn.dataset.edit)));
     });

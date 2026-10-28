@@ -1,5 +1,6 @@
 // js/approval-page.js
 import { requireAuth, logout, getCurrentRole, getSetting } from './auth.js';
+import { renderNav, requirePageAccess } from './access.js';
 import { listPendingApprovals, approveSO, rejectSO, voidSO } from './approval.js';
 
 function toast(msg, isError = false) {
@@ -22,14 +23,11 @@ let currentMode = 'supervisor_only';
   const user = await requireAuth();
   if (!user) return;
 
-  currentRole = await getCurrentRole();
-  if (!['finance','supervisor','admin','superadmin'].includes(currentRole)) {
-    alert('Halaman ini hanya untuk supervisor/finance/admin.');
-    window.location.href = './dashboard.html';
-    return;
-  }
+  currentRole = await requirePageAccess('approval');
+  if (!currentRole) return;
 
   document.getElementById('logoutBtn').addEventListener('click', logout);
+  await renderNav(document.getElementById('mainNav'), 'approval');
 
   currentMode = await getSetting('so_approval_mode') || 'supervisor_only';
   document.getElementById('approvalModeInfo').innerHTML =
@@ -45,11 +43,9 @@ async function renderList() {
   wrap.innerHTML = '<div style="color:#9ca3af;font-size:13px;">Memuat...</div>';
   try {
     const list = await listPendingApprovals();
-    const filtered = list.filter(so => {
-      if (so.status === 'pending_approval') return true;
-      if (so.status === 'approved') return true; // untuk tombol void
-      return false;
-    });
+    const filtered = list.filter(so =>
+      so.status === 'pending_approval' || so.status === 'approved'
+    );
 
     if (!filtered.length) {
       wrap.innerHTML = '<div style="color:#9ca3af;font-size:13px;">Tidak ada SO yang perlu diproses.</div>';
@@ -72,7 +68,6 @@ async function renderList() {
         const supervisorApproved = so.approved_supervisor_at != null;
         const needFinance = currentMode === 'finance_and_supervisor';
 
-        // Tampilkan tombol approve kalau role sesuai dan belum approve
         let canApproveThis = false;
         if (currentRole === 'finance' && needFinance && !financeApproved) canApproveThis = true;
         if (['supervisor','admin','superadmin'].includes(currentRole) && !supervisorApproved) canApproveThis = true;
@@ -82,7 +77,6 @@ async function renderList() {
         }
         buttons.push(`<button class="btn btn-danger" style="padding:6px 12px;font-size:12px;" data-reject="${so.id}">Reject</button>`);
 
-        // Info status approval
         const info = [];
         if (needFinance) info.push(`Finance: ${financeApproved ? '✓' : '⏳'}`);
         info.push(`Supervisor: ${supervisorApproved ? '✓' : '⏳'}`);

@@ -1,5 +1,6 @@
 // js/settings-page.js
-import { requireAuth, logout, hasRole, getCurrentRole } from './auth.js';
+import { requireAuth, logout, getCurrentRole } from './auth.js';
+import { renderNav, requirePageAccess } from './access.js';
 import { SETTING_DEFS, getAllSettings, updateSetting } from './settings.js';
 import { listUsers, createUser, updateUser, deleteUser, AVAILABLE_ROLES } from './users.js';
 import { supabase } from './supabase-client.js';
@@ -18,23 +19,16 @@ function esc(s) {
 
 let currentRole = null;
 
-// ============================================================
-// INIT
-// ============================================================
 (async () => {
   const user = await requireAuth();
   if (!user) return;
 
-  currentRole = await getCurrentRole();
-  if (!['admin','superadmin'].includes(currentRole)) {
-    alert('Halaman ini hanya untuk admin/superadmin.');
-    window.location.href = './dashboard.html';
-    return;
-  }
+  currentRole = await requirePageAccess('settings');
+  if (!currentRole) return;
 
   document.getElementById('logoutBtn').addEventListener('click', logout);
+  await renderNav(document.getElementById('mainNav'), 'settings');
 
-  // Tabs
   document.querySelectorAll('.tabs button').forEach(btn => {
     btn.addEventListener('click', () => {
       document.querySelectorAll('.tabs button').forEach(b => b.classList.remove('active'));
@@ -44,13 +38,11 @@ let currentRole = null;
     });
   });
 
-  // Isi dropdown role
   const roleSel = document.getElementById('newUserRole');
   roleSel.innerHTML = AVAILABLE_ROLES
     .filter(r => r.value !== 'superadmin' || currentRole === 'superadmin')
     .map(r => `<option value="${r.value}">${r.label}</option>`).join('');
 
-  // Preview email dari username
   const usernameEl = document.querySelector('#form-new-user [name=username]');
   usernameEl.addEventListener('input', () => {
     const v = usernameEl.value.trim() || 'username';
@@ -67,9 +59,6 @@ let currentRole = null;
   document.getElementById('form-new-user').addEventListener('submit', onCreateUser);
 })();
 
-// ============================================================
-// SETTINGS
-// ============================================================
 async function renderSettings() {
   const form = document.getElementById('form-settings');
   const current = await getAllSettings();
@@ -117,16 +106,13 @@ async function onSaveSettings(e) {
   }
 }
 
-// ============================================================
-// USERS
-// ============================================================
 async function renderUsers() {
   const tbody = document.getElementById('tbody-users');
+  if (!tbody) return;
   tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#9ca3af;">Memuat...</td></tr>';
   try {
     const users = await listUsers();
     tbody.innerHTML = users.map(u => {
-      const isSelf = u.email === (window.__me?.email || '');
       const canEdit = currentRole === 'superadmin'
         || (currentRole === 'admin' && u.role !== 'superadmin');
       const canDelete = currentRole === 'superadmin' && u.role !== 'superadmin';
@@ -158,7 +144,6 @@ async function renderUsers() {
         </tr>`;
     }).join('') || '<tr><td colspan="5" style="text-align:center;color:#9ca3af;">Belum ada user</td></tr>';
 
-    // Event: simpan perubahan role/status
     tbody.querySelectorAll('[data-save-user]').forEach(btn => {
       btn.addEventListener('click', async () => {
         const uid = btn.dataset.saveUser;
@@ -167,7 +152,10 @@ async function renderUsers() {
         const row = btn.closest('tr');
         const fullName = row.querySelector('[data-label="Nama"]').textContent.trim();
         try {
-          await updateUser(uid, { full_name: fullName === '—' ? null : fullName, role, is_active: isActive });
+          await updateUser(uid, {
+            full_name: fullName === '—' ? null : fullName,
+            role, is_active: isActive
+          });
           toast('✓ User diupdate');
           await renderUsers();
         } catch (err) {
@@ -176,7 +164,6 @@ async function renderUsers() {
       });
     });
 
-    // Event: hapus
     tbody.querySelectorAll('[data-del-user]').forEach(btn => {
       btn.addEventListener('click', async () => {
         if (!confirm(`Hapus permanen user ${btn.dataset.email}?`)) return;
@@ -223,9 +210,6 @@ async function onCreateUser(e) {
   }
 }
 
-// ============================================================
-// SALES ↔ PARTNER
-// ============================================================
 async function renderSalesPartners() {
   const wrap = document.getElementById('salesPartnersList');
   wrap.innerHTML = '<div style="color:#9ca3af;font-size:13px;">Memuat...</div>';
@@ -266,8 +250,7 @@ async function renderSalesPartners() {
           <td style="padding:8px;">${esc(s.full_name || s.email)}</td>
           <td style="padding:8px;">${esc(c.code || '')} — ${esc(c.name)}</td>
           <td style="padding:8px;text-align:center;">
-            <button class="btn btn-danger" style="padding:4px 10px;font-size:12px;"
-                    data-del="${r.id}">Hapus</button>
+            <button class="btn btn-danger" style="padding:4px 10px;font-size:12px;" data-del="${r.id}">Hapus</button>
           </td>
         </tr>`;
     }).join('') || '<tr><td colspan="3" style="padding:16px;text-align:center;color:#9ca3af;">Belum ada relasi</td></tr>';
