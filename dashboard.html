@@ -110,6 +110,17 @@
             </div>
           </div>`;
       }
+      // Tambahkan kartu DO pending
+const { data: doPending } = await supabase
+  .from('delivery_orders')
+  .select('id')
+  .eq('status', 'issued');
+
+container.innerHTML += `
+  <div class="card">
+    <div style="font-size:12px;color:#666;margin-bottom:6px;">DO Menunggu Dikirim</div>
+    <div style="font-size:22px;font-weight:600;color:#b45309;">${(doPending || []).length}</div>
+  </div>`;
     }
 
     async function renderSalesDashboard(container) {
