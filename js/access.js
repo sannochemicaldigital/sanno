@@ -55,8 +55,8 @@ export async function requirePageAccess(pageName) {
 // Halaman default per role (untuk redirect saat tidak berhak)
 async function defaultPageFor(role) {
   if (role === 'sales')  return 'sales-order';
-  if (role === 'kasir')  return 'dashboard';   // belum ada kasir.html
-  if (role === 'gudang') return 'inventory';
+  if (role === 'kasir')  return 'kasir';
+  if (role === 'gudang') return 'inventory';   // atau 'delivery'
   return 'dashboard';
 }
 

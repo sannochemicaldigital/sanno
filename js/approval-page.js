@@ -122,7 +122,11 @@ async function onApprove(soId) {
   if (!confirm('Approve SO ini?')) return;
   try {
     const newStatus = await approveSO(soId);
-    toast(`✓ Approved (status: ${newStatus})`);
+    if (newStatus === 'approved') {
+      toast('✓ Approved — DO otomatis terbit, menunggu gudang mark delivered');
+    } else {
+      toast(`✓ Approved sebagian (status: ${newStatus})`);
+    }
     await renderList();
   } catch (err) {
     toast('Gagal approve: ' + (err.message || err), true);
