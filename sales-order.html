@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Sales Order — SANNO Accounting</title>
+  <title>Sales Order — Sanno Accounting</title>
   <link rel="stylesheet" href="./css/style.css">
 </head>
 <body>
@@ -13,33 +13,18 @@
       <button class="btn btn-danger" id="logoutBtn">Keluar</button>
     </div>
 
-    <nav class="nav">
-      <a href="./dashboard.html">Dashboard</a>
-      <a href="./sales-order.html" class="active">Sales Order</a>
-      <a href="./approval.html" id="navApproval" style="display:none;">Approval</a>
-      <a href="./journal.html" id="navJournal" style="display:none;">Jurnal</a>
-      <a href="./reports.html" id="navReports" style="display:none;">Laporan</a>
-    </nav>
+    <nav class="nav" id="mainNav"></nav>
 
-    <!-- FORM SO -->
     <div class="card">
       <h3 style="margin-top:0;font-size:16px;" id="formTitle">Sales Order Baru</h3>
       <form id="form-so">
         <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(150px,1fr));">
-          <div class="form-row">
-            <label>Tanggal SO</label>
-            <input type="date" name="so_date" required>
-          </div>
+          <div class="form-row"><label>Tanggal SO</label><input type="date" name="so_date" required></div>
           <div class="form-row">
             <label>Pelanggan</label>
-            <select name="partner_id" id="partnerSelect" required>
-              <option value="">— pilih pelanggan —</option>
-            </select>
+            <select name="partner_id" id="partnerSelect" required><option value="">— pilih pelanggan —</option></select>
           </div>
-          <div class="form-row" style="grid-column: span 2;">
-            <label>Deskripsi</label>
-            <input name="description" placeholder="Catatan SO">
-          </div>
+          <div class="form-row" style="grid-column: span 2;"><label>Deskripsi</label><input name="description" placeholder="Catatan SO"></div>
         </div>
 
         <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;">
@@ -61,7 +46,6 @@
       </form>
     </div>
 
-    <!-- DAFTAR SO -->
     <div class="card">
       <h3 style="margin-top:0;font-size:16px;">Daftar Sales Order</h3>
       <div id="soList"></div>

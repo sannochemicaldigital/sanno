@@ -3,62 +3,188 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Dashboard — SANNO Accounting</title>
+  <title>Dashboard — Sanno Accounting</title>
   <link rel="stylesheet" href="./css/style.css">
 </head>
 <body>
   <div class="container">
     <div class="topbar">
       <h1>Dashboard</h1>
-      <button class="btn btn-danger" id="logoutBtn">Keluar</button>
+      <div style="display:flex;align-items:center;gap:8px;">
+        <span id="roleBadge" style="font-size:12px;color:#6b7280;"></span>
+        <button class="btn btn-danger" id="logoutBtn">Keluar</button>
+      </div>
     </div>
 
-    <nav class="nav">
-  <a href="./dashboard.html">Dashboard</a>
-  <a href="./master.html">Master</a>
-  <a href="./journal.html">Jurnal</a>
-  <a href="./reports.html">Laporan</a>
-  <a href="./settings.html" id="navSettings" style="display:none;">Pengaturan</a>
-</nav>
+    <nav class="nav" id="mainNav"></nav>
 
     <div id="cards" class="grid"></div>
   </div>
 
   <script type="module">
-    import { requireAuth, logout } from './js/auth.js';
+    import { requireAuth, logout, getCurrentRole } from './js/auth.js';
+    import { renderNav, requirePageAccess } from './js/access.js';
     import { dashboardBalances } from './js/reports.js';
-    import { hasRole } from './js/auth.js';
-if (await hasRole('admin')) {
-  document.getElementById('navSettings').style.display = '';
-}
+    import { supabase } from './js/supabase-client.js';
 
     const fmt = n => 'Rp ' + Number(n).toLocaleString('id-ID');
+    const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({
+      '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+    }[c]));
 
     (async () => {
       const user = await requireAuth();
       if (!user) return;
 
+      const role = await requirePageAccess('dashboard');
+      if (!role) return;
+
       document.getElementById('logoutBtn').addEventListener('click', logout);
+      document.getElementById('roleBadge').textContent = `(${role})`;
+      await renderNav(document.getElementById('mainNav'), 'dashboard');
+
+      const cards = document.getElementById('cards');
+      cards.innerHTML = '<div style="color:#9ca3af;font-size:13px;">Memuat...</div>';
 
       try {
-        const data = await dashboardBalances();
-        document.getElementById('cards').innerHTML = data.map(d => `
-          <div class="card">
-            <div style="font-size:12px;color:#666;margin-bottom:6px;">${d.label}</div>
-            <div style="font-size:18px;font-weight:600;">${fmt(d.balance)}</div>
-          </div>
-        `).join('');
+        if (role === 'gudang')       await renderGudangDashboard(cards);
+        else if (role === 'sales')   await renderSalesDashboard(cards);
+        else if (role === 'kasir')   await renderKasirDashboard(cards);
+        else                         await renderFinanceDashboard(cards);
       } catch (err) {
-        console.error('dashboardBalances error:', err);
-        document.getElementById('cards').innerHTML =
-          `<div class="card" style="grid-column:1/-1;">
-             <div style="font-size:13px;color:#b91c1c;">
-               Gagal memuat: <b>${err.message || err}</b>
-               ${err.code ? `<br>Code: ${err.code}` : ''}
-             </div>
-           </div>`;
+        cards.innerHTML = `<div class="card" style="grid-column:1/-1;">
+          <div style="color:#b91c1c;font-size:13px;">Gagal memuat: <b>${esc(err.message)}</b></div>
+        </div>`;
       }
     })();
+
+    async function renderGudangDashboard(container) {
+      const { data: items, error } = await supabase
+        .from('items')
+        .select('id, sku, name, unit, stock_qty, min_stock, is_active')
+        .eq('is_active', true)
+        .order('sku');
+      if (error) throw error;
+
+      const totalItems = items.length;
+      const totalStok = items.reduce((s, i) => s + Number(i.stock_qty), 0);
+      const lowStock = items.filter(i => Number(i.stock_qty) <= Number(i.min_stock));
+      const outOfStock = items.filter(i => Number(i.stock_qty) === 0);
+
+      container.innerHTML = `
+        <div class="card">
+          <div style="font-size:12px;color:#666;margin-bottom:6px;">Total Item Aktif</div>
+          <div style="font-size:22px;font-weight:600;">${totalItems}</div>
+        </div>
+        <div class="card">
+          <div style="font-size:12px;color:#666;margin-bottom:6px;">Total Qty Stok</div>
+          <div style="font-size:22px;font-weight:600;">${totalStok.toLocaleString('id-ID')}</div>
+        </div>
+        <div class="card">
+          <div style="font-size:12px;color:#666;margin-bottom:6px;">Item di Bawah Min Stok</div>
+          <div style="font-size:22px;font-weight:600;color:#b45309;">${lowStock.length}</div>
+        </div>
+        <div class="card">
+          <div style="font-size:12px;color:#666;margin-bottom:6px;">Item Stok Kosong</div>
+          <div style="font-size:22px;font-weight:600;color:#b91c1c;">${outOfStock.length}</div>
+        </div>`;
+
+      if (lowStock.length) {
+        container.innerHTML += `
+          <div class="card" style="grid-column:1/-1;">
+            <div style="font-size:14px;font-weight:600;margin-bottom:8px;">Item Perlu Restock</div>
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>SKU</th><th>Nama</th><th>Stok</th><th>Min</th><th>Satuan</th></tr></thead>
+                <tbody>
+                  ${lowStock.map(i => `
+                    <tr>
+                      <td data-label="SKU">${esc(i.sku)}</td>
+                      <td data-label="Nama">${esc(i.name)}</td>
+                      <td data-label="Stok" style="color:${Number(i.stock_qty) === 0 ? '#b91c1c' : '#b45309'};font-weight:600;">${Number(i.stock_qty).toLocaleString('id-ID')}</td>
+                      <td data-label="Min">${Number(i.min_stock).toLocaleString('id-ID')}</td>
+                      <td data-label="Satuan">${esc(i.unit)}</td>
+                    </tr>`).join('')}
+                </tbody>
+              </table>
+            </div>
+          </div>`;
+      }
+    }
+
+    async function renderSalesDashboard(container) {
+      const { data: { session } } = await supabase.auth.getSession();
+      const { data: sos, error } = await supabase
+        .from('sales_orders')
+        .select('id, status, grand_total')
+        .eq('sales_id', session.user.id);
+      if (error) throw error;
+
+      const count = s => sos.filter(so => so.status === s).length;
+      const sum = s => sos.filter(so => so.status === s)
+        .reduce((a, so) => a + Number(so.grand_total), 0);
+
+      container.innerHTML = `
+        <div class="card">
+          <div style="font-size:12px;color:#666;margin-bottom:6px;">SO Draft</div>
+          <div style="font-size:22px;font-weight:600;">${count('draft')}</div>
+        </div>
+        <div class="card">
+          <div style="font-size:12px;color:#666;margin-bottom:6px;">SO Pending Approval</div>
+          <div style="font-size:22px;font-weight:600;color:#b45309;">${count('pending_approval')}</div>
+        </div>
+        <div class="card">
+          <div style="font-size:12px;color:#666;margin-bottom:6px;">SO Approved</div>
+          <div style="font-size:22px;font-weight:600;color:#059669;">${count('approved')}</div>
+          <div style="font-size:12px;color:#666;margin-top:4px;">${fmt(sum('approved'))}</div>
+        </div>
+        <div class="card">
+          <div style="font-size:12px;color:#666;margin-bottom:6px;">SO Rejected</div>
+          <div style="font-size:22px;font-weight:600;color:#b91c1c;">${count('rejected')}</div>
+        </div>`;
+    }
+
+    async function renderKasirDashboard(container) {
+      const { data: kas } = await supabase
+        .from('v_account_balance')
+        .select('balance')
+        .eq('code', '1-1000')
+        .single();
+      const saldoKas = Number(kas?.balance || 0);
+
+      const today = new Date().toISOString().slice(0, 10);
+      const { data: { session } } = await supabase.auth.getSession();
+      const { data: cashToday, error } = await supabase
+        .from('cash_sales')
+        .select('id, grand_total')
+        .eq('kasir_id', session.user.id)
+        .eq('cash_date', today);
+      const cashList = error ? [] : (cashToday || []);
+      const totalCash = cashList.reduce((s, c) => s + Number(c.grand_total), 0);
+
+      container.innerHTML = `
+        <div class="card">
+          <div style="font-size:12px;color:#666;margin-bottom:6px;">Saldo Kas Fisik</div>
+          <div style="font-size:22px;font-weight:600;">${fmt(saldoKas)}</div>
+        </div>
+        <div class="card">
+          <div style="font-size:12px;color:#666;margin-bottom:6px;">Transaksi Tunai Hari Ini</div>
+          <div style="font-size:22px;font-weight:600;">${cashList.length}</div>
+        </div>
+        <div class="card">
+          <div style="font-size:12px;color:#666;margin-bottom:6px;">Total Tunai Hari Ini</div>
+          <div style="font-size:22px;font-weight:600;">${fmt(totalCash)}</div>
+        </div>`;
+    }
+
+    async function renderFinanceDashboard(container) {
+      const data = await dashboardBalances();
+      container.innerHTML = data.map(d => `
+        <div class="card">
+          <div style="font-size:12px;color:#666;margin-bottom:6px;">${esc(d.label)}</div>
+          <div style="font-size:18px;font-weight:600;">${fmt(d.balance)}</div>
+        </div>`).join('');
+    }
   </script>
 </body>
 </html>

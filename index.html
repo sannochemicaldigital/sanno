@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Login — Internal Accounting</title>
+  <title>Login — Sanno Accounting</title>
   <style>
     * { box-sizing: border-box; }
     body {
@@ -17,7 +17,7 @@
       box-shadow: 0 4px 20px rgba(0,0,0,0.08);
       width: 100%; max-width: 380px;
     }
-    h1 { font-size: 20px; margin: 0 0 8px; color: #1a1a1a; }
+    h1 { font-size: 22px; margin: 0 0 4px; color: #1a1a1a; }
     p.sub { font-size: 13px; color: #666; margin: 0 0 24px; }
     label { display: block; font-size: 13px; font-weight: 500; margin-bottom: 6px; color: #333; }
     input {
@@ -39,19 +39,21 @@
       margin-bottom: 16px; border: 1px solid #fecaca;
     }
     .error.show { display: block; }
+    .hint { font-size: 12px; color: #9ca3af; margin-top: -8px; margin-bottom: 16px; }
   </style>
 </head>
 <body>
   <div class="card">
-    <h1>SANNO Accounting</h1>
+    <h1>Sanno Accounting</h1>
     <p class="sub">Masuk untuk melanjutkan</p>
 
     <div id="errorMsg" class="error"></div>
 
     <form id="loginForm">
-      <label for="email">Email / Username</label>
+      <label for="email">Username</label>
       <input type="text" id="email" autocomplete="username" required
-             placeholder="nama@perusahaan.com">
+             placeholder="mis. admin atau nama@domain.com">
+      <div class="hint">Cukup ketik username. Domain internal otomatis ditambahkan.</div>
 
       <label for="password">Password</label>
       <input type="password" id="password" autocomplete="current-password" required
@@ -61,9 +63,7 @@
     </form>
   </div>
 
-  <script type="module" src="./js/auth.js"></script>
   <script type="module">
-    // Script kecil di halaman: hubungkan form ke fungsi login dari auth.js
     import { login } from './js/auth.js';
 
     const form    = document.getElementById('loginForm');
@@ -84,12 +84,13 @@
       btn.textContent = 'Memuat...';
 
       try {
-        await login(emailEl.value, passEl.value);
-        // Login sukses → redirect ke dashboard
+        let email = emailEl.value.trim();
+        if (email && !email.includes('@')) email = email + '@sanno.local';
+        await login(email, passEl.value);
         window.location.href = './dashboard.html';
       } catch (err) {
         const msg = (err.message || '').toLowerCase().includes('invalid')
-          ? 'Email atau password salah.'
+          ? 'Username atau password salah.'
           : (err.message || 'Gagal login. Coba lagi.');
         showError(msg);
         btn.disabled = false;
