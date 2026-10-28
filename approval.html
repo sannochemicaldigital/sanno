@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Approval — Internal Accounting</title>
+  <link rel="stylesheet" href="./css/style.css">
+</head>
+<body>
+  <div class="container">
+    <div class="topbar">
+      <h1>Approval Sales Order</h1>
+      <button class="btn btn-danger" id="logoutBtn">Keluar</button>
+    </div>
+
+    <nav class="nav">
+      <a href="./dashboard.html">Dashboard</a>
+      <a href="./sales-order.html">Sales Order</a>
+      <a href="./approval.html" class="active">Approval</a>
+    </nav>
+
+    <div class="card">
+      <div id="approvalModeInfo" style="padding:12px;background:#eef2ff;border-radius:8px;margin-bottom:16px;font-size:13px;"></div>
+      <div id="approvalList"></div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script type="module" src="./js/approval-page.js"></script>
+</body>
+</html>
