@@ -21,6 +21,23 @@
       display: flex;
       gap: 8px;
       justify-content: flex-end;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .toolbar label {
+      font-size: 12px;
+      color: #4b5563;
+      font-weight: 600;
+      margin-right: 4px;
+    }
+    .toolbar select {
+      padding: 8px 12px;
+      border: 1px solid #d0d5dd;
+      border-radius: 6px;
+      font-size: 13px;
+      background: #fff;
+      cursor: pointer;
+      min-width: 200px;
     }
     .toolbar button {
       padding: 8px 16px;
@@ -44,7 +61,6 @@
       box-shadow: 0 4px 20px rgba(0,0,0,0.08);
     }
 
-    /* Header */
     .company-header {
       display: flex;
       justify-content: space-between;
@@ -54,43 +70,14 @@
       margin-bottom: 20px;
     }
     .company-left { flex: 1; }
-    .company-logo {
-      max-height: 60px;
-      max-width: 150px;
-      margin-bottom: 8px;
-    }
-    .company-name {
-      font-size: 18px;
-      font-weight: 700;
-      color: #1a1a1a;
-      margin-bottom: 4px;
-    }
-    .company-info {
-      font-size: 11px;
-      color: #4b5563;
-      line-height: 1.5;
-    }
-    .company-right {
-      text-align: right;
-      flex-shrink: 0;
-    }
-    .doc-title {
-      font-size: 20px;
-      font-weight: 700;
-      color: #2563eb;
-      margin-bottom: 4px;
-    }
-    .doc-number {
-      font-size: 13px;
-      color: #4b5563;
-      margin-bottom: 2px;
-    }
-    .doc-date {
-      font-size: 12px;
-      color: #6b7280;
-    }
+    .company-logo { max-height: 60px; max-width: 150px; margin-bottom: 8px; }
+    .company-name { font-size: 18px; font-weight: 700; color: #1a1a1a; margin-bottom: 4px; }
+    .company-info { font-size: 11px; color: #4b5563; line-height: 1.5; }
+    .company-right { text-align: right; flex-shrink: 0; }
+    .doc-title { font-size: 20px; font-weight: 700; color: #2563eb; margin-bottom: 4px; }
+    .doc-number { font-size: 13px; color: #4b5563; margin-bottom: 2px; }
+    .doc-date { font-size: 12px; color: #6b7280; }
 
-    /* Info grid */
     .info-grid {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -103,40 +90,20 @@
       padding: 10px 12px;
     }
     .info-block-title {
-      font-size: 10px;
-      font-weight: 700;
-      color: #6b7280;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      margin-bottom: 6px;
+      font-size: 10px; font-weight: 700; color: #6b7280;
+      text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px;
     }
-    .info-block-name {
-      font-size: 13px;
-      font-weight: 600;
-      color: #1a1a1a;
-      margin-bottom: 2px;
-    }
-    .info-block-detail {
-      font-size: 11px;
-      color: #4b5563;
-      line-height: 1.6;
-    }
+    .info-block-name { font-size: 13px; font-weight: 600; color: #1a1a1a; margin-bottom: 2px; }
+    .info-block-detail { font-size: 11px; color: #4b5563; line-height: 1.6; }
 
-    /* Status badge */
     .status-badge {
-      display: inline-block;
-      padding: 4px 10px;
-      border-radius: 4px;
-      font-size: 11px;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
+      display: inline-block; padding: 4px 10px; border-radius: 4px;
+      font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;
     }
     .status-unpaid { background: #fef3c7; color: #92400e; }
     .status-paid   { background: #d1fae5; color: #065f46; }
     .status-overdue { background: #fee2e2; color: #991b1b; }
 
-    /* Tabel item */
     .items-table {
       width: 100%;
       border-collapse: collapse;
@@ -145,36 +112,21 @@
     }
     .items-table thead { background: #f3f4f6; }
     .items-table th {
-      padding: 8px 10px;
-      text-align: left;
-      font-weight: 600;
-      font-size: 11px;
-      color: #374151;
-      border-bottom: 2px solid #d1d5db;
-      text-transform: uppercase;
-      letter-spacing: 0.3px;
+      padding: 8px 10px; text-align: left; font-weight: 600;
+      font-size: 11px; color: #374151; border-bottom: 2px solid #d1d5db;
+      text-transform: uppercase; letter-spacing: 0.3px;
     }
     .items-table th.num { text-align: right; }
     .items-table td {
-      padding: 8px 10px;
-      border-bottom: 1px solid #e5e7eb;
-      vertical-align: top;
+      padding: 8px 10px; border-bottom: 1px solid #e5e7eb; vertical-align: top;
     }
     .items-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
     .items-table tbody tr:last-child td { border-bottom: 1px solid #d1d5db; }
-    .items-table tfoot td {
-      padding: 8px 10px;
-      font-weight: 600;
-    }
+    .items-table tfoot td { padding: 8px 10px; font-weight: 600; }
     .items-table tfoot td.label { text-align: right; color: #374151; }
     .items-table tfoot td.value { text-align: right; font-variant-numeric: tabular-nums; }
-    .items-table tfoot tr.grand td {
-      background: #eff6ff;
-      font-size: 14px;
-      color: #1e40af;
-    }
+    .items-table tfoot tr.grand td { background: #eff6ff; font-size: 14px; color: #1e40af; }
 
-    /* Pembayaran */
     .payment-section {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -189,20 +141,30 @@
       background: #fafafa;
     }
     .payment-block-title {
-      font-size: 11px;
-      font-weight: 700;
-      color: #2563eb;
-      margin-bottom: 6px;
-      text-transform: uppercase;
+      font-size: 11px; font-weight: 700; color: #2563eb;
+      margin-bottom: 6px; text-transform: uppercase;
     }
-    .payment-block-detail {
-      font-size: 11px;
-      color: #4b5563;
-      line-height: 1.6;
-    }
+    .payment-block-detail { font-size: 11px; color: #4b5563; line-height: 1.6; }
     .payment-block-detail b { color: #1a1a1a; }
 
-    /* Tanda tangan */
+    .payment-bank {
+      padding: 8px 10px;
+      background: #eff6ff;
+      border-left: 3px solid #2563eb;
+      border-radius: 4px;
+      margin: 6px 0;
+    }
+    .payment-bank .bank-name {
+      font-size: 12px; font-weight: 700; color: #1e40af; margin-bottom: 2px;
+    }
+    .payment-bank .bank-no {
+      font-family: monospace; font-size: 14px; font-weight: 700; color: #1a1a1a;
+      letter-spacing: 0.5px; margin-bottom: 2px;
+    }
+    .payment-bank .bank-owner {
+      font-size: 11px; color: #4b5563;
+    }
+
     .signatures {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -210,19 +172,9 @@
       margin-top: 40px;
     }
     .sig-box { text-align: center; }
-    .sig-label {
-      font-size: 11px;
-      color: #6b7280;
-      margin-bottom: 60px;
-    }
-    .sig-line {
-      border-top: 1px solid #374151;
-      padding-top: 6px;
-      font-size: 11px;
-      color: #374151;
-    }
+    .sig-label { font-size: 11px; color: #6b7280; margin-bottom: 60px; }
+    .sig-line { border-top: 1px solid #374151; padding-top: 6px; font-size: 11px; color: #374151; }
 
-    /* Footer */
     .footer-notes {
       margin-top: 30px;
       padding-top: 12px;
@@ -231,12 +183,7 @@
       color: #6b7280;
       font-style: italic;
     }
-    .printed-at {
-      margin-top: 8px;
-      font-size: 9px;
-      color: #9ca3af;
-      text-align: right;
-    }
+    .printed-at { margin-top: 8px; font-size: 9px; color: #9ca3af; text-align: right; }
 
     .loading, .error {
       text-align: center;
@@ -266,6 +213,10 @@
 <body>
 
   <div class="toolbar">
+    <label for="bankSelect">Rekening:</label>
+    <select id="bankSelect">
+      <option value="">Memuat...</option>
+    </select>
     <button class="btn-close" onclick="window.close()">Tutup</button>
     <button class="btn-print" onclick="window.print()">🖨 Cetak / Save PDF</button>
   </div>
@@ -277,6 +228,7 @@
   <script type="module">
     import { requireAuth } from './js/auth.js';
     import { getCompanyProfile } from './js/company.js';
+    import { listBankAccounts } from './js/bank-accounts.js';
     import { supabase } from './js/supabase-client.js';
 
     const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({
@@ -303,6 +255,19 @@
       return Math.floor((new Date(b) - new Date(a)) / (1000 * 60 * 60 * 24));
     }
 
+    // ============================================================
+    // STATE
+    // ============================================================
+    let currentSO = null;
+    let currentLines = [];
+    let currentDO = null;
+    let currentCompany = null;
+    let allBanks = [];
+    let selectedBankId = null;
+
+    // ============================================================
+    // INIT
+    // ============================================================
     (async () => {
       const user = await requireAuth();
       if (!user) return;
@@ -310,12 +275,11 @@
       const paper = document.getElementById('paper');
 
       try {
-        // 1. Ambil SO id dari URL
         const params = new URLSearchParams(window.location.search);
         const soId = Number(params.get('id'));
         if (!soId) throw new Error('Parameter ?id= tidak ada di URL');
 
-        // 2. Fetch SO + partner
+        // Fetch SO + partner
         const { data: so, error: soErr } = await supabase
           .from('sales_orders')
           .select(`
@@ -329,196 +293,54 @@
         if (so.status !== 'posted') {
           throw new Error(`SO belum posted (status: ${so.status}). Invoice hanya bisa dibuat untuk SO posted.`);
         }
+        currentSO = so;
 
-        // 3. Fetch lines
+        // Fetch lines
         const { data: lines, error: lErr } = await supabase
           .from('sales_order_lines')
           .select('*, items!inner(sku, name, unit)')
           .eq('so_id', soId)
           .order('id');
         if (lErr) throw lErr;
+        currentLines = lines || [];
 
-        // 4. Fetch DO (referensi pengiriman)
+        // Fetch DO (referensi)
         const { data: doList } = await supabase
           .from('delivery_orders')
           .select('do_no, do_date, status')
           .eq('so_id', soId)
           .order('id', { ascending: false })
           .limit(1);
-        const doRef = doList && doList.length ? doList[0] : null;
+        currentDO = doList && doList.length ? doList[0] : null;
 
-        // 5. Fetch company profile
-        const company = await getCompanyProfile();
+        // Fetch company
+        currentCompany = await getCompanyProfile();
 
-        // 6. Ambil rekening bank dari COA (1-11xx)
-        const { data: bankAccounts } = await supabase
-          .from('accounts')
-          .select('code, name')
-          .like('code', '1-11%')
-          .eq('is_active', true)
-          .order('code');
+        // Fetch bank accounts
+        allBanks = await listBankAccounts({ activeOnly: true });
 
-        // 7. Hitung status pembayaran
-        const totalAmount = Number(so.total_amount);
-        const ppnAmount = Number(so.ppn_amount);
-        const grandTotal = Number(so.grand_total);
-
-        const dueDate = so.due_date || so.so_date;
-        const today = new Date().toISOString().slice(0, 10);
-        const daysToDue = daysBetween(today, dueDate);
-
-        // Status: BELUM DIBAYAR (default), LUNAS (kalau ada pembayaran), JATUH TEMPO (kalau lewat)
-        // Untuk MVP, kita belum punya tabel pembayaran, jadi default BELUM DIBAYAR
-        let statusLabel = 'BELUM DIBAYAR';
-        let statusClass = 'status-unpaid';
-        if (daysToDue < 0) {
-          statusLabel = `JATUH TEMPO (${Math.abs(daysToDue)} hari lewat)`;
-          statusClass = 'status-overdue';
+        // Tentukan bank default: so.bank_account_id, atau bank pertama
+        if (so.bank_account_id) {
+          selectedBankId = so.bank_account_id;
+        } else if (allBanks.length) {
+          selectedBankId = allBanks[0].id;
         }
 
-        // 8. Render
-        const partner = so.partners;
+        // Isi dropdown
+        renderBankSelect();
 
-        let itemsHtml = '';
-        lines.forEach((l, i) => {
-          itemsHtml += `
-            <tr>
-              <td style="text-align:center;">${i + 1}</td>
-              <td>${esc(l.items.sku)}</td>
-              <td>${esc(l.items.name)}</td>
-              <td class="num">${fmtQty(l.qty)}</td>
-              <td>${esc(l.items.unit)}</td>
-              <td class="num">${fmtMoney(l.unit_price)}</td>
-              <td class="num">${fmtMoney(l.subtotal)}</td>
-            </tr>`;
-        });
+        // Render invoice
+        renderInvoice();
 
-        const bankList = (bankAccounts || [])
-          .map(b => `<div>• <b>${esc(b.name)}</b></div>`)
-          .join('');
-
-        const invoiceNo = `INV-${so.so_no.replace('SO-', '')}`;
-        const paymentTerms = so.payment_terms_days || 30;
-
-        paper.innerHTML = `
-          <div class="company-header">
-            <div class="company-left">
-              ${company.logo_url ? `<img src="${esc(company.logo_url)}" alt="Logo" class="company-logo">` : ''}
-              <div class="company-name">${esc(company.name || 'Perusahaan')}</div>
-              <div class="company-info">
-                ${company.address ? esc(company.address) + '<br>' : ''}
-                ${company.phone ? 'Telp: ' + esc(company.phone) : ''}
-                ${company.phone && company.email ? ' · ' : ''}
-                ${company.email ? 'Email: ' + esc(company.email) : ''}
-                ${company.website ? '<br>' + esc(company.website) : ''}
-                ${company.tax_id ? '<br>NPWP: ' + esc(company.tax_id) : ''}
-              </div>
-            </div>
-            <div class="company-right">
-              <div class="doc-title">INVOICE</div>
-              <div class="doc-number">No: <b>${esc(invoiceNo)}</b></div>
-              <div class="doc-date">Tanggal: ${fmtDate(so.so_date)}</div>
-              <div class="doc-date" style="font-size:11px;margin-top:4px;">
-                Ref SO: ${esc(so.so_no)}
-                ${doRef ? `<br>Ref DO: ${esc(doRef.do_no)}` : ''}
-              </div>
-            </div>
-          </div>
-
-          <div class="info-grid">
-            <div class="info-block">
-              <div class="info-block-title">Ditagihkan Kepada</div>
-              <div class="info-block-name">${esc(partner.name)}</div>
-              <div class="info-block-detail">
-                ${partner.address ? esc(partner.address) + '<br>' : ''}
-                ${partner.phone ? 'Telp: ' + esc(partner.phone) : ''}
-                ${partner.email ? '<br>Email: ' + esc(partner.email) : ''}
-              </div>
-            </div>
-            <div class="info-block">
-              <div class="info-block-title">Status & Jatuh Tempo</div>
-              <div style="margin-bottom:6px;">
-                <span class="status-badge ${statusClass}">${statusLabel}</span>
-              </div>
-              <div class="info-block-detail">
-                Term of Payment: <b>${paymentTerms} hari</b><br>
-                Jatuh Tempo: <b>${fmtDate(dueDate)}</b>
-                ${doRef ? `<br>Bukti Pengiriman: <b>${esc(doRef.do_no)}</b> (${fmtDate(doRef.do_date)})` : ''}
-              </div>
-            </div>
-          </div>
-
-          <table class="items-table">
-            <thead>
-              <tr>
-                <th style="width:30px;text-align:center;">No</th>
-                <th style="width:90px;">SKU</th>
-                <th>Nama Barang</th>
-                <th class="num" style="width:70px;">Qty</th>
-                <th style="width:50px;">Satuan</th>
-                <th class="num" style="width:100px;">Harga</th>
-                <th class="num" style="width:110px;">Subtotal</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${itemsHtml || '<tr><td colspan="7" style="text-align:center;color:#9ca3af;">Tidak ada item</td></tr>'}
-            </tbody>
-            <tfoot>
-              <tr>
-                <td colspan="6" class="label">Total</td>
-                <td class="value">${fmtMoney(totalAmount)}</td>
-              </tr>
-              ${ppnAmount > 0 ? `
-              <tr>
-                <td colspan="6" class="label">PPN</td>
-                <td class="value">${fmtMoney(ppnAmount)}</td>
-              </tr>` : ''}
-              <tr class="grand">
-                <td colspan="6" class="label">GRAND TOTAL</td>
-                <td class="value">${fmtMoney(grandTotal)}</td>
-              </tr>
-            </tfoot>
-          </table>
-
-          <div class="payment-section">
-            <div class="payment-block">
-              <div class="payment-block-title">Instruksi Pembayaran</div>
-              <div class="payment-block-detail">
-                Silakan transfer ke rekening berikut:
-                ${bankList || '<div style="color:#9ca3af;">Belum ada rekening bank terdaftar</div>'}
-                <div style="margin-top:8px;padding:6px;background:#eff6ff;border-radius:4px;">
-                  Nominal: <b style="color:#1e40af;">${fmtMoney(grandTotal)}</b><br>
-                  Berita Transfer: <b>${esc(invoiceNo)}</b>
-                </div>
-              </div>
-            </div>
-            <div class="payment-block">
-              <div class="payment-block-title">Catatan</div>
-              <div class="payment-block-detail">
-                Invoice ini diterbitkan berdasarkan pengiriman barang
-                ${doRef ? `dengan nomor <b>${esc(doRef.do_no)}</b>` : ''}.
-                Pembayaran dianggap sah setelah dana diterima di rekening perusahaan
-                dan bukti transfer dikonfirmasi.
-              </div>
-            </div>
-          </div>
-
-          <div class="signatures">
-            <div class="sig-box">
-              <div class="sig-label">Hormat Kami,</div>
-              <div class="sig-line">( _________________________ )</div>
-            </div>
-            <div class="sig-box">
-              <div class="sig-label">Diterima Oleh,</div>
-              <div class="sig-line">( _________________________ )</div>
-            </div>
-          </div>
-
-          ${company.notes ? `<div class="footer-notes">${esc(company.notes)}</div>` : ''}
-          <div class="printed-at">Dicetak: ${new Date().toLocaleString('id-ID')}</div>
-        `;
-
-        document.title = `${invoiceNo} — ${company.name || 'Sanno Accounting'}`;
+        // Simpan bank default ke SO kalau belum ada
+        if (!so.bank_account_id && selectedBankId) {
+          supabase.from('sales_orders')
+            .update({ bank_account_id: selectedBankId })
+            .eq('id', soId)
+            .then(({ error }) => {
+              if (error) console.warn('Gagal simpan bank default:', error.message);
+            });
+        }
 
       } catch (err) {
         console.error('[invoice-print] error:', err);
@@ -532,6 +354,215 @@
           </div>`;
       }
     })();
+
+    // ============================================================
+    // RENDER DROPDOWN BANK
+    // ============================================================
+    function renderBankSelect() {
+      const sel = document.getElementById('bankSelect');
+      if (!allBanks.length) {
+        sel.innerHTML = '<option value="">(Belum ada rekening bank)</option>';
+        sel.disabled = true;
+        return;
+      }
+      sel.innerHTML = allBanks.map(b =>
+        `<option value="${b.id}" ${b.id === selectedBankId ? 'selected' : ''}>
+          ${esc(b.bank_name)} — ${esc(b.account_no)}
+        </option>`
+      ).join('');
+
+      sel.addEventListener('change', async () => {
+        selectedBankId = Number(sel.value);
+        renderInvoice();
+
+        // Simpan ke SO
+        if (currentSO) {
+          const { error } = await supabase
+            .from('sales_orders')
+            .update({ bank_account_id: selectedBankId })
+            .eq('id', currentSO.id);
+          if (error) console.warn('Gagal simpan bank:', error.message);
+        }
+      });
+    }
+
+    // ============================================================
+    // RENDER INVOICE
+    // ============================================================
+    function renderInvoice() {
+      const paper = document.getElementById('paper');
+      const so = currentSO;
+      const lines = currentLines;
+      const doRef = currentDO;
+      const company = currentCompany;
+      const partner = so.partners;
+
+      const totalAmount = Number(so.total_amount);
+      const ppnAmount = Number(so.ppn_amount);
+      const grandTotal = Number(so.grand_total);
+
+      const dueDate = so.due_date || so.so_date;
+      const today = new Date().toISOString().slice(0, 10);
+      const daysToDue = daysBetween(today, dueDate);
+
+      let statusLabel = 'BELUM DIBAYAR';
+      let statusClass = 'status-unpaid';
+      if (daysToDue < 0) {
+        statusLabel = `JATUH TEMPO (${Math.abs(daysToDue)} hari lewat)`;
+        statusClass = 'status-overdue';
+      }
+
+      let itemsHtml = '';
+      lines.forEach((l, i) => {
+        itemsHtml += `
+          <tr>
+            <td style="text-align:center;">${i + 1}</td>
+            <td>${esc(l.items.sku)}</td>
+            <td>${esc(l.items.name)}</td>
+            <td class="num">${fmtQty(l.qty)}</td>
+            <td>${esc(l.items.unit)}</td>
+            <td class="num">${fmtMoney(l.unit_price)}</td>
+            <td class="num">${fmtMoney(l.subtotal)}</td>
+          </tr>`;
+      });
+
+      // Bank terpilih
+      const selectedBank = allBanks.find(b => b.id === selectedBankId);
+      let bankHtml = '';
+      if (selectedBank) {
+        bankHtml = `
+          <div class="payment-bank">
+            <div class="bank-name">${esc(selectedBank.bank_name)}</div>
+            <div class="bank-no">${esc(selectedBank.account_no)}</div>
+            <div class="bank-owner">a.n. ${esc(selectedBank.account_name)}${selectedBank.branch ? ' · ' + esc(selectedBank.branch) : ''}</div>
+          </div>`;
+      } else {
+        bankHtml = '<div style="color:#9ca3af;">Belum ada rekening bank terdaftar</div>';
+      }
+
+      const invoiceNo = `INV-${so.so_no.replace('SO-', '')}`;
+      const paymentTerms = so.payment_terms_days || 30;
+
+      paper.innerHTML = `
+        <div class="company-header">
+          <div class="company-left">
+            ${company.logo_url ? `<img src="${esc(company.logo_url)}" alt="Logo" class="company-logo">` : ''}
+            <div class="company-name">${esc(company.name || 'Perusahaan')}</div>
+            <div class="company-info">
+              ${company.address ? esc(company.address) + '<br>' : ''}
+              ${company.phone ? 'Telp: ' + esc(company.phone) : ''}
+              ${company.phone && company.email ? ' · ' : ''}
+              ${company.email ? 'Email: ' + esc(company.email) : ''}
+              ${company.website ? '<br>' + esc(company.website) : ''}
+              ${company.tax_id ? '<br>NPWP: ' + esc(company.tax_id) : ''}
+            </div>
+          </div>
+          <div class="company-right">
+            <div class="doc-title">INVOICE</div>
+            <div class="doc-number">No: <b>${esc(invoiceNo)}</b></div>
+            <div class="doc-date">Tanggal: ${fmtDate(so.so_date)}</div>
+            <div class="doc-date" style="font-size:11px;margin-top:4px;">
+              Ref SO: ${esc(so.so_no)}
+              ${doRef ? `<br>Ref DO: ${esc(doRef.do_no)}` : ''}
+            </div>
+          </div>
+        </div>
+
+        <div class="info-grid">
+          <div class="info-block">
+            <div class="info-block-title">Ditagihkan Kepada</div>
+            <div class="info-block-name">${esc(partner.name)}</div>
+            <div class="info-block-detail">
+              ${partner.address ? esc(partner.address) + '<br>' : ''}
+              ${partner.phone ? 'Telp: ' + esc(partner.phone) : ''}
+              ${partner.email ? '<br>Email: ' + esc(partner.email) : ''}
+            </div>
+          </div>
+          <div class="info-block">
+            <div class="info-block-title">Status & Jatuh Tempo</div>
+            <div style="margin-bottom:6px;">
+              <span class="status-badge ${statusClass}">${statusLabel}</span>
+            </div>
+            <div class="info-block-detail">
+              Term of Payment: <b>${paymentTerms} hari</b><br>
+              Jatuh Tempo: <b>${fmtDate(dueDate)}</b>
+              ${doRef ? `<br>Bukti Pengiriman: <b>${esc(doRef.do_no)}</b> (${fmtDate(doRef.do_date)})` : ''}
+            </div>
+          </div>
+        </div>
+
+        <table class="items-table">
+          <thead>
+            <tr>
+              <th style="width:30px;text-align:center;">No</th>
+              <th style="width:90px;">SKU</th>
+              <th>Nama Barang</th>
+              <th class="num" style="width:70px;">Qty</th>
+              <th style="width:50px;">Satuan</th>
+              <th class="num" style="width:100px;">Harga</th>
+              <th class="num" style="width:110px;">Subtotal</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${itemsHtml || '<tr><td colspan="7" style="text-align:center;color:#9ca3af;">Tidak ada item</td></tr>'}
+          </tbody>
+          <tfoot>
+            <tr>
+              <td colspan="6" class="label">Total</td>
+              <td class="value">${fmtMoney(totalAmount)}</td>
+            </tr>
+            ${ppnAmount > 0 ? `
+            <tr>
+              <td colspan="6" class="label">PPN</td>
+              <td class="value">${fmtMoney(ppnAmount)}</td>
+            </tr>` : ''}
+            <tr class="grand">
+              <td colspan="6" class="label">GRAND TOTAL</td>
+              <td class="value">${fmtMoney(grandTotal)}</td>
+            </tr>
+          </tfoot>
+        </table>
+
+        <div class="payment-section">
+          <div class="payment-block">
+            <div class="payment-block-title">Instruksi Pembayaran</div>
+            <div class="payment-block-detail">
+              Silakan transfer ke rekening berikut:
+              ${bankHtml}
+              <div style="margin-top:8px;padding:6px;background:#eff6ff;border-radius:4px;">
+                Nominal: <b style="color:#1e40af;">${fmtMoney(grandTotal)}</b><br>
+                Berita Transfer: <b>${esc(invoiceNo)}</b>
+              </div>
+            </div>
+          </div>
+          <div class="payment-block">
+            <div class="payment-block-title">Catatan</div>
+            <div class="payment-block-detail">
+              Invoice ini diterbitkan berdasarkan pengiriman barang
+              ${doRef ? `dengan nomor <b>${esc(doRef.do_no)}</b>` : ''}.
+              Pembayaran dianggap sah setelah dana diterima di rekening perusahaan
+              dan bukti transfer dikonfirmasi.
+            </div>
+          </div>
+        </div>
+
+        <div class="signatures">
+          <div class="sig-box">
+            <div class="sig-label">Hormat Kami,</div>
+            <div class="sig-line">( _________________________ )</div>
+          </div>
+          <div class="sig-box">
+            <div class="sig-label">Diterima Oleh,</div>
+            <div class="sig-line">( _________________________ )</div>
+          </div>
+        </div>
+
+        ${company.notes ? `<div class="footer-notes">${esc(company.notes)}</div>` : ''}
+        <div class="printed-at">Dicetak: ${new Date().toLocaleString('id-ID')}</div>
+      `;
+
+      document.title = `${invoiceNo} — ${company.name || 'Sanno Accounting'}`;
+    }
   </script>
 </body>
 </html>
