@@ -274,3 +274,83 @@ export async function neraca({ asOf = null } = {}) {
     balanced: Math.abs(totalAsset - (totalLiability + totalEquity)) < 0.01
   };
 }
+// ============================================================
+// LAPORAN: PENJUALAN PER SALES
+// Agregasi SO per sales, per status, per periode
+// ============================================================
+export async function salesReport({ from = null, to = null } = {}) {
+  // 1. Ambil semua SO dalam periode (dengan filter tanggal)
+  let q = supabase
+    .from('sales_orders')
+    .select('id, so_no, so_date, sales_id, status, total_amount, ppn_amount, grand_total');
+  if (from) q = q.gte('so_date', from);
+  if (to)   q = q.lte('so_date', to);
+  const { data: orders, error: oErr } = await q;
+  if (oErr) throw oErr;
+
+  if (!orders || orders.length === 0) return { rows: [], totals: null };
+
+  // 2. Ambil profil sales (batch)
+  const salesIds = [...new Set(orders.map(o => o.sales_id).filter(Boolean))];
+  let profileMap = {};
+  if (salesIds.length) {
+    const { data: profiles, error: pErr } = await supabase
+      .from('profiles')
+      .select('id, email, full_name')
+      .in('id', salesIds);
+    if (!pErr) {
+      profileMap = Object.fromEntries((profiles || []).map(p => [p.id, p]));
+    }
+  }
+
+  // 3. Agregasi per sales
+  const buckets = {};
+  for (const o of orders) {
+    const key = o.sales_id || 'unknown';
+    if (!buckets[key]) {
+      buckets[key] = {
+        sales_id: key,
+        sales_name: profileMap[key]?.full_name || profileMap[key]?.email || '—',
+        sales_email: profileMap[key]?.email || '—',
+        total_so: 0,
+        draft: 0, pending: 0, approved: 0, rejected: 0,
+        posted: 0, cancelled: 0, delivered: 0,
+        total_posted: 0,
+        total_all: 0
+      };
+    }
+    const b = buckets[key];
+    b.total_so += 1;
+    b.total_all += Number(o.grand_total || 0);
+
+    switch (o.status) {
+      case 'draft':            b.draft++; break;
+      case 'pending_approval': b.pending++; break;
+      case 'approved':         b.approved++; break;
+      case 'rejected':         b.rejected++; break;
+      case 'posted':           b.posted++; b.total_posted += Number(o.grand_total || 0); break;
+      case 'delivered':        b.delivered++; b.total_posted += Number(o.grand_total || 0); break;
+      case 'cancelled':        b.cancelled++; break;
+    }
+  }
+
+  const rows = Object.values(buckets).sort((a, b) => b.total_posted - a.total_posted);
+
+  // 4. Total keseluruhan
+  const totals = rows.reduce((acc, r) => ({
+    total_so:      acc.total_so + r.total_so,
+    draft:         acc.draft + r.draft,
+    pending:       acc.pending + r.pending,
+    approved:      acc.approved + r.approved,
+    rejected:      acc.rejected + r.rejected,
+    posted:        acc.posted + r.posted,
+    cancelled:     acc.cancelled + r.cancelled,
+    total_posted:  acc.total_posted + r.total_posted,
+    total_all:     acc.total_all + r.total_all
+  }), {
+    total_so: 0, draft: 0, pending: 0, approved: 0, rejected: 0,
+    posted: 0, cancelled: 0, total_posted: 0, total_all: 0
+  });
+
+  return { rows, totals };
+}
