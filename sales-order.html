@@ -15,16 +15,37 @@
 
     <nav class="nav" id="mainNav"></nav>
 
+    <!-- FORM SO -->
     <div class="card">
       <h3 style="margin-top:0;font-size:16px;" id="formTitle">Sales Order Baru</h3>
       <form id="form-so">
         <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(150px,1fr));">
-          <div class="form-row"><label>Tanggal SO</label><input type="date" name="so_date" required></div>
+          <div class="form-row">
+            <label>Tanggal SO</label>
+            <input type="date" name="so_date" required>
+          </div>
           <div class="form-row">
             <label>Pelanggan</label>
-            <select name="partner_id" id="partnerSelect" required><option value="">— pilih pelanggan —</option></select>
+            <select name="partner_id" id="partnerSelect" required>
+              <option value="">— pilih pelanggan —</option>
+            </select>
           </div>
-          <div class="form-row" style="grid-column: span 2;"><label>Deskripsi</label><input name="description" placeholder="Catatan SO"></div>
+          <div class="form-row">
+            <label>Jatuh Tempo</label>
+            <select name="payment_terms_days" required>
+              <option value="0">Cash / COD (0 hari)</option>
+              <option value="7">7 hari</option>
+              <option value="14">14 hari</option>
+              <option value="30" selected>30 hari (default)</option>
+              <option value="45">45 hari</option>
+              <option value="60">60 hari</option>
+              <option value="90">90 hari</option>
+            </select>
+          </div>
+          <div class="form-row" style="grid-column: span 2;">
+            <label>Deskripsi</label>
+            <input name="description" placeholder="Catatan SO">
+          </div>
         </div>
 
         <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;">
@@ -46,6 +67,7 @@
       </form>
     </div>
 
+    <!-- DAFTAR SO -->
     <div class="card">
       <h3 style="margin-top:0;font-size:16px;">Daftar Sales Order</h3>
       <div id="soList"></div>
