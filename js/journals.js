@@ -17,7 +17,16 @@ export async function getRate(currency_code, date = null) {
 }
 
 // ============================================================
-// BUAT JURNAL
+// CEK PERIODE TERKUNCI
+// ============================================================
+export async function isPeriodLocked(dateStr) {
+  const { data, error } = await supabase.rpc('is_period_locked', { p_date: dateStr });
+  if (error) throw error;
+  return data === true;
+}
+
+// ============================================================
+// BUAT JURNAL (via RPC dengan guard periode)
 // ============================================================
 export async function createJournal({
   journal_date, description, ref_no = null,
@@ -29,6 +38,7 @@ export async function createJournal({
 
   const rate = exchange_rate ?? await getRate(currency_code, journal_date);
 
+  // Validasi balance di client dulu (biar error cepat & jelas)
   let totalDebit = 0, totalCredit = 0;
   const prepared = lines.map(l => {
     const debit  = Number(l.debit  || 0);
@@ -43,8 +53,8 @@ export async function createJournal({
     return {
       account_id: l.account_id,
       partner_id: l.partner_id ?? null,
-      item_id:    l.item_id    ?? null,
-      debit, credit, debit_base, credit_base,
+      debit, credit,
+      debit_base, credit_base,
       tax_code:   l.tax_code   ?? null,
       memo:       l.memo       ?? null
     };
@@ -54,34 +64,21 @@ export async function createJournal({
     throw new Error(`Jurnal tidak balance: debit ${totalDebit} vs kredit ${totalCredit}`);
   }
 
-  const ym = journal_date.slice(0, 7).replace('-', '');
-  const { count, error: cntErr } = await supabase
-    .from('journals')
-    .select('*', { count: 'exact', head: true })
-    .like('journal_no', `JV-${ym}-%`);
-  if (cntErr) throw cntErr;
-  const journal_no = `JV-${ym}-${String((count || 0) + 1).padStart(4, '0')}`;
+  // Panggil RPC (guard periode di database)
+  const { data: journalId, error } = await supabase.rpc('create_journal_with_lock', {
+    p_journal_date: journal_date,
+    p_description: description,
+    p_ref_no: ref_no,
+    p_currency_code: currency_code,
+    p_exchange_rate: rate,
+    p_lines: prepared
+  });
+  if (error) throw error;
 
-  const { data: { session } } = await supabase.auth.getSession();
-  const userId = session?.user?.id ?? null;
-
+  // Ambil header untuk return
   const { data: header, error: hErr } = await supabase
-    .from('journals')
-    .insert({
-      journal_no, journal_date, description, ref_no,
-      currency_code, exchange_rate: rate,
-      created_by: userId
-    })
-    .select().single();
+    .from('journals').select('*').eq('id', journalId).single();
   if (hErr) throw hErr;
-
-  const rows = prepared.map(p => ({ ...p, journal_id: header.id }));
-  const { error: lErr } = await supabase.from('journal_lines').insert(rows);
-  if (lErr) {
-    await supabase.from('journals').delete().eq('id', header.id);
-    throw lErr;
-  }
-
   return header;
 }
 
@@ -102,28 +99,22 @@ export async function listJournals({ from = null, to = null, limit = 100 } = {})
 }
 
 // ============================================================
-// AMBIL SATU JURNAL + LINES (untuk edit)
+// AMBIL SATU JURNAL + LINES
 // ============================================================
 export async function getJournal(journalId) {
   const { data: header, error: hErr } = await supabase
-    .from('journals')
-    .select('*')
-    .eq('id', journalId)
-    .single();
+    .from('journals').select('*').eq('id', journalId).single();
   if (hErr) throw hErr;
 
   const { data: lines, error: lErr } = await supabase
-    .from('journal_lines')
-    .select('*')
-    .eq('journal_id', journalId)
-    .order('id');
+    .from('journal_lines').select('*').eq('journal_id', journalId).order('id');
   if (lErr) throw lErr;
 
   return { ...header, lines };
 }
 
 // ============================================================
-// UPDATE JURNAL (hapus lines lama, insert ulang)
+// UPDATE JURNAL (guard periode di client)
 // ============================================================
 export async function updateJournal(journalId, {
   journal_date, description, ref_no = null,
@@ -131,6 +122,15 @@ export async function updateJournal(journalId, {
 }) {
   if (!lines || lines.length === 0) {
     throw new Error('Jurnal harus punya minimal 1 baris');
+  }
+
+  // Ambil header lama untuk cek periode
+  const old = await getJournal(journalId);
+  if (await isPeriodLocked(old.journal_date)) {
+    throw new Error(`Periode ${old.journal_date.slice(0,7)} sudah dikunci. Tidak bisa edit.`);
+  }
+  if (await isPeriodLocked(journal_date)) {
+    throw new Error(`Periode ${journal_date.slice(0,7)} sudah dikunci. Tidak bisa edit ke periode ini.`);
   }
 
   const rate = exchange_rate ?? await getRate(currency_code, journal_date);
@@ -180,25 +180,31 @@ export async function updateJournal(journalId, {
 }
 
 // ============================================================
-// HAPUS JURNAL (lines otomatis via ON DELETE CASCADE)
+// HAPUS JURNAL (via RPC dengan guard periode)
 // ============================================================
 export async function deleteJournal(journalId) {
-  const { error } = await supabase.from('journals').delete().eq('id', journalId);
+  const { error } = await supabase.rpc('delete_journal_with_lock', {
+    p_journal_id: journalId
+  });
   if (error) throw error;
 }
 
 // ============================================================
-// REVERSAL JURNAL (buat jurnal balik, tandai jurnal asli)
+// REVERSAL JURNAL (guard periode di client)
 // ============================================================
 export async function reverseJournal(journalId) {
-  // 1. Ambil jurnal asli + lines
   const original = await getJournal(journalId);
 
   if (original.reversed_by) {
     throw new Error('Jurnal ini sudah pernah di-reversal');
   }
 
-  // 2. Siapkan lines balik (debit ↔ kredit)
+  // Cek periode: reversal selalu dibuat dengan tanggal hari ini
+  const today = new Date().toISOString().slice(0, 10);
+  if (await isPeriodLocked(today)) {
+    throw new Error(`Periode ${today.slice(0,7)} sudah dikunci. Tidak bisa reversal.`);
+  }
+
   const reversedLines = original.lines.map(l => ({
     account_id: l.account_id,
     partner_id: l.partner_id,
@@ -211,19 +217,15 @@ export async function reverseJournal(journalId) {
     memo:       `Reversal: ${l.memo || ''}`.trim()
   }));
 
-  // 3. Generate nomor jurnal reversal
-  const today = new Date().toISOString().slice(0, 10);
   const ym = today.slice(0, 7).replace('-', '');
   const { count } = await supabase
     .from('journals').select('*', { count: 'exact', head: true })
     .like('journal_no', `JV-${ym}-%`);
   const journal_no = `JV-${ym}-${String((count || 0) + 1).padStart(4, '0')}`;
 
-  // 4. User id
   const { data: { session } } = await supabase.auth.getSession();
   const userId = session?.user?.id ?? null;
 
-  // 5. Insert header reversal
   const { data: header, error: hErr } = await supabase
     .from('journals')
     .insert({
@@ -239,7 +241,6 @@ export async function reverseJournal(journalId) {
     .select().single();
   if (hErr) throw hErr;
 
-  // 6. Insert lines balik
   const rows = reversedLines.map(r => ({ ...r, journal_id: header.id }));
   const { error: lErr } = await supabase.from('journal_lines').insert(rows);
   if (lErr) {
@@ -247,7 +248,6 @@ export async function reverseJournal(journalId) {
     throw lErr;
   }
 
-  // 7. Tandai jurnal asli sebagai reversed
   const { error: uErr } = await supabase
     .from('journals')
     .update({ reversed_by: header.id })
