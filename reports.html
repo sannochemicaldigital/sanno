@@ -44,6 +44,7 @@
       <button data-tab="cf">Cashflow</button>
       <button data-tab="ar">Aging Piutang</button>
       <button data-tab="ap">Aging Hutang</button>
+      <button data-tab="sp">Penjualan per Sales</button>
       <button data-tab="lr">Laba Rugi</button>
       <button data-tab="nc">Neraca</button>
     </div>
@@ -161,6 +162,36 @@
             </thead>
             <tbody id="tbody-ap"></tbody>
             <tfoot id="tfoot-ap"></tfoot>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== TAB PENJUALAN PER SALES ===== -->
+    <section id="tab-sp" class="tab-panel" style="display:none;">
+      <div class="card">
+        <div class="report-header">
+          <h3>Penjualan per Sales</h3>
+          <span id="spPeriod" style="font-size:13px;color:#6b7280;"></span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Sales</th>
+                <th class="num">Total SO</th>
+                <th class="num">Draft</th>
+                <th class="num">Pending</th>
+                <th class="num">Approved</th>
+                <th class="num">Posted</th>
+                <th class="num">Rejected</th>
+                <th class="num">Cancelled</th>
+                <th class="num">Total Posted</th>
+                <th class="num">Total All</th>
+              </tr>
+            </thead>
+            <tbody id="tbody-sp"></tbody>
+            <tfoot id="tfoot-sp"></tfoot>
           </table>
         </div>
       </div>
