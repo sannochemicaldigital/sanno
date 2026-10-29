@@ -4,9 +4,14 @@ import { renderNav, requirePageAccess } from './access.js';
 import { hasPermission } from './permissions.js';
 import { listPartners } from './partners.js';
 import { listItems } from './items.js';
-import { createSO, editSO, submitSO, cancelSO, getSO, listSOs } from './sales-order.js';
+import {
+  createSO, editSO, submitSO, cancelSO, getSO, listSOs
+} from './sales-order.js';
 import { supabase } from './supabase-client.js';
 
+// ============================================================
+// STATE
+// ============================================================
 const state = {
   partners: [],
   items: [],
@@ -18,6 +23,9 @@ const state = {
   perms: { create: false, edit: false, submit: false, cancel: false }
 };
 
+// ============================================================
+// UTIL
+// ============================================================
 function toast(msg, isError = false) {
   const el = document.getElementById('toast');
   el.textContent = msg;
@@ -30,7 +38,16 @@ function esc(s) {
   }[c]));
 }
 function fmt(n) { return 'Rp ' + Number(n || 0).toLocaleString('id-ID'); }
+function fmtDate(d) {
+  if (!d) return '—';
+  return new Date(d).toLocaleDateString('id-ID', {
+    day: '2-digit', month: 'short', year: 'numeric'
+  });
+}
 
+// ============================================================
+// INIT
+// ============================================================
 (async () => {
   const user = await requireAuth();
   if (!user) return;
@@ -63,6 +80,9 @@ function fmt(n) { return 'Rp ' + Number(n || 0).toLocaleString('id-ID'); }
   await renderSOList();
 })();
 
+// ============================================================
+// LOAD MASTER
+// ============================================================
 async function loadMaster() {
   const [parts, its] = await Promise.all([
     listPartners('customer'),
@@ -88,6 +108,9 @@ async function loadMaster() {
     ).join('');
 }
 
+// ============================================================
+// BARIS ITEM
+// ============================================================
 function addLine() {
   state.lineCount++;
   const id = state.lineCount;
@@ -160,6 +183,9 @@ function resetForm() {
   addLine();
 }
 
+// ============================================================
+// SUBMIT
+// ============================================================
 async function onSubmit(e) {
   e.preventDefault();
   const f = e.target;
@@ -179,6 +205,7 @@ async function onSubmit(e) {
       so_date: f.so_date.value,
       partner_id: Number(f.partner_id.value),
       description: f.description.value.trim() || null,
+      payment_terms_days: Number(f.payment_terms_days.value) || 30,
       lines
     };
 
@@ -199,6 +226,9 @@ async function onSubmit(e) {
   }
 }
 
+// ============================================================
+// DAFTAR SO
+// ============================================================
 async function renderSOList() {
   const wrap = document.getElementById('soList');
   wrap.innerHTML = '<div style="color:#9ca3af;font-size:13px;">Memuat...</div>';
@@ -229,16 +259,25 @@ async function renderSOList() {
         if (state.perms.submit) actions.push(`<button class="btn btn-primary" style="padding:4px 10px;font-size:12px;" data-submit="${so.id}">Submit Approval</button>`);
         if (state.perms.cancel) actions.push(`<button class="btn btn-danger" style="padding:4px 10px;font-size:12px;" data-cancel="${so.id}">Batal</button>`);
       }
+      if (so.status === 'posted') {
+        actions.push(`<button class="btn btn-secondary" style="padding:4px 10px;font-size:12px;" data-invoice="${so.id}">🖨 Invoice</button>`);
+      }
       const actHtml = actions.length
         ? `<div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap;">${actions.join('')}</div>`
         : '';
+
+      const terms = so.payment_terms_days ?? 30;
+      const dueDate = so.due_date || '—';
 
       return `
         <div class="journal-list-item">
           <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;">
             <div>
               <b>${esc(so.so_no)}</b> ${statusBadge(so.status)}<br>
-              <span style="font-size:13px;">${esc(so.partners?.name || '')}</span>
+              <span style="font-size:13px;">${esc(so.partners?.name || '')}</span><br>
+              <span style="font-size:11px;color:#6b7280;">
+                Jatuh tempo: ${terms} hari · Due: ${fmtDate(dueDate)}
+              </span>
             </div>
             <div style="text-align:right;font-size:13px;">
               <div>${fmt(so.grand_total)}</div>
@@ -258,6 +297,9 @@ async function renderSOList() {
     wrap.querySelectorAll('[data-cancel]').forEach(btn => {
       btn.addEventListener('click', () => onCancel(Number(btn.dataset.cancel)));
     });
+    wrap.querySelectorAll('[data-invoice]').forEach(btn => {
+      btn.addEventListener('click', () => onInvoice(Number(btn.dataset.invoice)));
+    });
   } catch (err) {
     wrap.innerHTML = `<div style="color:#b91c1c;font-size:13px;">${esc(err.message)}</div>`;
   }
@@ -274,6 +316,7 @@ async function onEdit(soId) {
     f.so_date.value = so.so_date;
     f.partner_id.value = so.partner_id;
     f.description.value = so.description || '';
+    f.payment_terms_days.value = String(so.payment_terms_days ?? 30);
 
     document.getElementById('soLines').innerHTML = '';
     state.lineCount = 0;
@@ -318,4 +361,8 @@ async function onCancel(soId) {
   } catch (err) {
     toast('Gagal batal: ' + (err.message || err), true);
   }
+}
+
+function onInvoice(soId) {
+  window.open(`./invoice-print.html?id=${soId}`, '_blank');
 }
