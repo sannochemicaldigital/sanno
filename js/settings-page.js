@@ -4,6 +4,7 @@ import { renderNav, requirePageAccess } from './access.js';
 import { SETTING_DEFS, getAllSettings, updateSetting } from './settings.js';
 import { listUsers, createUser, updateUser, deleteUser, AVAILABLE_ROLES } from './users.js';
 import { initPermissionsTab } from './permissions-page.js';
+import { listLockedPeriods, lockPeriod, unlockPeriod, checkPeriodLocked } from './periods.js';
 import { supabase } from './supabase-client.js';
 
 // ============================================================
@@ -23,6 +24,7 @@ function esc(s) {
 
 let currentRole = null;
 let permissionsLoaded = false;
+let periodsLoaded = false;
 
 // ============================================================
 // INIT
@@ -45,7 +47,6 @@ let permissionsLoaded = false;
       document.querySelectorAll('.tab-panel').forEach(p => p.style.display = 'none');
       document.getElementById('tab-' + btn.dataset.tab).style.display = 'block';
 
-      // Lazy load permissions saat tab dibuka pertama kali
       if (btn.dataset.tab === 'permissions' && !permissionsLoaded) {
         permissionsLoaded = true;
         try {
@@ -54,6 +55,11 @@ let permissionsLoaded = false;
           document.getElementById('rolePermissionsList').innerHTML =
             `<div style="color:#b91c1c;font-size:13px;">Gagal memuat: ${esc(err.message)}</div>`;
         }
+      }
+
+      if (btn.dataset.tab === 'periods' && !periodsLoaded) {
+        periodsLoaded = true;
+        await renderPeriods();
       }
     });
   });
@@ -71,16 +77,17 @@ let permissionsLoaded = false;
     document.getElementById('emailPreview').textContent = `${v}@sanno.local`;
   });
 
-  // Load semua tab (kecuali permissions yang lazy)
+  // Load tab yang butuh data di awal
   await Promise.all([
     renderSettings(),
     renderUsers(),
     renderSalesPartners()
   ]);
 
-  // Event listeners
+  // Event listeners form
   document.getElementById('form-settings').addEventListener('submit', onSaveSettings);
   document.getElementById('form-new-user').addEventListener('submit', onCreateUser);
+  attachLockPeriodForm();
 })();
 
 // ============================================================
@@ -174,7 +181,6 @@ async function renderUsers() {
         </tr>`;
     }).join('') || '<tr><td colspan="5" style="text-align:center;color:#9ca3af;">Belum ada user</td></tr>';
 
-    // Event: simpan perubahan role/status
     tbody.querySelectorAll('[data-save-user]').forEach(btn => {
       btn.addEventListener('click', async () => {
         const uid = btn.dataset.saveUser;
@@ -195,7 +201,6 @@ async function renderUsers() {
       });
     });
 
-    // Event: hapus
     tbody.querySelectorAll('[data-del-user]').forEach(btn => {
       btn.addEventListener('click', async () => {
         if (!confirm(`Hapus permanen user ${btn.dataset.email}?`)) return;
@@ -338,4 +343,99 @@ async function renderSalesPartners() {
   } catch (err) {
     wrap.innerHTML = `<div style="color:#b91c1c;font-size:13px;">${esc(err.message)}</div>`;
   }
+}
+
+// ============================================================
+// TAB PERIODE
+// ============================================================
+async function renderPeriods() {
+  const wrap = document.getElementById('lockedPeriodsList');
+  if (!wrap) return;
+  wrap.innerHTML = '<div style="color:#9ca3af;font-size:13px;">Memuat...</div>';
+
+  try {
+    const list = await listLockedPeriods();
+    if (!list.length) {
+      wrap.innerHTML = '<div style="color:#9ca3af;font-size:13px;">Belum ada periode terkunci.</div>';
+      return;
+    }
+
+    const monthNames = ['Jan','Feb','Mar','Apr','Mei','Jun','Jul','Agu','Sep','Okt','Nov','Des'];
+    wrap.innerHTML = `
+      <table style="width:100%;border-collapse:collapse;font-size:13px;">
+        <thead>
+          <tr style="background:#f9fafb;">
+            <th style="padding:8px;text-align:left;">Periode</th>
+            <th style="padding:8px;text-align:left;">Catatan</th>
+            <th style="padding:8px;text-align:left;">Di-lock Oleh</th>
+            <th style="padding:8px;text-align:left;">Tanggal</th>
+            <th style="padding:8px;text-align:center;">Aksi</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${list.map(p => `
+            <tr style="border-bottom:1px solid #eef0f3;">
+              <td style="padding:8px;font-weight:600;">${monthNames[p.month-1]} ${p.year}</td>
+              <td style="padding:8px;">${esc(p.notes || '—')}</td>
+              <td style="padding:8px;">${esc(p.profiles?.full_name || p.profiles?.email || '—')}</td>
+              <td style="padding:8px;color:#6b7280;">${new Date(p.locked_at).toLocaleDateString('id-ID')}</td>
+              <td style="padding:8px;text-align:center;">
+                <button class="btn btn-danger" style="padding:4px 10px;font-size:12px;"
+                        data-unlock="${p.id}" data-period="${monthNames[p.month-1]} ${p.year}">
+                  🔓 Buka
+                </button>
+              </td>
+            </tr>`).join('')}
+        </tbody>
+      </table>`;
+
+    wrap.querySelectorAll('[data-unlock]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        if (!confirm(`Buka kunci periode ${btn.dataset.period}?\n\nSetelah dibuka, jurnal di periode ini bisa diedit kembali.`)) return;
+        try {
+          await unlockPeriod(Number(btn.dataset.unlock));
+          toast(`✓ Periode ${btn.dataset.period} dibuka`);
+          await renderPeriods();
+        } catch (err) {
+          toast('Gagal: ' + (err.message || err), true);
+        }
+      });
+    });
+  } catch (err) {
+    wrap.innerHTML = `<div style="color:#b91c1c;font-size:13px;">${esc(err.message)}</div>`;
+  }
+}
+
+function attachLockPeriodForm() {
+  const form = document.getElementById('form-lock-period');
+  if (!form) return;
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const f = e.target;
+    const btn = document.getElementById('lockPeriodBtn');
+    btn.disabled = true;
+    btn.textContent = 'Mengunci...';
+
+    try {
+      const year = Number(f.year.value);
+      const month = Number(f.month.value);
+      const notes = f.notes.value.trim() || null;
+
+      const already = await checkPeriodLocked(year, month);
+      if (already) {
+        throw new Error(`Periode ${year}-${String(month).padStart(2,'0')} sudah terkunci`);
+      }
+
+      await lockPeriod(year, month, notes);
+      toast(`✓ Periode ${year}-${String(month).padStart(2,'0')} dikunci`);
+      f.notes.value = '';
+      await renderPeriods();
+    } catch (err) {
+      toast('Gagal: ' + (err.message || err), true);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '🔒 Kunci Periode';
+    }
+  });
 }
