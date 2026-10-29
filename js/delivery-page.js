@@ -19,7 +19,8 @@ function fmt(n) { return 'Rp ' + Number(n || 0).toLocaleString('id-ID'); }
 
 const state = {
   canDeliver: false,
-  canCancel: false
+  canCancel: false,
+  canPrint: false
 };
 
 (async () => {
@@ -34,6 +35,7 @@ const state = {
 
   state.canDeliver = await hasPermission('delivery.mark_delivered');
   state.canCancel  = await hasPermission('delivery.cancel');
+  state.canPrint   = await hasPermission('delivery.view');
 
   await renderList();
 })();
@@ -61,14 +63,25 @@ async function renderList() {
     wrap.innerHTML = list.map(d => {
       const so = d.sales_orders;
       const buttons = [];
+
+      // Tombol Cetak — selalu muncul kalau punya permission delivery.view
+      // (bisa cetak DO issued maupun delivered; cancelled tidak perlu)
+      if (state.canPrint && d.status !== 'cancelled') {
+        buttons.push(`<button class="btn btn-secondary" style="padding:6px 12px;font-size:12px;"
+                              data-print="${d.id}">🖨 Cetak</button>`);
+      }
+
       if (d.status === 'issued') {
         if (state.canDeliver) {
-          buttons.push(`<button class="btn btn-primary" style="padding:6px 12px;font-size:12px;" data-deliver="${d.id}">Mark Delivered</button>`);
+          buttons.push(`<button class="btn btn-primary" style="padding:6px 12px;font-size:12px;"
+                                data-deliver="${d.id}">Mark Delivered</button>`);
         }
         if (state.canCancel) {
-          buttons.push(`<button class="btn btn-secondary" style="padding:6px 12px;font-size:12px;background:#fef3c7;color:#92400e;" data-cancel="${d.id}">Cancel DO</button>`);
+          buttons.push(`<button class="btn btn-secondary" style="padding:6px 12px;font-size:12px;background:#fef3c7;color:#92400e;"
+                                data-cancel="${d.id}">Cancel DO</button>`);
         }
       }
+
       const actHtml = buttons.length
         ? `<div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap;">${buttons.join('')}</div>`
         : '';
@@ -89,6 +102,9 @@ async function renderList() {
         </div>`;
     }).join('');
 
+    wrap.querySelectorAll('[data-print]').forEach(btn => {
+      btn.addEventListener('click', () => onPrint(Number(btn.dataset.print)));
+    });
     wrap.querySelectorAll('[data-deliver]').forEach(btn => {
       btn.addEventListener('click', () => onDeliver(Number(btn.dataset.deliver)));
     });
@@ -98,6 +114,11 @@ async function renderList() {
   } catch (err) {
     wrap.innerHTML = `<div style="color:#b91c1c;font-size:13px;">${esc(err.message)}</div>`;
   }
+}
+
+async function onPrint(doId) {
+  if (!state.canPrint) { toast('Tidak ada akses cetak DO', true); return; }
+  window.open(`./delivery-print.html?id=${doId}`, '_blank');
 }
 
 async function onDeliver(doId) {
