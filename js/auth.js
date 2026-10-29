@@ -1,71 +1,109 @@
 // js/auth.js
 import { supabase } from './supabase-client.js';
 
+// ============================================================
+// CACHE ROLE
+// ============================================================
+let roleCache = null;
+let roleLoading = null;
+
+export async function getCurrentRole() {
+  if (roleCache) return roleCache;
+  if (roleLoading) return roleLoading;
+
+  roleLoading = (async () => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return null;
+
+      // 1. Coba baca dari JWT (app_metadata.role) — 0ms
+      let role = session.user.app_metadata?.role || null;
+
+      // 2. Fallback: query DB sekali kalau JWT belum punya role
+      if (!role) {
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('role')
+          .eq('id', session.user.id)
+          .single();
+        if (!error) role = data?.role ?? null;
+      }
+
+      roleCache = role;
+      return roleCache;
+    } finally {
+      roleLoading = null;
+    }
+  })();
+
+  return roleLoading;
+}
+
+export function resetRoleCache() {
+  roleCache = null;
+  roleLoading = null;
+}
+
+// ============================================================
+// AUTH
+// ============================================================
 export async function login(email, password) {
   let em = String(email || '').trim().toLowerCase();
-  // Auto domain internal
   if (em && !em.includes('@')) em = em + '@sanno.local';
+
   const { data, error } = await supabase.auth.signInWithPassword({
     email: em,
     password: String(password || '').trim()
   });
   if (error) throw error;
+
+  resetRoleCache();
   return data.user;
 }
 
 export async function logout() {
+  resetRoleCache();
   await supabase.auth.signOut();
   window.location.href = './index.html';
 }
 
 export async function currentUser() {
-  const { data: { user } } = await supabase.auth.getUser();
-  return user;
+  const { data: { session } } = await supabase.auth.getSession();
+  return session?.user ?? null;
 }
 
 export async function currentProfile() {
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return null;
-  const { data, error } = await supabase
-    .from('profiles').select('*').eq('id', user.id).single();
-  if (error) throw error;
-  return data;
-}
-
-// Guard: panggil di halaman yang butuh login (mis. dashboard.html)
-export async function requireAuth() {
-  const user = await currentUser();
-  if (!user) {
-    window.location.href = './index.html';
-    return null;
-  }
-  return user;
-}
-
-// Urutan hierarki role
-// viewer < sales/kasir/gudang < finance < supervisor < admin < superadmin
-const ROLE_LEVEL = {
-  viewer:     1,
-  sales:      2,
-  kasir:      2,
-  gudang:     2,
-  finance:    3,
-  supervisor: 4,
-  admin:      5,
-  superadmin: 6
-};
-
-export async function getCurrentRole() {
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) return null;
   const { data, error } = await supabase
     .from('profiles')
-    .select('role')
+    .select('*')
     .eq('id', session.user.id)
     .single();
-  if (error) return null;
-  return data?.role ?? null;
+  if (error) throw error;
+  return data;
 }
+
+export async function requireAuth() {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) {
+    window.location.href = './index.html';
+    return null;
+  }
+  return session.user;
+}
+
+// ============================================================
+// ROLE HELPERS
+// ============================================================
+const ROLE_LEVEL = {
+  viewer: 1,
+  sales: 2, kasir: 2, gudang: 2,
+  finance: 3,
+  supervisor: 4,
+  admin: 5,
+  superadmin: 6
+};
 
 export async function hasRole(minRole) {
   const role = await getCurrentRole();
@@ -73,42 +111,17 @@ export async function hasRole(minRole) {
   return (ROLE_LEVEL[role] || 0) >= (ROLE_LEVEL[minRole] || 0);
 }
 
-// Helper spesifik
-export async function isSales()       { return (await getCurrentRole()) === 'sales'; }
-export async function isKasir()       { return (await getCurrentRole()) === 'kasir'; }
-export async function isGudang()      { return (await getCurrentRole()) === 'gudang'; }
-export async function isFinance()     { return (await getCurrentRole()) === 'finance'; }
-export async function isSupervisor()  { return (await getCurrentRole()) === 'supervisor'; }
-export async function isAdmin()       { return await hasRole('admin'); }
-export async function isSuperAdmin()  { return (await getCurrentRole()) === 'superadmin'; }
+export async function isAdmin()      { return await hasRole('admin'); }
+export async function isSuperAdmin() { return (await getCurrentRole()) === 'superadmin'; }
+export async function isSales()      { return (await getCurrentRole()) === 'sales'; }
+export async function isKasir()      { return (await getCurrentRole()) === 'kasir'; }
+export async function isGudang()     { return (await getCurrentRole()) === 'gudang'; }
+export async function isFinance()    { return (await getCurrentRole()) === 'finance'; }
+export async function isSupervisor() { return (await getCurrentRole()) === 'supervisor'; }
 
-// Cek akses spesifik
-export async function canApproveSO() {
-  const role = await getCurrentRole();
-  if (!role) return false;
-  const mode = await getSetting('so_approval_mode');
-  if (mode === 'finance_and_supervisor') {
-    return ['finance','supervisor','admin','superadmin'].includes(role);
-  }
-  return ['supervisor','admin','superadmin'].includes(role);
-}
-
-export async function canMarkDelivered() {
-  const role = await getCurrentRole();
-  return ['gudang','admin','superadmin'].includes(role);
-}
-
-export async function canCreateCashSale() {
-  const role = await getCurrentRole();
-  return ['kasir','admin','superadmin'].includes(role);
-}
-
-export async function canVoidSO() {
-  const role = await getCurrentRole();
-  return ['supervisor','admin','superadmin'].includes(role);
-}
-
-// Ambil setting dari app_settings
+// ============================================================
+// SETTINGS
+// ============================================================
 export async function getSetting(key) {
   const { data, error } = await supabase
     .from('app_settings')
