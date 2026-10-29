@@ -5,6 +5,8 @@ import { SETTING_DEFS, getAllSettings, updateSetting } from './settings.js';
 import { listUsers, createUser, updateUser, deleteUser, AVAILABLE_ROLES } from './users.js';
 import { initPermissionsTab } from './permissions-page.js';
 import { listLockedPeriods, lockPeriod, unlockPeriod, checkPeriodLocked } from './periods.js';
+import { getCompanyProfile, updateCompanyProfile } from './company.js';
+import { hasPermission } from './permissions.js';
 import { supabase } from './supabase-client.js';
 
 // ============================================================
@@ -22,9 +24,14 @@ function esc(s) {
   }[c]));
 }
 
+// ============================================================
+// STATE
+// ============================================================
 let currentRole = null;
 let permissionsLoaded = false;
+let companyLoaded = false;
 let periodsLoaded = false;
+let companyPerms = { view: false, manage: false };
 
 // ============================================================
 // INIT
@@ -57,6 +64,11 @@ let periodsLoaded = false;
         }
       }
 
+      if (btn.dataset.tab === 'company' && !companyLoaded) {
+        companyLoaded = true;
+        await renderCompany();
+      }
+
       if (btn.dataset.tab === 'periods' && !periodsLoaded) {
         periodsLoaded = true;
         await renderPeriods();
@@ -87,6 +99,7 @@ let periodsLoaded = false;
   // Event listeners form
   document.getElementById('form-settings').addEventListener('submit', onSaveSettings);
   document.getElementById('form-new-user').addEventListener('submit', onCreateUser);
+  document.getElementById('form-company').addEventListener('submit', onSaveCompany);
   attachLockPeriodForm();
 })();
 
@@ -342,6 +355,72 @@ async function renderSalesPartners() {
     });
   } catch (err) {
     wrap.innerHTML = `<div style="color:#b91c1c;font-size:13px;">${esc(err.message)}</div>`;
+  }
+}
+
+// ============================================================
+// TAB PERUSAHAAN
+// ============================================================
+async function renderCompany() {
+  const form = document.getElementById('form-company');
+  if (!form) return;
+
+  companyPerms.view   = await hasPermission('admin.company_profile.view');
+  companyPerms.manage = await hasPermission('admin.company_profile.manage');
+
+  if (!companyPerms.view) {
+    form.closest('.card').innerHTML =
+      '<div style="color:#b91c1c;font-size:13px;">Tidak ada akses melihat profil perusahaan.</div>';
+    return;
+  }
+
+  try {
+    const prof = await getCompanyProfile();
+    form.name.value     = prof.name || '';
+    form.address.value  = prof.address || '';
+    form.phone.value    = prof.phone || '';
+    form.email.value    = prof.email || '';
+    form.website.value  = prof.website || '';
+    form.tax_id.value   = prof.tax_id || '';
+    form.logo_url.value = prof.logo_url || '';
+    form.notes.value    = prof.notes || '';
+
+    if (!companyPerms.manage) {
+      form.querySelectorAll('input, textarea, button').forEach(el => el.disabled = true);
+    }
+  } catch (err) {
+    toast('Gagal memuat profil: ' + err.message, true);
+  }
+}
+
+async function onSaveCompany(e) {
+  e.preventDefault();
+  if (!companyPerms.manage) {
+    toast('Tidak ada akses mengubah profil', true);
+    return;
+  }
+  const f = e.target;
+  const btn = document.getElementById('saveCompanyBtn');
+  btn.disabled = true;
+  btn.textContent = 'Menyimpan...';
+
+  try {
+    await updateCompanyProfile({
+      name:    f.name.value.trim(),
+      address: f.address.value.trim(),
+      phone:   f.phone.value.trim(),
+      email:   f.email.value.trim(),
+      website: f.website.value.trim(),
+      tax_id:  f.tax_id.value.trim(),
+      logo_url: f.logo_url.value.trim(),
+      notes:   f.notes.value.trim()
+    });
+    toast('✓ Profil perusahaan tersimpan');
+  } catch (err) {
+    toast('Gagal: ' + (err.message || err), true);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Simpan Profil Perusahaan';
   }
 }
 
