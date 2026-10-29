@@ -1,6 +1,9 @@
 // js/reports.js
 import { supabase } from './supabase-client.js';
 
+// ============================================================
+// DASHBOARD BALANCES
+// ============================================================
 export async function dashboardBalances() {
   const { data, error } = await supabase
     .from('dashboard_mapping')
@@ -21,6 +24,9 @@ export async function dashboardBalances() {
   }));
 }
 
+// ============================================================
+// PIUTANG PER PELANGGAN
+// ============================================================
 export async function piutangPerPelanggan() {
   const { data: lines, error } = await supabase
     .from('journal_lines')
@@ -39,10 +45,9 @@ export async function piutangPerPelanggan() {
 }
 
 // ============================================================
-// LAPORAN: TRIAL BALANCE
+// TRIAL BALANCE
 // ============================================================
 export async function trialBalance({ from = null, to = null } = {}) {
-  // Ambil semua akun aktif
   const { data: accounts, error: aErr } = await supabase
     .from('accounts')
     .select('id, code, name, type, normal_balance')
@@ -50,7 +55,6 @@ export async function trialBalance({ from = null, to = null } = {}) {
     .order('code');
   if (aErr) throw aErr;
 
-  // Ambil semua journal_lines dalam periode (pakai join ke journals untuk filter tanggal)
   let q = supabase
     .from('journal_lines')
     .select('account_id, debit_base, credit_base, journals!inner(journal_date)');
@@ -59,7 +63,6 @@ export async function trialBalance({ from = null, to = null } = {}) {
   const { data: lines, error: lErr } = await q;
   if (lErr) throw lErr;
 
-  // Agregasi per akun
   const agg = {};
   for (const l of lines) {
     const k = l.account_id;
@@ -72,22 +75,16 @@ export async function trialBalance({ from = null, to = null } = {}) {
     const s = agg[a.id] || { d: 0, c: 0 };
     const balance = a.normal_balance === 'D' ? (s.d - s.c) : (s.c - s.d);
     return {
-      code: a.code,
-      name: a.name,
-      type: a.type,
-      normal_balance: a.normal_balance,
-      total_debit: s.d,
-      total_credit: s.c,
-      balance
+      code: a.code, name: a.name, type: a.type, normal_balance: a.normal_balance,
+      total_debit: s.d, total_credit: s.c, balance
     };
   });
 }
 
 // ============================================================
-// LAPORAN: CASHFLOW (mutasi akun kas & bank)
+// CASHFLOW
 // ============================================================
 export async function cashflow({ from = null, to = null } = {}) {
-  // Akun kas/bank = kode 1-10xx dan 1-11xx
   const { data: accounts, error: aErr } = await supabase
     .from('accounts')
     .select('id, code, name')
@@ -110,7 +107,6 @@ export async function cashflow({ from = null, to = null } = {}) {
 
   const accMap = Object.fromEntries(accounts.map(a => [a.id, a]));
 
-  // Baris detail
   const rows = lines.map(l => ({
     journal_date:  l.journals.journal_date,
     journal_no:    l.journals.journal_no,
@@ -122,36 +118,26 @@ export async function cashflow({ from = null, to = null } = {}) {
     memo:          l.memo
   })).sort((a, b) => a.journal_date.localeCompare(b.journal_date));
 
-  // Ringkasan per akun
   const summary = accounts.map(a => {
     const accLines = lines.filter(l => l.account_id === a.id);
     const inflow  = accLines.reduce((s, l) => s + Number(l.debit_base), 0);
     const outflow = accLines.reduce((s, l) => s + Number(l.credit_base), 0);
-    return {
-      code: a.code,
-      name: a.name,
-      inflow,
-      outflow,
-      net: inflow - outflow
-    };
+    return { code: a.code, name: a.name, inflow, outflow, net: inflow - outflow };
   });
 
   return { accounts, rows, summary };
 }
 
 // ============================================================
-// LAPORAN: AGING PIUTANG PER PELANGGAN
+// AGING PIUTANG
 // ============================================================
 export async function agingPiutang({ asOf = null } = {}) {
   const cutoff = asOf || new Date().toISOString().slice(0, 10);
 
-  // Ambil semua journal_lines yang menyentuh akun piutang (1-12xx) dan punya partner
   const { data: lines, error } = await supabase
     .from('journal_lines')
     .select(`
-      partner_id,
-      debit_base,
-      credit_base,
+      partner_id, debit_base, credit_base,
       journals!inner(journal_date),
       accounts!inner(code),
       partners!inner(name, type)
@@ -161,11 +147,9 @@ export async function agingPiutang({ asOf = null } = {}) {
     .lte('journals.journal_date', cutoff);
   if (error) throw error;
 
-  // Filter hanya customer
   const custLines = lines.filter(l => l.partners?.type === 'customer');
 
-  // Agregasi per partner + bucket umur
-  const buckets = {}; // { partner_id: { name, b0_30, b31_60, b60p, total } }
+  const buckets = {};
   const today = new Date(cutoff);
 
   for (const l of custLines) {
@@ -184,22 +168,66 @@ export async function agingPiutang({ asOf = null } = {}) {
     buckets[key].total += net;
   }
 
-  // Hanya tampilkan yang saldo != 0
   return Object.values(buckets)
     .filter(b => Math.abs(b.total) > 0.01)
     .sort((a, b) => b.total - a.total);
 }
 
 // ============================================================
-// LAPORAN: LABA RUGI
+// AGING HUTANG (BARU)
+// ============================================================
+export async function agingHutang({ asOf = null } = {}) {
+  const cutoff = asOf || new Date().toISOString().slice(0, 10);
+
+  const { data: lines, error } = await supabase
+    .from('journal_lines')
+    .select(`
+      partner_id, debit_base, credit_base,
+      journals!inner(journal_date),
+      accounts!inner(code),
+      partners!inner(name, type)
+    `)
+    .like('accounts.code', '2-11%')
+    .not('partner_id', 'is', null)
+    .lte('journals.journal_date', cutoff);
+  if (error) throw error;
+
+  const vendorLines = lines.filter(l => l.partners?.type === 'vendor');
+
+  const buckets = {};
+  const today = new Date(cutoff);
+
+  for (const l of vendorLines) {
+    const key = l.partner_id;
+    if (!buckets[key]) {
+      buckets[key] = { name: l.partners.name, b0_30: 0, b31_60: 0, b60p: 0, total: 0 };
+    }
+    // Hutang: kredit menambah, debit mengurangi
+    const net = Number(l.credit_base) - Number(l.debit_base);
+    const jDate = new Date(l.journals.journal_date);
+    const days = Math.floor((today - jDate) / (1000 * 60 * 60 * 24));
+
+    if (days <= 30)       buckets[key].b0_30  += net;
+    else if (days <= 60)  buckets[key].b31_60 += net;
+    else                  buckets[key].b60p   += net;
+
+    buckets[key].total += net;
+  }
+
+  return Object.values(buckets)
+    .filter(b => Math.abs(b.total) > 0.01)
+    .sort((a, b) => b.total - a.total);
+}
+
+// ============================================================
+// LABA RUGI
 // ============================================================
 export async function labaRugi({ from = null, to = null } = {}) {
   const tb = await trialBalance({ from, to });
 
-  // Kelompokkan per tipe
   const revenue  = tb.filter(r => r.type === 'revenue');
   const expense  = tb.filter(r => r.type === 'expense');
-  const hpp      = expense.filter(r => r.code.startsWith('5-1')); // HPP
+  const hpp      = expense.filter(r => r.code.startsWith('5-1'));
   const opex     = expense.filter(r => !r.code.startsWith('5-1') && !r.code.startsWith('5-9'));
   const otherExp = expense.filter(r => r.code.startsWith('5-9'));
 
@@ -220,7 +248,7 @@ export async function labaRugi({ from = null, to = null } = {}) {
 }
 
 // ============================================================
-// LAPORAN: NERACA
+// NERACA
 // ============================================================
 export async function neraca({ asOf = null } = {}) {
   const tb = await trialBalance({ from: null, to: asOf });
@@ -229,7 +257,6 @@ export async function neraca({ asOf = null } = {}) {
   const liability = tb.filter(r => r.type === 'liability');
   const equity    = tb.filter(r => r.type === 'equity');
 
-  // Hitung laba berjalan (revenue - expense) untuk dimasukkan ke ekuitas
   const revenue = tb.filter(r => r.type === 'revenue');
   const expense = tb.filter(r => r.type === 'expense');
   const totalRevenue = revenue.reduce((s, r) => s + r.balance, 0);
