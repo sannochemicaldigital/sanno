@@ -119,8 +119,22 @@
     .info-block-detail {
       font-size: 11px;
       color: #4b5563;
-      line-height: 1.5;
+      line-height: 1.6;
     }
+
+    /* Status badge */
+    .status-badge {
+      display: inline-block;
+      padding: 4px 10px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .status-unpaid { background: #fef3c7; color: #92400e; }
+    .status-paid   { background: #d1fae5; color: #065f46; }
+    .status-overdue { background: #fee2e2; color: #991b1b; }
 
     /* Tabel item */
     .items-table {
@@ -186,9 +200,7 @@
       color: #4b5563;
       line-height: 1.6;
     }
-    .payment-block-detail b {
-      color: #1a1a1a;
-    }
+    .payment-block-detail b { color: #1a1a1a; }
 
     /* Tanda tangan */
     .signatures {
@@ -287,6 +299,9 @@
         day: '2-digit', month: 'long', year: 'numeric'
       });
     }
+    function daysBetween(a, b) {
+      return Math.floor((new Date(b) - new Date(a)) / (1000 * 60 * 60 * 24));
+    }
 
     (async () => {
       const user = await requireAuth();
@@ -323,10 +338,19 @@
           .order('id');
         if (lErr) throw lErr;
 
-        // 4. Fetch company profile
+        // 4. Fetch DO (referensi pengiriman)
+        const { data: doList } = await supabase
+          .from('delivery_orders')
+          .select('do_no, do_date, status')
+          .eq('so_id', soId)
+          .order('id', { ascending: false })
+          .limit(1);
+        const doRef = doList && doList.length ? doList[0] : null;
+
+        // 5. Fetch company profile
         const company = await getCompanyProfile();
 
-        // 5. Ambil info rekening bank dari COA (1-11xx)
+        // 6. Ambil rekening bank dari COA (1-11xx)
         const { data: bankAccounts } = await supabase
           .from('accounts')
           .select('code, name')
@@ -334,11 +358,26 @@
           .eq('is_active', true)
           .order('code');
 
-        // 6. Render
-        const partner = so.partners;
+        // 7. Hitung status pembayaran
         const totalAmount = Number(so.total_amount);
         const ppnAmount = Number(so.ppn_amount);
         const grandTotal = Number(so.grand_total);
+
+        const dueDate = so.due_date || so.so_date;
+        const today = new Date().toISOString().slice(0, 10);
+        const daysToDue = daysBetween(today, dueDate);
+
+        // Status: BELUM DIBAYAR (default), LUNAS (kalau ada pembayaran), JATUH TEMPO (kalau lewat)
+        // Untuk MVP, kita belum punya tabel pembayaran, jadi default BELUM DIBAYAR
+        let statusLabel = 'BELUM DIBAYAR';
+        let statusClass = 'status-unpaid';
+        if (daysToDue < 0) {
+          statusLabel = `JATUH TEMPO (${Math.abs(daysToDue)} hari lewat)`;
+          statusClass = 'status-overdue';
+        }
+
+        // 8. Render
+        const partner = so.partners;
 
         let itemsHtml = '';
         lines.forEach((l, i) => {
@@ -358,8 +397,8 @@
           .map(b => `<div>• <b>${esc(b.name)}</b></div>`)
           .join('');
 
-        // Nomor invoice: pakai so_no dengan prefix INV
         const invoiceNo = `INV-${so.so_no.replace('SO-', '')}`;
+        const paymentTerms = so.payment_terms_days || 30;
 
         paper.innerHTML = `
           <div class="company-header">
@@ -379,7 +418,10 @@
               <div class="doc-title">INVOICE</div>
               <div class="doc-number">No: <b>${esc(invoiceNo)}</b></div>
               <div class="doc-date">Tanggal: ${fmtDate(so.so_date)}</div>
-              <div class="doc-date" style="font-size:11px;margin-top:4px;">Ref SO: ${esc(so.so_no)}</div>
+              <div class="doc-date" style="font-size:11px;margin-top:4px;">
+                Ref SO: ${esc(so.so_no)}
+                ${doRef ? `<br>Ref DO: ${esc(doRef.do_no)}` : ''}
+              </div>
             </div>
           </div>
 
@@ -394,11 +436,14 @@
               </div>
             </div>
             <div class="info-block">
-              <div class="info-block-title">Keterangan</div>
+              <div class="info-block-title">Status & Jatuh Tempo</div>
+              <div style="margin-bottom:6px;">
+                <span class="status-badge ${statusClass}">${statusLabel}</span>
+              </div>
               <div class="info-block-detail">
-                Status: <b style="color:#059669;">LUNAS BELUM DIBAYAR</b><br>
-                Jatuh Tempo: <b>${fmtDate(new Date(new Date(so.so_date).getTime() + 30*24*60*60*1000))}</b><br>
-                ${so.description ? 'Catatan: ' + esc(so.description) : ''}
+                Term of Payment: <b>${paymentTerms} hari</b><br>
+                Jatuh Tempo: <b>${fmtDate(dueDate)}</b>
+                ${doRef ? `<br>Bukti Pengiriman: <b>${esc(doRef.do_no)}</b> (${fmtDate(doRef.do_date)})` : ''}
               </div>
             </div>
           </div>
@@ -441,17 +486,19 @@
               <div class="payment-block-detail">
                 Silakan transfer ke rekening berikut:
                 ${bankList || '<div style="color:#9ca3af;">Belum ada rekening bank terdaftar</div>'}
-                <div style="margin-top:8px;font-size:10px;color:#6b7280;">
-                  Mohon cantumkan nomor invoice <b>${esc(invoiceNo)}</b> pada berita transfer.
+                <div style="margin-top:8px;padding:6px;background:#eff6ff;border-radius:4px;">
+                  Nominal: <b style="color:#1e40af;">${fmtMoney(grandTotal)}</b><br>
+                  Berita Transfer: <b>${esc(invoiceNo)}</b>
                 </div>
               </div>
             </div>
             <div class="payment-block">
-              <div class="payment-block-title">Ringkasan</div>
+              <div class="payment-block-title">Catatan</div>
               <div class="payment-block-detail">
-                Total: <b>${fmtMoney(totalAmount)}</b><br>
-                PPN: <b>${fmtMoney(ppnAmount)}</b><br>
-                <span style="font-size:13px;">Grand Total: <b style="color:#1e40af;">${fmtMoney(grandTotal)}</b></span>
+                Invoice ini diterbitkan berdasarkan pengiriman barang
+                ${doRef ? `dengan nomor <b>${esc(doRef.do_no)}</b>` : ''}.
+                Pembayaran dianggap sah setelah dana diterima di rekening perusahaan
+                dan bukti transfer dikonfirmasi.
               </div>
             </div>
           </div>
