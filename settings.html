@@ -20,6 +20,7 @@
       <button data-tab="users">User</button>
       <button data-tab="salespartner">Sales ↔ Pelanggan</button>
       <button data-tab="permissions">Permissions</button>
+      <button data-tab="company">Perusahaan</button>
       <button data-tab="periods">Periode</button>
     </div>
 
@@ -130,6 +131,64 @@
           </select>
         </div>
         <div id="userPermissionsList" style="margin-top:12px;"></div>
+      </div>
+    </section>
+
+    <!-- ==================== TAB PERUSAHAAN ==================== -->
+    <section id="tab-company" class="tab-panel" style="display:none;">
+      <div class="card">
+        <h3 style="margin-top:0;font-size:16px;">Profil Perusahaan</h3>
+        <p style="font-size:13px;color:#6b7280;margin-top:0;">
+          Data ini muncul di header dokumen cetak (Delivery Order, Invoice, dll).
+        </p>
+        <form id="form-company">
+          <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(200px,1fr));">
+            <div class="form-row" style="grid-column: span 2;">
+              <label>Nama Perusahaan <span style="color:#dc2626;">*</span></label>
+              <input name="name" placeholder="PT Sanno Jaya" required>
+            </div>
+            <div class="form-row" style="grid-column: span 2;">
+              <label>Alamat</label>
+              <textarea name="address" rows="2"
+                        placeholder="Jl. Contoh No. 1, Jakarta"
+                        style="width:100%;padding:10px;border:1px solid #d0d5dd;border-radius:8px;font-family:inherit;"></textarea>
+            </div>
+            <div class="form-row">
+              <label>Telepon</label>
+              <input name="phone" placeholder="021-1234567">
+            </div>
+            <div class="form-row">
+              <label>Email</label>
+              <input name="email" type="email" placeholder="info@perusahaan.com">
+            </div>
+            <div class="form-row">
+              <label>Website</label>
+              <input name="website" placeholder="www.perusahaan.com">
+            </div>
+            <div class="form-row">
+              <label>NPWP</label>
+              <input name="tax_id" placeholder="00.000.000.0-000.000">
+            </div>
+            <div class="form-row" style="grid-column: span 2;">
+              <label>URL Logo</label>
+              <input name="logo_url" placeholder="https://... (opsional)">
+              <div style="font-size:12px;color:#6b7280;margin-top:4px;">
+                Kosongkan jika tidak ada logo. Bisa upload ke Supabase Storage lalu salin URL-nya.
+              </div>
+            </div>
+            <div class="form-row" style="grid-column: span 2;">
+              <label>Catatan Footer Dokumen</label>
+              <textarea name="notes" rows="2"
+                        placeholder="mis. Barang yang sudah diterima tidak dapat ditukar."
+                        style="width:100%;padding:10px;border:1px solid #d0d5dd;border-radius:8px;font-family:inherit;"></textarea>
+            </div>
+          </div>
+          <div class="form-actions" style="margin-top:16px;">
+            <button type="submit" class="btn btn-primary" id="saveCompanyBtn">
+              Simpan Profil Perusahaan
+            </button>
+          </div>
+        </form>
       </div>
     </section>
 
