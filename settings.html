@@ -19,18 +19,26 @@
       <button data-tab="sys" class="active">Sistem</button>
       <button data-tab="users">User</button>
       <button data-tab="salespartner">Sales ↔ Pelanggan</button>
+      <button data-tab="permissions">Permissions</button>
     </div>
 
+    <!-- ==================== TAB SISTEM ==================== -->
     <section id="tab-sys" class="tab-panel">
       <div class="card">
         <h3 style="margin-top:0;font-size:16px;">Pengaturan Sistem</h3>
+        <p style="font-size:13px;color:#6b7280;margin-top:0;">
+          Perubahan langsung berlaku. Hanya admin/superadmin yang bisa mengubah.
+        </p>
         <form id="form-settings"></form>
         <div class="form-actions" style="margin-top:16px;">
-          <button type="submit" form="form-settings" class="btn btn-primary" id="saveSettingsBtn">Simpan Pengaturan</button>
+          <button type="submit" form="form-settings" class="btn btn-primary" id="saveSettingsBtn">
+            Simpan Pengaturan
+          </button>
         </div>
       </div>
     </section>
 
+    <!-- ==================== TAB USER ==================== -->
     <section id="tab-users" class="tab-panel" style="display:none;">
       <div class="card">
         <h3 style="margin-top:0;font-size:16px;">Tambah User Baru</h3>
@@ -38,34 +46,89 @@
           <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(160px,1fr));">
             <div class="form-row">
               <label>Username</label>
-              <input name="username" placeholder="mis. sales1" required pattern="[a-zA-Z0-9._-]+" title="Huruf, angka, titik, underscore, strip">
+              <input name="username" placeholder="mis. sales1" required
+                     pattern="[a-zA-Z0-9._-]+"
+                     title="Huruf, angka, titik, underscore, strip">
             </div>
-            <div class="form-row"><label>Nama Lengkap</label><input name="full_name" placeholder="Nama user" required></div>
-            <div class="form-row"><label>Password</label><input name="password" type="password" minlength="6" required placeholder="minimal 6 karakter"></div>
-            <div class="form-row"><label>Role</label><select name="role" id="newUserRole" required></select></div>
+            <div class="form-row">
+              <label>Nama Lengkap</label>
+              <input name="full_name" placeholder="Nama user" required>
+            </div>
+            <div class="form-row">
+              <label>Password</label>
+              <input name="password" type="password" minlength="6" required
+                     placeholder="minimal 6 karakter">
+            </div>
+            <div class="form-row">
+              <label>Role</label>
+              <select name="role" id="newUserRole" required></select>
+            </div>
           </div>
           <div style="font-size:12px;color:#6b7280;margin-bottom:8px;">
             Email login otomatis: <code id="emailPreview">username@sanno.local</code>
           </div>
-          <div class="form-actions"><button type="submit" class="btn btn-primary" id="createUserBtn">Buat User</button></div>
+          <div class="form-actions">
+            <button type="submit" class="btn btn-primary" id="createUserBtn">Buat User</button>
+          </div>
         </form>
       </div>
+
       <div class="card">
         <h3 style="margin-top:0;font-size:16px;">Daftar User</h3>
         <div class="table-wrap">
           <table>
-            <thead><tr><th>Email</th><th>Nama</th><th>Role</th><th>Status</th><th>Aksi</th></tr></thead>
+            <thead>
+              <tr>
+                <th>Email</th>
+                <th>Nama</th>
+                <th>Role</th>
+                <th>Status</th>
+                <th>Aksi</th>
+              </tr>
+            </thead>
             <tbody id="tbody-users"></tbody>
           </table>
         </div>
       </div>
     </section>
 
+    <!-- ==================== TAB SALES ↔ PELANGGAN ==================== -->
     <section id="tab-salespartner" class="tab-panel" style="display:none;">
       <div class="card">
         <h3 style="margin-top:0;font-size:16px;">Pengaturan Sales ↔ Pelanggan</h3>
-        <p style="font-size:13px;color:#6b7280;margin-top:0;">Tentukan pelanggan mana yang ditangani masing-masing sales.</p>
+        <p style="font-size:13px;color:#6b7280;margin-top:0;">
+          Tentukan pelanggan mana yang ditangani masing-masing sales.
+        </p>
         <div id="salesPartnersList" style="margin-top:12px;"></div>
+      </div>
+    </section>
+
+    <!-- ==================== TAB PERMISSIONS ==================== -->
+    <section id="tab-permissions" class="tab-panel" style="display:none;">
+      <div class="card">
+        <h3 style="margin-top:0;font-size:16px;">Permission per Role</h3>
+        <p style="font-size:13px;color:#6b7280;margin-top:0;">
+          Centang untuk mengaktifkan akses. Perubahan berlaku setelah user logout/login ulang.
+          Baris superadmin dikunci (selalu punya semua akses).
+        </p>
+        <div id="rolePermissionsList">
+          <div style="color:#9ca3af;font-size:13px;">Klik tab Permissions untuk memuat...</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3 style="margin-top:0;font-size:16px;">Override per User</h3>
+        <p style="font-size:13px;color:#6b7280;margin-top:0;">
+          Atur akses khusus untuk user tertentu. Override <b>mengalahkan</b> default role.
+          Pilih <b>Default</b> untuk kembali mengikuti role.
+        </p>
+        <div class="form-row">
+          <label>Pilih User</label>
+          <select id="overrideUserSelect">
+            <option value="">— pilih user —</option>
+          </select>
+        </div>
+        <div id="userPermissionsList" style="margin-top:12px;"></div>
       </div>
     </section>
   </div>
