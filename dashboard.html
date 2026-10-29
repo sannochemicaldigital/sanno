@@ -123,37 +123,29 @@ container.innerHTML += `
   </div>`;
     }
 
-    async function renderSalesDashboard(container) {
-      const { data: { session } } = await supabase.auth.getSession();
-      const { data: sos, error } = await supabase
-        .from('sales_orders')
-        .select('id, status, grand_total')
-        .eq('sales_id', session.user.id);
-      if (error) throw error;
+    async function renderFinanceDashboard(container) {
+  const { hasPermission } = await import('./js/permissions.js');
+  const { dashboardBalances } = await import('./js/reports.js');
 
-      const count = s => sos.filter(so => so.status === s).length;
-      const sum = s => sos.filter(so => so.status === s)
-        .reduce((a, so) => a + Number(so.grand_total), 0);
+  const data = await dashboardBalances();
+  const map = Object.fromEntries(data.map(d => [d.key, d]));
+  const cards = [];
 
-      container.innerHTML = `
-        <div class="card">
-          <div style="font-size:12px;color:#666;margin-bottom:6px;">SO Draft</div>
-          <div style="font-size:22px;font-weight:600;">${count('draft')}</div>
-        </div>
-        <div class="card">
-          <div style="font-size:12px;color:#666;margin-bottom:6px;">SO Pending Approval</div>
-          <div style="font-size:22px;font-weight:600;color:#b45309;">${count('pending_approval')}</div>
-        </div>
-        <div class="card">
-          <div style="font-size:12px;color:#666;margin-bottom:6px;">SO Approved</div>
-          <div style="font-size:22px;font-weight:600;color:#059669;">${count('approved')}</div>
-          <div style="font-size:12px;color:#666;margin-top:4px;">${fmt(sum('approved'))}</div>
-        </div>
-        <div class="card">
-          <div style="font-size:12px;color:#666;margin-bottom:6px;">SO Rejected</div>
-          <div style="font-size:22px;font-weight:600;color:#b91c1c;">${count('rejected')}</div>
-        </div>`;
-    }
+  const card = (label, val) => `
+    <div class="card">
+      <div style="font-size:12px;color:#666;margin-bottom:6px;">${label}</div>
+      <div style="font-size:18px;font-weight:600;">Rp ${Number(val||0).toLocaleString('id-ID')}</div>
+    </div>`;
+
+  if (await hasPermission('finance.cash.view'))    cards.push(card('Saldo Kas', map.kas?.balance));
+  if (await hasPermission('finance.bank.view'))    cards.push(card('Saldo Bank BCA', map.bank?.balance));
+  if (await hasPermission('finance.piutang.view')) cards.push(card('Piutang Dagang', map.piutang_dagang?.balance));
+  if (await hasPermission('finance.piutang.view')) cards.push(card('Piutang Pihak Ketiga', map.piutang_pihak3?.balance));
+  if (await hasPermission('finance.hutang.view'))  cards.push(card('Hutang Bank', map.hutang_bank?.balance));
+  if (await hasPermission('finance.hutang.view'))  cards.push(card('Hutang Dagang', map.hutang_dagang?.balance));
+
+  container.innerHTML = cards.join('') || '<div style="color:#9ca3af;font-size:13px;">Tidak ada kartu yang ditampilkan sesuai hak akses.</div>';
+}
 
     async function renderKasirDashboard(container) {
       const { data: kas } = await supabase
