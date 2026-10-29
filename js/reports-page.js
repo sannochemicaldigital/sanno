@@ -2,7 +2,10 @@
 import { requireAuth, logout } from './auth.js';
 import { renderNav, requirePageAccess } from './access.js';
 import { hasPermission } from './permissions.js';
-import { trialBalance, cashflow, agingPiutang, agingHutang, labaRugi, neraca } from './reports.js';
+import {
+  trialBalance, cashflow, agingPiutang, agingHutang,
+  salesReport, labaRugi, neraca
+} from './reports.js';
 
 // ============================================================
 // STATE
@@ -33,6 +36,9 @@ function fmt(n) {
   const v = Number(n || 0);
   return v.toLocaleString('id-ID', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 }
+function fmtInt(n) {
+  return Number(n || 0).toLocaleString('id-ID');
+}
 function periodLabel(from, to) {
   if (!from && !to) return 'Semua periode';
   return `${from || '...'} s/d ${to || '...'}`;
@@ -52,14 +58,15 @@ function periodLabel(from, to) {
   await renderNav(document.getElementById('mainNav'), 'reports');
 
   // Muat permission
-  state.perms.export       = await hasPermission('reports.export');
-  state.perms.periodSet    = await hasPermission('reports.period.set');
-  state.perms.trialBalance = await hasPermission('reports.trial_balance');
-  state.perms.cashflow     = await hasPermission('reports.cashflow');
-  state.perms.aging        = await hasPermission('reports.aging_piutang');
-  state.perms.agingHutang  = await hasPermission('finance.hutang.detail');
-  state.perms.labaRugi     = await hasPermission('reports.laba_rugi');
-  state.perms.neraca       = await hasPermission('reports.neraca');
+  state.perms.export          = await hasPermission('reports.export');
+  state.perms.periodSet       = await hasPermission('reports.period.set');
+  state.perms.trialBalance    = await hasPermission('reports.trial_balance');
+  state.perms.cashflow        = await hasPermission('reports.cashflow');
+  state.perms.aging           = await hasPermission('reports.aging_piutang');
+  state.perms.agingHutang     = await hasPermission('finance.hutang.detail');
+  state.perms.salesPerformance = await hasPermission('reports.view');
+  state.perms.labaRugi        = await hasPermission('reports.laba_rugi');
+  state.perms.neraca          = await hasPermission('reports.neraca');
 
   if (!state.perms.export) document.getElementById('exportCsv').style.display = 'none';
   if (!state.perms.periodSet) {
@@ -73,6 +80,7 @@ function periodLabel(from, to) {
     cf: state.perms.cashflow,
     ar: state.perms.aging,
     ap: state.perms.agingHutang,
+    sp: state.perms.salesPerformance,
     lr: state.perms.labaRugi,
     nc: state.perms.neraca
   };
@@ -136,6 +144,7 @@ async function loadActive() {
   else if (state.activeTab === 'cf') await loadCashflow();
   else if (state.activeTab === 'ar') await loadAging();
   else if (state.activeTab === 'ap') await loadAgingHutang();
+  else if (state.activeTab === 'sp') await loadSalesReport();
   else if (state.activeTab === 'lr') await loadLabaRugi();
   else if (state.activeTab === 'nc') await loadNeraca();
 }
@@ -297,6 +306,62 @@ async function loadAgingHutang() {
 }
 
 // ============================================================
+// PENJUALAN PER SALES
+// ============================================================
+async function loadSalesReport() {
+  const tbody = document.getElementById('tbody-sp');
+  const tfoot = document.getElementById('tfoot-sp');
+  document.getElementById('spPeriod').textContent = periodLabel(state.from, state.to);
+  tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;color:#9ca3af;">Memuat...</td></tr>';
+  tfoot.innerHTML = '';
+
+  try {
+    const { rows, totals } = await salesReport({ from: state.from, to: state.to });
+
+    if (!rows.length) {
+      tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;color:#9ca3af;">Tidak ada SO dalam periode ini</td></tr>';
+      state.lastData = { type: 'sp', rows: [], totals };
+      return;
+    }
+
+    tbody.innerHTML = rows.map(r => `
+      <tr>
+        <td data-label="Sales">
+          <div style="font-weight:600;">${esc(r.sales_name)}</div>
+          <div style="font-size:11px;color:#6b7280;">${esc(r.sales_email)}</div>
+        </td>
+        <td data-label="Total SO" class="num">${fmtInt(r.total_so)}</td>
+        <td data-label="Draft" class="num">${fmtInt(r.draft)}</td>
+        <td data-label="Pending" class="num">${fmtInt(r.pending)}</td>
+        <td data-label="Approved" class="num">${fmtInt(r.approved)}</td>
+        <td data-label="Posted" class="num pos">${fmtInt(r.posted)}</td>
+        <td data-label="Rejected" class="num">${fmtInt(r.rejected)}</td>
+        <td data-label="Cancelled" class="num">${fmtInt(r.cancelled)}</td>
+        <td data-label="Total Posted" class="num">${fmt(r.total_posted)}</td>
+        <td data-label="Total All" class="num">${fmt(r.total_all)}</td>
+      </tr>`).join('');
+
+    tfoot.innerHTML = `
+      <tr class="report-total">
+        <td>TOTAL</td>
+        <td class="num">${fmtInt(totals.total_so)}</td>
+        <td class="num">${fmtInt(totals.draft)}</td>
+        <td class="num">${fmtInt(totals.pending)}</td>
+        <td class="num">${fmtInt(totals.approved)}</td>
+        <td class="num">${fmtInt(totals.posted)}</td>
+        <td class="num">${fmtInt(totals.rejected)}</td>
+        <td class="num">${fmtInt(totals.cancelled)}</td>
+        <td class="num">${fmt(totals.total_posted)}</td>
+        <td class="num">${fmt(totals.total_all)}</td>
+      </tr>`;
+
+    state.lastData = { type: 'sp', rows, totals };
+  } catch (err) {
+    tbody.innerHTML = `<tr><td colspan="10" style="color:#b91c1c;">${esc(err.message)}</td></tr>`;
+  }
+}
+
+// ============================================================
 // LABA RUGI
 // ============================================================
 async function loadLabaRugi() {
@@ -399,6 +464,22 @@ function exportCsv() {
     filename = 'aging-hutang';
     headers = ['Vendor', '0-30', '31-60', '60+', 'Total'];
     rows = d.rows.map(r => [r.name, r.b0_30, r.b31_60, r.b60p, r.total]);
+  } else if (d.type === 'sp') {
+    filename = 'penjualan-per-sales';
+    headers = ['Sales', 'Email', 'Total SO', 'Draft', 'Pending', 'Approved',
+               'Posted', 'Rejected', 'Cancelled', 'Total Posted', 'Total All'];
+    rows = d.rows.map(r => [
+      r.sales_name, r.sales_email, r.total_so, r.draft, r.pending, r.approved,
+      r.posted, r.rejected, r.cancelled, r.total_posted, r.total_all
+    ]);
+    // Tambah baris TOTAL
+    if (d.totals) {
+      rows.push([
+        'TOTAL', '', d.totals.total_so, d.totals.draft, d.totals.pending,
+        d.totals.approved, d.totals.posted, d.totals.rejected, d.totals.cancelled,
+        d.totals.total_posted, d.totals.total_all
+      ]);
+    }
   } else if (d.type === 'lr') {
     filename = 'laba-rugi';
     headers = ['Keterangan', 'Nilai'];
