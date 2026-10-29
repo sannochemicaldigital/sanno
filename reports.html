@@ -15,24 +15,40 @@
 
     <nav class="nav" id="mainNav"></nav>
 
+    <!-- ===== FILTER ===== -->
     <div class="card">
       <div class="filter-row">
-        <div class="form-row"><label>Dari Tanggal</label><input type="date" id="filterFrom"></div>
-        <div class="form-row"><label>Sampai Tanggal</label><input type="date" id="filterTo"></div>
-        <div class="form-row" style="flex:0;"><button class="btn btn-primary" id="applyFilter">Terapkan</button></div>
-        <div class="form-row" style="flex:0;"><button class="btn btn-secondary" id="resetFilter">Reset</button></div>
-        <div class="form-row" style="flex:0;"><button class="btn btn-secondary" id="exportCsv">Export CSV</button></div>
+        <div class="form-row">
+          <label>Dari Tanggal</label>
+          <input type="date" id="filterFrom">
+        </div>
+        <div class="form-row">
+          <label>Sampai Tanggal</label>
+          <input type="date" id="filterTo">
+        </div>
+        <div class="form-row" style="flex:0;">
+          <button class="btn btn-primary" id="applyFilter">Terapkan</button>
+        </div>
+        <div class="form-row" style="flex:0;">
+          <button class="btn btn-secondary" id="resetFilter">Reset</button>
+        </div>
+        <div class="form-row" style="flex:0;">
+          <button class="btn btn-secondary" id="exportCsv">Export CSV</button>
+        </div>
       </div>
     </div>
 
+    <!-- ===== TABS ===== -->
     <div class="tabs">
       <button data-tab="tb" class="active">Trial Balance</button>
       <button data-tab="cf">Cashflow</button>
       <button data-tab="ar">Aging Piutang</button>
+      <button data-tab="ap">Aging Hutang</button>
       <button data-tab="lr">Laba Rugi</button>
       <button data-tab="nc">Neraca</button>
     </div>
 
+    <!-- ===== TAB TRIAL BALANCE ===== -->
     <section id="tab-tb" class="tab-panel">
       <div class="card">
         <div class="report-header">
@@ -41,7 +57,16 @@
         </div>
         <div class="table-wrap">
           <table>
-            <thead><tr><th>Kode</th><th>Nama Akun</th><th>Tipe</th><th class="num">Debit</th><th class="num">Kredit</th><th class="num">Saldo</th></tr></thead>
+            <thead>
+              <tr>
+                <th>Kode</th>
+                <th>Nama Akun</th>
+                <th>Tipe</th>
+                <th class="num">Debit</th>
+                <th class="num">Kredit</th>
+                <th class="num">Saldo</th>
+              </tr>
+            </thead>
             <tbody id="tbody-tb"></tbody>
             <tfoot id="tfoot-tb"></tfoot>
           </table>
@@ -49,12 +74,24 @@
       </div>
     </section>
 
+    <!-- ===== TAB CASHFLOW ===== -->
     <section id="tab-cf" class="tab-panel" style="display:none;">
       <div class="card">
-        <div class="report-header"><h3>Ringkasan Kas & Bank</h3><span id="cfPeriod" style="font-size:13px;color:#6b7280;"></span></div>
+        <div class="report-header">
+          <h3>Ringkasan Kas & Bank</h3>
+          <span id="cfPeriod" style="font-size:13px;color:#6b7280;"></span>
+        </div>
         <div class="table-wrap">
           <table>
-            <thead><tr><th>Kode</th><th>Akun</th><th class="num">Masuk</th><th class="num">Keluar</th><th class="num">Net</th></tr></thead>
+            <thead>
+              <tr>
+                <th>Kode</th>
+                <th>Akun</th>
+                <th class="num">Masuk</th>
+                <th class="num">Keluar</th>
+                <th class="num">Net</th>
+              </tr>
+            </thead>
             <tbody id="tbody-cf-summary"></tbody>
           </table>
         </div>
@@ -63,19 +100,40 @@
         <h3 style="margin-top:0;font-size:16px;">Detail Mutasi</h3>
         <div class="table-wrap">
           <table>
-            <thead><tr><th>Tanggal</th><th>No. Jurnal</th><th>Akun</th><th>Deskripsi</th><th class="num">Debit</th><th class="num">Kredit</th></tr></thead>
+            <thead>
+              <tr>
+                <th>Tanggal</th>
+                <th>No. Jurnal</th>
+                <th>Akun</th>
+                <th>Deskripsi</th>
+                <th class="num">Debit</th>
+                <th class="num">Kredit</th>
+              </tr>
+            </thead>
             <tbody id="tbody-cf-detail"></tbody>
           </table>
         </div>
       </div>
     </section>
 
+    <!-- ===== TAB AGING PIUTANG ===== -->
     <section id="tab-ar" class="tab-panel" style="display:none;">
       <div class="card">
-        <div class="report-header"><h3>Aging Piutang per Pelanggan</h3><span id="arPeriod" style="font-size:13px;color:#6b7280;"></span></div>
+        <div class="report-header">
+          <h3>Aging Piutang per Pelanggan</h3>
+          <span id="arPeriod" style="font-size:13px;color:#6b7280;"></span>
+        </div>
         <div class="table-wrap">
           <table>
-            <thead><tr><th>Pelanggan</th><th class="num">0–30 hari</th><th class="num">31–60 hari</th><th class="num">60+ hari</th><th class="num">Total</th></tr></thead>
+            <thead>
+              <tr>
+                <th>Pelanggan</th>
+                <th class="num">0–30 hari</th>
+                <th class="num">31–60 hari</th>
+                <th class="num">60+ hari</th>
+                <th class="num">Total</th>
+              </tr>
+            </thead>
             <tbody id="tbody-ar"></tbody>
             <tfoot id="tfoot-ar"></tfoot>
           </table>
@@ -83,17 +141,58 @@
       </div>
     </section>
 
-    <section id="tab-lr" class="tab-panel" style="display:none;">
+    <!-- ===== TAB AGING HUTANG ===== -->
+    <section id="tab-ap" class="tab-panel" style="display:none;">
       <div class="card">
-        <div class="report-header"><h3>Laporan Laba Rugi</h3><span id="lrPeriod" style="font-size:13px;color:#6b7280;"></span></div>
-        <div class="table-wrap"><table><tbody id="tbody-lr"></tbody></table></div>
+        <div class="report-header">
+          <h3>Aging Hutang per Vendor</h3>
+          <span id="apPeriod" style="font-size:13px;color:#6b7280;"></span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Vendor</th>
+                <th class="num">0–30 hari</th>
+                <th class="num">31–60 hari</th>
+                <th class="num">60+ hari</th>
+                <th class="num">Total</th>
+              </tr>
+            </thead>
+            <tbody id="tbody-ap"></tbody>
+            <tfoot id="tfoot-ap"></tfoot>
+          </table>
+        </div>
       </div>
     </section>
 
+    <!-- ===== TAB LABA RUGI ===== -->
+    <section id="tab-lr" class="tab-panel" style="display:none;">
+      <div class="card">
+        <div class="report-header">
+          <h3>Laporan Laba Rugi</h3>
+          <span id="lrPeriod" style="font-size:13px;color:#6b7280;"></span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <tbody id="tbody-lr"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== TAB NERACA ===== -->
     <section id="tab-nc" class="tab-panel" style="display:none;">
       <div class="card">
-        <div class="report-header"><h3>Neraca</h3><span id="ncPeriod" style="font-size:13px;color:#6b7280;"></span></div>
-        <div class="table-wrap"><table><tbody id="tbody-nc"></tbody></table></div>
+        <div class="report-header">
+          <h3>Neraca</h3>
+          <span id="ncPeriod" style="font-size:13px;color:#6b7280;"></span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <tbody id="tbody-nc"></tbody>
+          </table>
+        </div>
         <div id="ncStatus" style="margin-top:12px;font-size:14px;"></div>
       </div>
     </section>
