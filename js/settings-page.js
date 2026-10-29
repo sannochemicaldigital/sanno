@@ -6,6 +6,10 @@ import { listUsers, createUser, updateUser, deleteUser, AVAILABLE_ROLES } from '
 import { initPermissionsTab } from './permissions-page.js';
 import { listLockedPeriods, lockPeriod, unlockPeriod, checkPeriodLocked } from './periods.js';
 import { getCompanyProfile, updateCompanyProfile } from './company.js';
+import {
+  listBankAccounts, createBankAccount, updateBankAccount,
+  deleteBankAccount, listBankCoaAccounts, getBankAccount
+} from './bank-accounts.js';
 import { hasPermission } from './permissions.js';
 import { supabase } from './supabase-client.js';
 
@@ -30,8 +34,11 @@ function esc(s) {
 let currentRole = null;
 let permissionsLoaded = false;
 let companyLoaded = false;
+let bankLoaded = false;
 let periodsLoaded = false;
 let companyPerms = { view: false, manage: false };
+let bankPerms = { view: false, manage: false };
+let bankEditId = null;
 
 // ============================================================
 // INIT
@@ -69,6 +76,11 @@ let companyPerms = { view: false, manage: false };
         await renderCompany();
       }
 
+      if (btn.dataset.tab === 'bank' && !bankLoaded) {
+        bankLoaded = true;
+        await renderBank();
+      }
+
       if (btn.dataset.tab === 'periods' && !periodsLoaded) {
         periodsLoaded = true;
         await renderPeriods();
@@ -100,6 +112,8 @@ let companyPerms = { view: false, manage: false };
   document.getElementById('form-settings').addEventListener('submit', onSaveSettings);
   document.getElementById('form-new-user').addEventListener('submit', onCreateUser);
   document.getElementById('form-company').addEventListener('submit', onSaveCompany);
+  document.getElementById('form-bank').addEventListener('submit', onSaveBank);
+  document.getElementById('cancelBankEditBtn').addEventListener('click', resetBankForm);
   attachLockPeriodForm();
 })();
 
@@ -422,6 +436,180 @@ async function onSaveCompany(e) {
     btn.disabled = false;
     btn.textContent = 'Simpan Profil Perusahaan';
   }
+}
+
+// ============================================================
+// TAB BANK
+// ============================================================
+async function renderBank() {
+  const form = document.getElementById('form-bank');
+  const wrap = document.getElementById('bankList');
+  if (!form || !wrap) return;
+
+  bankPerms.view   = await hasPermission('admin.bank_accounts.view');
+  bankPerms.manage = await hasPermission('admin.bank_accounts.manage');
+
+  if (!bankPerms.view) {
+    wrap.innerHTML = '<div style="color:#b91c1c;font-size:13px;">Tidak ada akses melihat rekening bank.</div>';
+    form.style.display = 'none';
+    return;
+  }
+
+  // Isi dropdown akun COA
+  const coa = await listBankCoaAccounts();
+  const sel = document.getElementById('bankCoaSelect');
+  sel.innerHTML = '<option value="">— pilih akun —</option>' +
+    coa.map(a => `<option value="${a.id}">${esc(a.code)} — ${esc(a.name)}</option>`).join('');
+
+  if (!bankPerms.manage) {
+    form.querySelectorAll('input, select, button').forEach(el => el.disabled = true);
+  }
+
+  await renderBankList();
+}
+
+async function renderBankList() {
+  const wrap = document.getElementById('bankList');
+  if (!wrap) return;
+  wrap.innerHTML = '<div style="color:#9ca3af;font-size:13px;">Memuat...</div>';
+
+  try {
+    const list = await listBankAccounts();
+    if (!list.length) {
+      wrap.innerHTML = '<div style="color:#9ca3af;font-size:13px;">Belum ada rekening bank. Tambah lewat form di atas.</div>';
+      return;
+    }
+
+    wrap.innerHTML = `
+      <table style="width:100%;border-collapse:collapse;font-size:13px;">
+        <thead>
+          <tr style="background:#f9fafb;">
+            <th style="padding:8px;text-align:left;">Bank</th>
+            <th style="padding:8px;text-align:left;">No. Rekening</th>
+            <th style="padding:8px;text-align:left;">Atas Nama</th>
+            <th style="padding:8px;text-align:left;">Cabang</th>
+            <th style="padding:8px;text-align:left;">Akun COA</th>
+            <th style="padding:8px;text-align:center;">Status</th>
+            <th style="padding:8px;text-align:center;">Aksi</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${list.map(b => `
+            <tr style="border-bottom:1px solid #eef0f3;">
+              <td style="padding:8px;font-weight:600;">${esc(b.bank_name)}</td>
+              <td style="padding:8px;font-family:monospace;">${esc(b.account_no)}</td>
+              <td style="padding:8px;">${esc(b.account_name)}</td>
+              <td style="padding:8px;color:#6b7280;">${esc(b.branch || '—')}</td>
+              <td style="padding:8px;font-size:12px;color:#6b7280;">
+                ${esc(b.accounts?.code || '—')} ${esc(b.accounts?.name || '')}
+              </td>
+              <td style="padding:8px;text-align:center;">
+                ${b.is_active
+                  ? '<span style="color:#059669;font-weight:600;">Aktif</span>'
+                  : '<span style="color:#9ca3af;">Nonaktif</span>'}
+              </td>
+              <td style="padding:8px;text-align:center;">
+                ${bankPerms.manage ? `
+                  <button class="btn btn-secondary" style="padding:4px 10px;font-size:12px;"
+                          data-edit-bank="${b.id}">Edit</button>
+                  <button class="btn btn-danger" style="padding:4px 10px;font-size:12px;"
+                          data-del-bank="${b.id}" data-label="${esc(b.bank_name)} ${esc(b.account_no)}">Hapus</button>
+                ` : ''}
+              </td>
+            </tr>`).join('')}
+        </tbody>
+      </table>`;
+
+    wrap.querySelectorAll('[data-edit-bank]').forEach(btn => {
+      btn.addEventListener('click', () => onEditBank(Number(btn.dataset.editBank)));
+    });
+
+    wrap.querySelectorAll('[data-del-bank]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        if (!confirm(`Hapus rekening ${btn.dataset.label}?`)) return;
+        try {
+          await deleteBankAccount(Number(btn.dataset.delBank));
+          toast('✓ Rekening dihapus');
+          await renderBankList();
+        } catch (err) {
+          toast('Gagal: ' + (err.message || err), true);
+        }
+      });
+    });
+  } catch (err) {
+    wrap.innerHTML = `<div style="color:#b91c1c;font-size:13px;">${esc(err.message)}</div>`;
+  }
+}
+
+async function onSaveBank(e) {
+  e.preventDefault();
+  if (!bankPerms.manage) { toast('Tidak ada akses mengubah rekening', true); return; }
+  const f = e.target;
+  const btn = document.getElementById('saveBankBtn');
+  btn.disabled = true;
+  btn.textContent = bankEditId ? 'Mengupdate...' : 'Menyimpan...';
+
+  try {
+    const payload = {
+      account_id: Number(f.account_id.value),
+      bank_name: f.bank_name.value.trim(),
+      account_no: f.account_no.value.trim(),
+      account_name: f.account_name.value.trim(),
+      branch: f.branch.value.trim() || null,
+      sort_order: Number(f.sort_order.value) || 0,
+      is_active: f.is_active.value === 'true'
+    };
+
+    if (!payload.account_id) throw new Error('Pilih akun COA');
+    if (!payload.bank_name)  throw new Error('Nama bank wajib diisi');
+    if (!payload.account_no) throw new Error('Nomor rekening wajib diisi');
+    if (!payload.account_name) throw new Error('Atas nama wajib diisi');
+
+    if (bankEditId) {
+      await updateBankAccount(bankEditId, payload);
+      toast('✓ Rekening diupdate');
+    } else {
+      await createBankAccount(payload);
+      toast('✓ Rekening ditambahkan');
+    }
+
+    resetBankForm();
+    await renderBankList();
+  } catch (err) {
+    toast('Gagal: ' + (err.message || err), true);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Simpan Rekening';
+  }
+}
+
+async function onEditBank(id) {
+  try {
+    const b = await getBankAccount(id);
+    bankEditId = id;
+
+    const f = document.getElementById('form-bank');
+    f.account_id.value   = b.account_id || '';
+    f.bank_name.value    = b.bank_name || '';
+    f.account_no.value   = b.account_no || '';
+    f.account_name.value = b.account_name || '';
+    f.branch.value       = b.branch || '';
+    f.sort_order.value   = b.sort_order || 0;
+    f.is_active.value    = b.is_active ? 'true' : 'false';
+
+    document.getElementById('saveBankBtn').textContent = 'Update Rekening';
+    document.getElementById('cancelBankEditBtn').style.display = 'inline-block';
+    f.scrollIntoView({ behavior: 'smooth' });
+  } catch (err) {
+    toast('Gagal muat: ' + err.message, true);
+  }
+}
+
+function resetBankForm() {
+  document.getElementById('form-bank').reset();
+  bankEditId = null;
+  document.getElementById('saveBankBtn').textContent = 'Simpan Rekening';
+  document.getElementById('cancelBankEditBtn').style.display = 'none';
 }
 
 // ============================================================
