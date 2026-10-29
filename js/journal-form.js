@@ -1,6 +1,7 @@
 // js/journal-form.js
-import { requireAuth, logout, getCurrentRole, hasRole } from './auth.js';
+import { requireAuth, logout } from './auth.js';
 import { renderNav, requirePageAccess } from './access.js';
+import { hasPermission } from './permissions.js';
 import { listAccounts } from './accounts.js';
 import { listPartners } from './partners.js';
 import { listItems } from './items.js';
@@ -16,8 +17,10 @@ const state = {
   items: [],
   accountsById: {},
   lineCount: 0,
-  role: null,
-  editingId: null
+  editingId: null,
+  perms: {
+    create: false, edit: false, reversal: false, delete: false
+  }
 };
 
 function toast(msg, isError = false) {
@@ -39,25 +42,36 @@ function fmt(n) {
   const user = await requireAuth();
   if (!user) return;
 
-  state.role = await requirePageAccess('journal');
-  if (!state.role) return;
+  const role = await requirePageAccess('journal');
+  if (!role) return;
 
   document.getElementById('logoutBtn').addEventListener('click', logout);
   await renderNav(document.getElementById('mainNav'), 'journal');
 
-  document.querySelector('[name=journal_date]').value = new Date().toISOString().slice(0, 10);
+  // Muat permission
+  state.perms.create   = await hasPermission('finance.journal.create');
+  state.perms.edit     = await hasPermission('finance.journal.edit');
+  state.perms.reversal = await hasPermission('finance.journal.reversal');
+  state.perms.delete   = await hasPermission('finance.journal.delete');
 
-  await loadMaster();
-  await loadCurrencies();
+  // Kalau tidak punya permission create, sembunyikan form
+  if (!state.perms.create) {
+    document.getElementById('form-journal').style.display = 'none';
+    document.getElementById('formTitle').textContent = 'Tidak ada akses membuat jurnal';
+  } else {
+    document.querySelector('[name=journal_date]').value = new Date().toISOString().slice(0, 10);
+    await loadMaster();
+    await loadCurrencies();
 
-  document.getElementById('addLineBtn').addEventListener('click', () => addLine());
-  document.getElementById('resetBtn').addEventListener('click', resetForm);
-  document.getElementById('cancelEditBtn').addEventListener('click', resetForm);
-  document.getElementById('currencySelect').addEventListener('change', onCurrencyChange);
-  document.getElementById('form-journal').addEventListener('submit', onSubmit);
+    document.getElementById('addLineBtn').addEventListener('click', () => addLine());
+    document.getElementById('resetBtn').addEventListener('click', resetForm);
+    document.getElementById('cancelEditBtn').addEventListener('click', resetForm);
+    document.getElementById('currencySelect').addEventListener('change', onCurrencyChange);
+    document.getElementById('form-journal').addEventListener('submit', onSubmit);
 
-  addLine();
-  addLine();
+    addLine();
+    addLine();
+  }
 
   await renderJournals();
 })();
@@ -214,6 +228,16 @@ async function onSubmit(e) {
   const f = e.target;
   const btn = document.getElementById('saveBtn');
   const isEditing = state.editingId !== null;
+
+  if (isEditing && !state.perms.edit) {
+    toast('Tidak ada akses edit jurnal', true);
+    return;
+  }
+  if (!isEditing && !state.perms.create) {
+    toast('Tidak ada akses membuat jurnal', true);
+    return;
+  }
+
   btn.disabled = true;
   btn.textContent = isEditing ? 'Mengupdate...' : 'Menyimpan...';
 
@@ -288,10 +312,6 @@ async function renderJournals() {
       sumMap[r.journal_id].c += Number(r.credit_base);
     });
 
-    const canEdit     = await hasRole('admin');
-    const canReversal = await hasRole('supervisor');
-    const canDelete   = await hasRole('superadmin');
-
     wrap.innerHTML = list.map(j => {
       const s = sumMap[j.id] || { d: 0, c: 0 };
       const cur = j.currency_code !== 'IDR' ? ` (${j.currency_code} @${j.exchange_rate})` : '';
@@ -303,9 +323,9 @@ async function renderJournals() {
           ? `<span style="background:#dbeafe;color:#1e40af;padding:2px 8px;border-radius:4px;font-size:11px;margin-left:6px;">REVERSAL</span>`
           : '');
 
-      const showEdit     = canEdit     && !isReversed && !isReversal;
-      const showReversal = canReversal && !isReversed && !isReversal;
-      const showDelete   = canDelete   && !isReversal;
+      const showEdit     = state.perms.edit     && !isReversed && !isReversal;
+      const showReversal = state.perms.reversal && !isReversed && !isReversal;
+      const showDelete   = state.perms.delete   && !isReversal;
 
       const buttons = [];
       if (showEdit) buttons.push(
@@ -346,6 +366,7 @@ async function renderJournals() {
 
 async function loadEdit(journalId) {
   try {
+    if (!state.perms.edit) throw new Error('Tidak ada akses edit jurnal');
     const j = await getJournal(journalId);
     state.editingId = journalId;
 
@@ -380,6 +401,7 @@ async function loadEdit(journalId) {
 }
 
 async function onReverse(journalId, journalNo) {
+  if (!state.perms.reversal) { toast('Tidak ada akses reversal', true); return; }
   if (!confirm(
     `Reversal jurnal ${journalNo}?\n\n` +
     `Sistem akan membuat jurnal balik otomatis. Jurnal asli tetap tersimpan ` +
@@ -396,6 +418,7 @@ async function onReverse(journalId, journalNo) {
 }
 
 async function onDelete(journalId, journalNo) {
+  if (!state.perms.delete) { toast('Tidak ada akses hapus jurnal', true); return; }
   if (!confirm(
     `HAPUS PERMANEN jurnal ${journalNo}?\n\n` +
     `Tindakan ini tidak bisa dibatalkan. Untuk koreksi normal, gunakan Reversal.`

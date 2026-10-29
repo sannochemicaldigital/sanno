@@ -1,13 +1,15 @@
 // js/reports-page.js
 import { requireAuth, logout } from './auth.js';
 import { renderNav, requirePageAccess } from './access.js';
+import { hasPermission } from './permissions.js';
 import { trialBalance, cashflow, agingPiutang, labaRugi, neraca } from './reports.js';
 
 const state = {
   from: null,
   to: null,
   activeTab: 'tb',
-  lastData: null
+  lastData: null,
+  perms: {}
 };
 
 function toast(msg, isError = false) {
@@ -40,12 +42,49 @@ function periodLabel(from, to) {
   document.getElementById('logoutBtn').addEventListener('click', logout);
   await renderNav(document.getElementById('mainNav'), 'reports');
 
+  // Muat permission
+  state.perms.export       = await hasPermission('reports.export');
+  state.perms.periodSet    = await hasPermission('reports.period.set');
+  state.perms.trialBalance = await hasPermission('reports.trial_balance');
+  state.perms.cashflow     = await hasPermission('reports.cashflow');
+  state.perms.aging        = await hasPermission('reports.aging_piutang');
+  state.perms.labaRugi     = await hasPermission('reports.laba_rugi');
+  state.perms.neraca       = await hasPermission('reports.neraca');
+
+  if (!state.perms.export) document.getElementById('exportCsv').style.display = 'none';
+  if (!state.perms.periodSet) {
+    document.getElementById('applyFilter').disabled = true;
+    document.getElementById('resetFilter').disabled = true;
+  }
+
+  // Sembunyikan tab yang tidak berhak
+  const tabPerms = {
+    tb: state.perms.trialBalance, cf: state.perms.cashflow,
+    ar: state.perms.aging, lr: state.perms.labaRugi, nc: state.perms.neraca
+  };
+  let firstAllowed = null;
+  Object.entries(tabPerms).forEach(([tab, ok]) => {
+    const btn = document.querySelector(`.tabs button[data-tab="${tab}"]`);
+    if (!ok && btn) btn.style.display = 'none';
+    else if (ok && !firstAllowed) firstAllowed = tab;
+  });
+
+  // Default periode
   const today = new Date();
   const firstOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
   document.getElementById('filterFrom').value = firstOfMonth.toISOString().slice(0, 10);
   document.getElementById('filterTo').value = today.toISOString().slice(0, 10);
   state.from = document.getElementById('filterFrom').value;
   state.to = document.getElementById('filterTo').value;
+
+  // Aktifkan tab pertama yang berhak
+  if (firstAllowed) {
+    document.querySelectorAll('.tabs button').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-panel').forEach(p => p.style.display = 'none');
+    document.querySelector(`.tabs button[data-tab="${firstAllowed}"]`).classList.add('active');
+    document.getElementById('tab-' + firstAllowed).style.display = 'block';
+    state.activeTab = firstAllowed;
+  }
 
   document.querySelectorAll('.tabs button').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -265,6 +304,7 @@ async function loadNeraca() {
 }
 
 function exportCsv() {
+  if (!state.perms.export) { toast('Tidak ada akses export', true); return; }
   const d = state.lastData;
   if (!d) { toast('Tidak ada data untuk diexport', true); return; }
 

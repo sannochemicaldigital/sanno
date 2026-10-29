@@ -1,6 +1,7 @@
 // js/approval-page.js
 import { requireAuth, logout, getCurrentRole, getSetting } from './auth.js';
 import { renderNav, requirePageAccess } from './access.js';
+import { hasPermission } from './permissions.js';
 import { listPendingApprovals, approveSO, rejectSO, voidSO } from './approval.js';
 
 function toast(msg, isError = false) {
@@ -18,6 +19,7 @@ function fmt(n) { return 'Rp ' + Number(n || 0).toLocaleString('id-ID'); }
 
 let currentRole = null;
 let currentMode = 'supervisor_only';
+let perms = { approve: false, reject: false, void: false };
 
 (async () => {
   const user = await requireAuth();
@@ -28,6 +30,10 @@ let currentMode = 'supervisor_only';
 
   document.getElementById('logoutBtn').addEventListener('click', logout);
   await renderNav(document.getElementById('mainNav'), 'approval');
+
+  perms.approve = await hasPermission('sales.order.approve');
+  perms.reject  = await hasPermission('sales.order.reject');
+  perms.void    = await hasPermission('sales.order.void');
 
   currentMode = await getSetting('so_approval_mode') || 'supervisor_only';
   document.getElementById('approvalModeInfo').innerHTML =
@@ -69,20 +75,24 @@ async function renderList() {
         const needFinance = currentMode === 'finance_and_supervisor';
 
         let canApproveThis = false;
-        if (currentRole === 'finance' && needFinance && !financeApproved) canApproveThis = true;
-        if (['supervisor','admin','superadmin'].includes(currentRole) && !supervisorApproved) canApproveThis = true;
+        if (perms.approve) {
+          if (currentRole === 'finance' && needFinance && !financeApproved) canApproveThis = true;
+          if (currentRole !== 'finance' && !supervisorApproved) canApproveThis = true;
+        }
 
         if (canApproveThis) {
           buttons.push(`<button class="btn btn-primary" style="padding:6px 12px;font-size:12px;" data-approve="${so.id}">Approve</button>`);
         }
-        buttons.push(`<button class="btn btn-danger" style="padding:6px 12px;font-size:12px;" data-reject="${so.id}">Reject</button>`);
+        if (perms.reject) {
+          buttons.push(`<button class="btn btn-danger" style="padding:6px 12px;font-size:12px;" data-reject="${so.id}">Reject</button>`);
+        }
 
         const info = [];
         if (needFinance) info.push(`Finance: ${financeApproved ? '✓' : '⏳'}`);
         info.push(`Supervisor: ${supervisorApproved ? '✓' : '⏳'}`);
         buttons.unshift(`<span style="font-size:12px;color:#6b7280;">${info.join(' · ')}</span>`);
       } else if (so.status === 'approved') {
-        if (['supervisor','admin','superadmin'].includes(currentRole)) {
+        if (perms.void) {
           buttons.push(`<button class="btn btn-secondary" style="padding:6px 12px;font-size:12px;background:#fef3c7;color:#92400e;" data-void="${so.id}">Void</button>`);
         }
       }
@@ -99,7 +109,7 @@ async function renderList() {
               <div style="color:#6b7280;font-size:12px;">${so.so_date}</div>
             </div>
           </div>
-          ${so.status === 'approved' ? '<div style="font-size:12px;color:#6b7280;margin-top:4px;">Menunggu gudang mark delivered (Fase 3).</div>' : ''}
+          ${so.status === 'approved' ? '<div style="font-size:12px;color:#6b7280;margin-top:4px;">Menunggu gudang mark delivered.</div>' : ''}
           <div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap;align-items:center;">${buttons.join('')}</div>
         </div>`;
     }).join('');
@@ -119,6 +129,7 @@ async function renderList() {
 }
 
 async function onApprove(soId) {
+  if (!perms.approve) { toast('Tidak ada akses approve', true); return; }
   if (!confirm('Approve SO ini?')) return;
   try {
     const newStatus = await approveSO(soId);
@@ -134,6 +145,7 @@ async function onApprove(soId) {
 }
 
 async function onReject(soId) {
+  if (!perms.reject) { toast('Tidak ada akses reject', true); return; }
   const reason = prompt('Alasan reject:');
   if (!reason) return;
   try {
@@ -146,6 +158,7 @@ async function onReject(soId) {
 }
 
 async function onVoid(soId) {
+  if (!perms.void) { toast('Tidak ada akses void', true); return; }
   const reason = prompt('Alasan void (barang belum keluar):');
   if (!reason) return;
   try {

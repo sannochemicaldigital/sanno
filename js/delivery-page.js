@@ -1,7 +1,8 @@
 // js/delivery-page.js
 import { requireAuth, logout } from './auth.js';
 import { renderNav, requirePageAccess } from './access.js';
-import { listDOs, getDO, markDelivered, cancelDO } from './delivery.js';
+import { hasPermission } from './permissions.js';
+import { listDOs, markDelivered, cancelDO } from './delivery.js';
 
 function toast(msg, isError = false) {
   const el = document.getElementById('toast');
@@ -16,17 +17,23 @@ function esc(s) {
 }
 function fmt(n) { return 'Rp ' + Number(n || 0).toLocaleString('id-ID'); }
 
-let currentRole = null;
+const state = {
+  canDeliver: false,
+  canCancel: false
+};
 
 (async () => {
   const user = await requireAuth();
   if (!user) return;
 
-  currentRole = await requirePageAccess('delivery');
-  if (!currentRole) return;
+  const role = await requirePageAccess('delivery');
+  if (!role) return;
 
   document.getElementById('logoutBtn').addEventListener('click', logout);
   await renderNav(document.getElementById('mainNav'), 'delivery');
+
+  state.canDeliver = await hasPermission('delivery.mark_delivered');
+  state.canCancel  = await hasPermission('delivery.cancel');
 
   await renderList();
 })();
@@ -55,10 +62,10 @@ async function renderList() {
       const so = d.sales_orders;
       const buttons = [];
       if (d.status === 'issued') {
-        if (['gudang','admin','superadmin'].includes(currentRole)) {
+        if (state.canDeliver) {
           buttons.push(`<button class="btn btn-primary" style="padding:6px 12px;font-size:12px;" data-deliver="${d.id}">Mark Delivered</button>`);
         }
-        if (['supervisor','admin','superadmin'].includes(currentRole)) {
+        if (state.canCancel) {
           buttons.push(`<button class="btn btn-secondary" style="padding:6px 12px;font-size:12px;background:#fef3c7;color:#92400e;" data-cancel="${d.id}">Cancel DO</button>`);
         }
       }
@@ -71,10 +78,10 @@ async function renderList() {
           <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;">
             <div>
               <b>${esc(d.do_no)}</b> ${statusBadge(d.status)}<br>
-              <span style="font-size:13px;">SO ${esc(so.so_no)} · ${esc(so.partners?.name || '')}</span>
+              <span style="font-size:13px;">SO ${esc(so?.so_no || '')} · ${esc(so?.partners?.name || '')}</span>
             </div>
             <div style="text-align:right;font-size:13px;">
-              <div>${fmt(so.grand_total)}</div>
+              <div>${fmt(so?.grand_total)}</div>
               <div style="color:#6b7280;font-size:12px;">${d.do_date}</div>
             </div>
           </div>
@@ -94,6 +101,7 @@ async function renderList() {
 }
 
 async function onDeliver(doId) {
+  if (!state.canDeliver) { toast('Tidak ada akses mark delivered', true); return; }
   if (!confirm('Mark DO ini sebagai delivered?\n\nStok barang akan dikurangi dan jurnal penjualan akan otomatis terbuat.')) return;
   try {
     const journalId = await markDelivered(doId);
@@ -105,6 +113,7 @@ async function onDeliver(doId) {
 }
 
 async function onCancel(doId) {
+  if (!state.canCancel) { toast('Tidak ada akses cancel DO', true); return; }
   const reason = prompt('Alasan cancel DO:');
   if (!reason) return;
   try {

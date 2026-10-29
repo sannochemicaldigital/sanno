@@ -1,6 +1,7 @@
 // js/sales-order-page.js
 import { requireAuth, logout, getCurrentRole, getSetting } from './auth.js';
 import { renderNav, requirePageAccess } from './access.js';
+import { hasPermission } from './permissions.js';
 import { listPartners } from './partners.js';
 import { listItems } from './items.js';
 import { createSO, editSO, submitSO, cancelSO, getSO, listSOs } from './sales-order.js';
@@ -13,7 +14,8 @@ const state = {
   lineCount: 0,
   editingId: null,
   ppnRate: 11,
-  role: null
+  role: null,
+  perms: { create: false, edit: false, submit: false, cancel: false }
 };
 
 function toast(msg, isError = false) {
@@ -39,18 +41,25 @@ function fmt(n) { return 'Rp ' + Number(n || 0).toLocaleString('id-ID'); }
   document.getElementById('logoutBtn').addEventListener('click', logout);
   await renderNav(document.getElementById('mainNav'), 'sales-order');
 
-  const ppnStr = await getSetting('ppn_rate');
-  state.ppnRate = Number(ppnStr) || 11;
+  state.perms.create = await hasPermission('sales.order.create');
+  state.perms.edit   = await hasPermission('sales.order.edit');
+  state.perms.submit = await hasPermission('sales.order.submit');
+  state.perms.cancel = await hasPermission('sales.order.cancel');
 
-  await loadMaster();
+  if (!state.perms.create) {
+    document.getElementById('form-so').style.display = 'none';
+    document.getElementById('formTitle').textContent = 'Tidak ada akses membuat SO';
+  } else {
+    const ppnStr = await getSetting('ppn_rate');
+    state.ppnRate = Number(ppnStr) || 11;
+    await loadMaster();
+    document.querySelector('[name=so_date]').value = new Date().toISOString().slice(0, 10);
+    document.getElementById('addLineBtn').addEventListener('click', () => addLine());
+    document.getElementById('cancelBtn').addEventListener('click', resetForm);
+    document.getElementById('form-so').addEventListener('submit', onSubmit);
+    addLine();
+  }
 
-  document.querySelector('[name=so_date]').value = new Date().toISOString().slice(0, 10);
-
-  document.getElementById('addLineBtn').addEventListener('click', () => addLine());
-  document.getElementById('cancelBtn').addEventListener('click', resetForm);
-  document.getElementById('form-so').addEventListener('submit', onSubmit);
-
-  addLine();
   await renderSOList();
 })();
 
@@ -87,14 +96,14 @@ function addLine() {
   div.className = 'line-row';
   div.dataset.lineId = id;
   div.innerHTML = `
-    <select class="line-item" data-field="item_id" required>
+    <select class="line-item" required>
       <option value="">— pilih item —</option>
       ${state.items.map(i =>
         `<option value="${i.id}">${esc(i.sku)} — ${esc(i.name)}</option>`
       ).join('')}
     </select>
-    <input type="number" class="line-qty" data-field="qty" placeholder="Qty" min="0.0001" step="0.0001" required>
-    <input type="number" class="line-price" data-field="unit_price" placeholder="Harga satuan" min="0" step="0.01" required>
+    <input type="number" class="line-qty" placeholder="Qty" min="0.0001" step="0.0001" required>
+    <input type="number" class="line-price" placeholder="Harga satuan" min="0" step="0.01" required>
     <div style="display:flex;align-items:center;font-size:13px;color:#6b7280;" class="line-subtotal">Rp 0</div>
     <button type="button" class="line-remove" title="Hapus">×</button>
   `;
@@ -155,8 +164,13 @@ async function onSubmit(e) {
   e.preventDefault();
   const f = e.target;
   const btn = document.getElementById('saveBtn');
+  const isEditing = state.editingId !== null;
+
+  if (isEditing && !state.perms.edit) { toast('Tidak ada akses edit SO', true); return; }
+  if (!isEditing && !state.perms.create) { toast('Tidak ada akses buat SO', true); return; }
+
   btn.disabled = true;
-  btn.textContent = state.editingId ? 'Mengupdate...' : 'Menyimpan...';
+  btn.textContent = isEditing ? 'Mengupdate...' : 'Menyimpan...';
   try {
     const lines = collectLines();
     if (lines.length === 0) throw new Error('Minimal 1 item');
@@ -168,7 +182,7 @@ async function onSubmit(e) {
       lines
     };
 
-    if (state.editingId) {
+    if (isEditing) {
       await editSO(state.editingId, payload);
       toast('✓ SO diupdate');
     } else {
@@ -211,9 +225,9 @@ async function renderSOList() {
     wrap.innerHTML = list.map(so => {
       const actions = [];
       if (so.status === 'draft') {
-        actions.push(`<button class="btn btn-secondary" style="padding:4px 10px;font-size:12px;" data-edit="${so.id}">Edit</button>`);
-        actions.push(`<button class="btn btn-primary" style="padding:4px 10px;font-size:12px;" data-submit="${so.id}">Submit Approval</button>`);
-        actions.push(`<button class="btn btn-danger" style="padding:4px 10px;font-size:12px;" data-cancel="${so.id}">Batal</button>`);
+        if (state.perms.edit)   actions.push(`<button class="btn btn-secondary" style="padding:4px 10px;font-size:12px;" data-edit="${so.id}">Edit</button>`);
+        if (state.perms.submit) actions.push(`<button class="btn btn-primary" style="padding:4px 10px;font-size:12px;" data-submit="${so.id}">Submit Approval</button>`);
+        if (state.perms.cancel) actions.push(`<button class="btn btn-danger" style="padding:4px 10px;font-size:12px;" data-cancel="${so.id}">Batal</button>`);
       }
       const actHtml = actions.length
         ? `<div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap;">${actions.join('')}</div>`
@@ -250,6 +264,7 @@ async function renderSOList() {
 }
 
 async function onEdit(soId) {
+  if (!state.perms.edit) { toast('Tidak ada akses edit SO', true); return; }
   try {
     const so = await getSO(soId);
     if (so.status !== 'draft') throw new Error('Hanya draft yang bisa diedit');
@@ -281,6 +296,7 @@ async function onEdit(soId) {
 }
 
 async function onSubmitApproval(soId) {
+  if (!state.perms.submit) { toast('Tidak ada akses submit', true); return; }
   if (!confirm('Submit SO ini untuk approval?')) return;
   try {
     await submitSO(soId);
@@ -292,6 +308,7 @@ async function onSubmitApproval(soId) {
 }
 
 async function onCancel(soId) {
+  if (!state.perms.cancel) { toast('Tidak ada akses batal SO', true); return; }
   const reason = prompt('Alasan batal:');
   if (!reason) return;
   try {

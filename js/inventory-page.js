@@ -1,6 +1,7 @@
 // js/inventory-page.js
 import { requireAuth, logout } from './auth.js';
 import { renderNav, requirePageAccess } from './access.js';
+import { hasPermission } from './permissions.js';
 import { listItems, createItem } from './items.js';
 import { supabase } from './supabase-client.js';
 
@@ -20,6 +21,9 @@ function fmt(n) {
 }
 
 let allItems = [];
+const perms = {
+  create: false, stockIn: false, viewPrice: false, viewMovement: false
+};
 
 (async () => {
   const user = await requireAuth();
@@ -31,19 +35,36 @@ let allItems = [];
   document.getElementById('logoutBtn').addEventListener('click', logout);
   await renderNav(document.getElementById('mainNav'), 'inventory');
 
-  // Tanggal default hari ini
+  perms.create       = await hasPermission('inventory.item.create');
+  perms.stockIn      = await hasPermission('inventory.stock_in');
+  perms.viewPrice    = await hasPermission('inventory.item.view_price');
+  perms.viewMovement = await hasPermission('inventory.movement.view');
+
+  if (!perms.create)  document.getElementById('form-new-item').style.display = 'none';
+  if (!perms.stockIn) document.getElementById('form-stock-in').style.display = 'none';
+  if (!perms.viewMovement) {
+    const histCard = document.getElementById('tbody-movements')?.closest('.card');
+    if (histCard) histCard.style.display = 'none';
+  }
+
+  // Sembunyikan kolom harga di riwayat kalau tidak punya izin
+  if (!perms.viewPrice) {
+    document.querySelectorAll('#tbody-movements').forEach(() => {});
+  }
+
   document.querySelector('#form-stock-in [name=movement_date]').value =
     new Date().toISOString().slice(0, 10);
 
-  // Event handlers
-  document.getElementById('form-new-item').addEventListener('submit', onCreateItem);
-  document.getElementById('form-stock-in').addEventListener('submit', onStockIn);
+  if (perms.create)  document.getElementById('form-new-item').addEventListener('submit', onCreateItem);
+  if (perms.stockIn) document.getElementById('form-stock-in').addEventListener('submit', onStockIn);
 
   await loadAll();
 })();
 
 async function loadAll() {
-  await Promise.all([renderInventory(), renderMovements()]);
+  const tasks = [renderInventory()];
+  if (perms.viewMovement) tasks.push(renderMovements());
+  await Promise.all(tasks);
 }
 
 async function renderInventory() {
@@ -68,12 +89,15 @@ async function renderInventory() {
         </tr>`;
     }).join('') || '<tr><td colspan="6" style="text-align:center;color:#9ca3af;">Belum ada item</td></tr>';
 
-    // Update dropdown stok masuk
-    const sel = document.getElementById('stockInItem');
-    sel.innerHTML = '<option value="">— pilih item —</option>' +
-      allItems.map(i =>
-        `<option value="${i.id}">${esc(i.sku)} — ${esc(i.name)} (stok: ${Number(i.stock_qty).toLocaleString('id-ID')})</option>`
-      ).join('');
+    if (perms.stockIn) {
+      const sel = document.getElementById('stockInItem');
+      if (sel) {
+        sel.innerHTML = '<option value="">— pilih item —</option>' +
+          allItems.map(i =>
+            `<option value="${i.id}">${esc(i.sku)} — ${esc(i.name)} (stok: ${Number(i.stock_qty).toLocaleString('id-ID')})</option>`
+          ).join('');
+      }
+    }
   } catch (err) {
     tbody.innerHTML = `<tr><td colspan="6" style="color:#b91c1c;">${esc(err.message)}</td></tr>`;
   }
@@ -81,37 +105,41 @@ async function renderInventory() {
 
 async function renderMovements() {
   const tbody = document.getElementById('tbody-movements');
+  if (!tbody) return;
   tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#9ca3af;">Memuat...</td></tr>';
   try {
     const { data, error } = await supabase
       .from('stock_movements')
       .select('id, movement_date, type, qty, unit_cost, total_cost, memo, items!inner(sku, name)')
-      .eq('type', 'in')
       .order('movement_date', { ascending: false })
       .order('id', { ascending: false })
-      .limit(50);
+      .limit(100);
     if (error) throw error;
 
-    tbody.innerHTML = (data || []).map(m => `
-      <tr>
-        <td data-label="Tanggal">${esc(m.movement_date)}</td>
-        <td data-label="Item">${esc(m.items?.sku || '')} — ${esc(m.items?.name || '')}</td>
-        <td data-label="Qty" class="num">${fmt(m.qty)}</td>
-        <td data-label="Harga" class="num">${fmt(m.unit_cost)}</td>
-        <td data-label="Total" class="num">${fmt(m.total_cost)}</td>
-        <td data-label="Memo">${esc(m.memo || '—')}</td>
-      </tr>
-    `).join('') || '<tr><td colspan="6" style="text-align:center;color:#9ca3af;">Belum ada stok masuk</td></tr>';
+    tbody.innerHTML = (data || []).map(m => {
+      const priceCols = perms.viewPrice
+        ? `<td data-label="Harga" class="num">${fmt(m.unit_cost)}</td>
+           <td data-label="Total" class="num">${fmt(m.total_cost)}</td>`
+        : `<td data-label="Harga" class="num">—</td>
+           <td data-label="Total" class="num">—</td>`;
+      return `
+        <tr>
+          <td data-label="Tanggal">${esc(m.movement_date)}</td>
+          <td data-label="Item">${esc(m.items?.sku || '')} — ${esc(m.items?.name || '')}</td>
+          <td data-label="Tipe">${esc(m.type)}</td>
+          <td data-label="Qty" class="num">${fmt(m.qty)}</td>
+          ${priceCols}
+          <td data-label="Memo">${esc(m.memo || '—')}</td>
+        </tr>`;
+    }).join('') || '<tr><td colspan="7" style="text-align:center;color:#9ca3af;">Belum ada movement</td></tr>';
   } catch (err) {
-    tbody.innerHTML = `<tr><td colspan="6" style="color:#b91c1c;">${esc(err.message)}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="7" style="color:#b91c1c;">${esc(err.message)}</td></tr>`;
   }
 }
 
-// ============================================================
-// BUAT ITEM BARU
-// ============================================================
 async function onCreateItem(e) {
   e.preventDefault();
+  if (!perms.create) { toast('Tidak ada akses buat item', true); return; }
   const f = e.target;
   const btn = document.getElementById('createItemBtn');
   btn.disabled = true;
@@ -136,11 +164,9 @@ async function onCreateItem(e) {
   }
 }
 
-// ============================================================
-// STOK MASUK
-// ============================================================
 async function onStockIn(e) {
   e.preventDefault();
+  if (!perms.stockIn) { toast('Tidak ada akses stok masuk', true); return; }
   const f = e.target;
   const btn = document.getElementById('stockInBtn');
   btn.disabled = true;
