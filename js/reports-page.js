@@ -2,8 +2,11 @@
 import { requireAuth, logout } from './auth.js';
 import { renderNav, requirePageAccess } from './access.js';
 import { hasPermission } from './permissions.js';
-import { trialBalance, cashflow, agingPiutang, labaRugi, neraca } from './reports.js';
+import { trialBalance, cashflow, agingPiutang, agingHutang, labaRugi, neraca } from './reports.js';
 
+// ============================================================
+// STATE
+// ============================================================
 const state = {
   from: null,
   to: null,
@@ -12,6 +15,9 @@ const state = {
   perms: {}
 };
 
+// ============================================================
+// UTIL
+// ============================================================
 function toast(msg, isError = false) {
   const el = document.getElementById('toast');
   el.textContent = msg;
@@ -32,6 +38,9 @@ function periodLabel(from, to) {
   return `${from || '...'} s/d ${to || '...'}`;
 }
 
+// ============================================================
+// INIT
+// ============================================================
 (async () => {
   const user = await requireAuth();
   if (!user) return;
@@ -48,6 +57,7 @@ function periodLabel(from, to) {
   state.perms.trialBalance = await hasPermission('reports.trial_balance');
   state.perms.cashflow     = await hasPermission('reports.cashflow');
   state.perms.aging        = await hasPermission('reports.aging_piutang');
+  state.perms.agingHutang  = await hasPermission('finance.hutang.detail');
   state.perms.labaRugi     = await hasPermission('reports.laba_rugi');
   state.perms.neraca       = await hasPermission('reports.neraca');
 
@@ -59,8 +69,12 @@ function periodLabel(from, to) {
 
   // Sembunyikan tab yang tidak berhak
   const tabPerms = {
-    tb: state.perms.trialBalance, cf: state.perms.cashflow,
-    ar: state.perms.aging, lr: state.perms.labaRugi, nc: state.perms.neraca
+    tb: state.perms.trialBalance,
+    cf: state.perms.cashflow,
+    ar: state.perms.aging,
+    ap: state.perms.agingHutang,
+    lr: state.perms.labaRugi,
+    nc: state.perms.neraca
   };
   let firstAllowed = null;
   Object.entries(tabPerms).forEach(([tab, ok]) => {
@@ -114,14 +128,21 @@ function periodLabel(from, to) {
   await loadActive();
 })();
 
+// ============================================================
+// DISPATCH
+// ============================================================
 async function loadActive() {
   if (state.activeTab === 'tb') await loadTrialBalance();
   else if (state.activeTab === 'cf') await loadCashflow();
   else if (state.activeTab === 'ar') await loadAging();
+  else if (state.activeTab === 'ap') await loadAgingHutang();
   else if (state.activeTab === 'lr') await loadLabaRugi();
   else if (state.activeTab === 'nc') await loadNeraca();
 }
 
+// ============================================================
+// TRIAL BALANCE
+// ============================================================
 async function loadTrialBalance() {
   const tbody = document.getElementById('tbody-tb');
   const tfoot = document.getElementById('tfoot-tb');
@@ -160,6 +181,9 @@ async function loadTrialBalance() {
   }
 }
 
+// ============================================================
+// CASHFLOW
+// ============================================================
 async function loadCashflow() {
   const sumBody = document.getElementById('tbody-cf-summary');
   const detailBody = document.getElementById('tbody-cf-detail');
@@ -196,6 +220,9 @@ async function loadCashflow() {
   }
 }
 
+// ============================================================
+// AGING PIUTANG
+// ============================================================
 async function loadAging() {
   const tbody = document.getElementById('tbody-ar');
   const tfoot = document.getElementById('tfoot-ar');
@@ -231,6 +258,47 @@ async function loadAging() {
   }
 }
 
+// ============================================================
+// AGING HUTANG
+// ============================================================
+async function loadAgingHutang() {
+  const tbody = document.getElementById('tbody-ap');
+  const tfoot = document.getElementById('tfoot-ap');
+  document.getElementById('apPeriod').textContent = `Per ${state.to || new Date().toISOString().slice(0, 10)}`;
+  tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#9ca3af;">Memuat...</td></tr>';
+  try {
+    const rows = await agingHutang({ asOf: state.to || null });
+    let t0 = 0, t31 = 0, t60 = 0, tAll = 0;
+    tbody.innerHTML = rows.map(r => {
+      t0 += r.b0_30; t31 += r.b31_60; t60 += r.b60p; tAll += r.total;
+      return `
+        <tr>
+          <td data-label="Vendor">${esc(r.name)}</td>
+          <td data-label="0-30" class="num">${fmt(r.b0_30)}</td>
+          <td data-label="31-60" class="num">${fmt(r.b31_60)}</td>
+          <td data-label="60+" class="num">${fmt(r.b60p)}</td>
+          <td data-label="Total" class="num">${fmt(r.total)}</td>
+        </tr>`;
+    }).join('') || '<tr><td colspan="5" style="text-align:center;color:#9ca3af;">Tidak ada hutang</td></tr>';
+
+    tfoot.innerHTML = `
+      <tr class="report-total">
+        <td>TOTAL</td>
+        <td class="num">${fmt(t0)}</td>
+        <td class="num">${fmt(t31)}</td>
+        <td class="num">${fmt(t60)}</td>
+        <td class="num">${fmt(tAll)}</td>
+      </tr>`;
+    state.lastData = { type: 'ap', rows };
+  } catch (err) {
+    tbody.innerHTML = `<tr><td colspan="5" style="color:#b91c1c;">${esc(err.message)}</td></tr>`;
+    tfoot.innerHTML = '';
+  }
+}
+
+// ============================================================
+// LABA RUGI
+// ============================================================
 async function loadLabaRugi() {
   const tbody = document.getElementById('tbody-lr');
   document.getElementById('lrPeriod').textContent = periodLabel(state.from, state.to);
@@ -267,6 +335,9 @@ async function loadLabaRugi() {
   }
 }
 
+// ============================================================
+// NERACA
+// ============================================================
 async function loadNeraca() {
   const tbody = document.getElementById('tbody-nc');
   const status = document.getElementById('ncStatus');
@@ -303,6 +374,9 @@ async function loadNeraca() {
   }
 }
 
+// ============================================================
+// EXPORT CSV
+// ============================================================
 function exportCsv() {
   if (!state.perms.export) { toast('Tidak ada akses export', true); return; }
   const d = state.lastData;
@@ -320,6 +394,10 @@ function exportCsv() {
   } else if (d.type === 'ar') {
     filename = 'aging-piutang';
     headers = ['Pelanggan', '0-30', '31-60', '60+', 'Total'];
+    rows = d.rows.map(r => [r.name, r.b0_30, r.b31_60, r.b60p, r.total]);
+  } else if (d.type === 'ap') {
+    filename = 'aging-hutang';
+    headers = ['Vendor', '0-30', '31-60', '60+', 'Total'];
     rows = d.rows.map(r => [r.name, r.b0_30, r.b31_60, r.b60p, r.total]);
   } else if (d.type === 'lr') {
     filename = 'laba-rugi';
