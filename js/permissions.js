@@ -1,44 +1,64 @@
 // js/permissions.js
 import { supabase } from './supabase-client.js';
 
-let cache = {}; // cache per key selama sesi
+let cacheSet = null;   // Set of granted permission keys
+let loading = null;    // Promise loading (untuk dedupe concurrent)
+
+async function loadPermissions() {
+  if (cacheSet) return cacheSet;
+  if (loading) return loading;
+
+  loading = (async () => {
+    const { data, error } = await supabase.rpc('get_my_permissions');
+    if (error) {
+      console.warn('get_my_permissions error:', error.message);
+      cacheSet = new Set();
+      loading = null;
+      return cacheSet;
+    }
+    cacheSet = new Set((data || []).map(r => r.permission));
+    loading = null;
+    return cacheSet;
+  })();
+
+  return loading;
+}
 
 export async function hasPermission(key) {
-  if (key in cache) return cache[key];
-  const { data, error } = await supabase.rpc('has_permission', { p_key: key });
-  if (error) {
-    console.warn('has_permission error:', key, error.message);
-    return false;
-  }
-  cache[key] = data === true;
-  return cache[key];
+  const set = await loadPermissions();
+  return set.has(key);
 }
 
 export async function hasAnyPermission(keys) {
-  for (const k of keys) {
-    if (await hasPermission(k)) return true;
-  }
-  return false;
+  const set = await loadPermissions();
+  return keys.some(k => set.has(k));
 }
 
 export async function hasAllPermissions(keys) {
-  for (const k of keys) {
-    if (!(await hasPermission(k))) return false;
-  }
-  return true;
+  const set = await loadPermissions();
+  return keys.every(k => set.has(k));
 }
 
-// Untuk halaman yang butuh cek permission saat load
 export async function requirePermission(key, fallbackUrl = './dashboard.html') {
-  const ok = await hasPermission(key);
-  if (!ok) {
+  if (!(await hasPermission(key))) {
     window.location.href = fallbackUrl;
     return false;
   }
   return true;
 }
 
-// Kelola permission
+// Preload permission sekali di awal (dipanggil di halaman yang butuh cepat)
+export async function preloadPermissions() {
+  return loadPermissions();
+}
+
+// Reset cache (setelah ubah permission atau logout)
+export function resetPermissionCache() {
+  cacheSet = null;
+  loading = null;
+}
+
+// Kelola permission (untuk halaman settings)
 export async function listPermissions() {
   const { data, error } = await supabase
     .from('permissions')
@@ -58,17 +78,15 @@ export async function listRolePermissions() {
 export async function setRolePermission(role, permission, granted) {
   if (granted) {
     const { error } = await supabase
-      .from('role_permissions')
-      .insert({ role, permission });
-    if (error && error.code !== '23505') throw error; // ignore duplicate
+      .from('role_permissions').insert({ role, permission });
+    if (error && error.code !== '23505') throw error;
   } else {
     const { error } = await supabase
       .from('role_permissions')
       .delete().eq('role', role).eq('permission', permission);
     if (error) throw error;
   }
-  // Reset cache lokal agar hasPermission berikutnya re-query
-  cache = {};
+  resetPermissionCache();
 }
 
 export async function listUserPermissions(userId) {
@@ -82,7 +100,6 @@ export async function listUserPermissions(userId) {
 
 export async function setUserPermission(userId, permission, granted) {
   if (granted === null) {
-    // Hapus override (kembali ke default role)
     const { error } = await supabase
       .from('user_permissions')
       .delete().eq('user_id', userId).eq('permission', permission);
@@ -98,10 +115,5 @@ export async function setUserPermission(userId, permission, granted) {
       }, { onConflict: 'user_id,permission' });
     if (error) throw error;
   }
-  cache = {};
-}
-
-// Reset cache (dipanggil saat logout atau role berubah)
-export function resetPermissionCache() {
-  cache = {};
+  resetPermissionCache();
 }
