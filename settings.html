@@ -20,6 +20,7 @@
       <button data-tab="users">User</button>
       <button data-tab="salespartner">Sales ↔ Pelanggan</button>
       <button data-tab="permissions">Permissions</button>
+      <button data-tab="periods">Periode</button>
     </div>
 
     <!-- ==================== TAB SISTEM ==================== -->
@@ -129,6 +130,54 @@
           </select>
         </div>
         <div id="userPermissionsList" style="margin-top:12px;"></div>
+      </div>
+    </section>
+
+    <!-- ==================== TAB PERIODE ==================== -->
+    <section id="tab-periods" class="tab-panel" style="display:none;">
+      <div class="card">
+        <h3 style="margin-top:0;font-size:16px;">Kunci Periode Baru</h3>
+        <p style="font-size:13px;color:#6b7280;margin-top:0;">
+          Setelah dikunci, tidak ada jurnal yang bisa dibuat, diedit, dihapus,
+          atau di-reversal di periode tersebut. Hanya superadmin yang bisa lock/unlock.
+        </p>
+        <form id="form-lock-period">
+          <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(140px,1fr));">
+            <div class="form-row">
+              <label>Tahun</label>
+              <input type="number" name="year" min="2020" max="2100" required value="2026">
+            </div>
+            <div class="form-row">
+              <label>Bulan</label>
+              <select name="month" required>
+                <option value="1">Januari</option>
+                <option value="2">Februari</option>
+                <option value="3">Maret</option>
+                <option value="4">April</option>
+                <option value="5">Mei</option>
+                <option value="6">Juni</option>
+                <option value="7">Juli</option>
+                <option value="8">Agustus</option>
+                <option value="9">September</option>
+                <option value="10">Oktober</option>
+                <option value="11">November</option>
+                <option value="12">Desember</option>
+              </select>
+            </div>
+            <div class="form-row" style="grid-column: span 2;">
+              <label>Catatan (opsional)</label>
+              <input name="notes" placeholder="mis. Tutup buku Oktober 2026">
+            </div>
+          </div>
+          <div class="form-actions">
+            <button type="submit" class="btn btn-primary" id="lockPeriodBtn">🔒 Kunci Periode</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="card">
+        <h3 style="margin-top:0;font-size:16px;">Periode Terkunci</h3>
+        <div id="lockedPeriodsList"></div>
       </div>
     </section>
   </div>
