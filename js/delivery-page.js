@@ -64,11 +64,16 @@ async function renderList() {
       const so = d.sales_orders;
       const buttons = [];
 
-      // Tombol Cetak — selalu muncul kalau punya permission delivery.view
-      // (bisa cetak DO issued maupun delivered; cancelled tidak perlu)
+      // Tombol Cetak DO — selalu muncul kalau punya permission delivery.view
       if (state.canPrint && d.status !== 'cancelled') {
         buttons.push(`<button class="btn btn-secondary" style="padding:6px 12px;font-size:12px;"
-                              data-print="${d.id}">🖨 Cetak</button>`);
+                              data-print="${d.id}">🖨 Cetak DO</button>`);
+      }
+
+      // Tombol Invoice — hanya untuk DO delivered (SO sudah posted)
+      if (state.canPrint && d.status === 'delivered' && so?.id) {
+        buttons.push(`<button class="btn btn-primary" style="padding:6px 12px;font-size:12px;"
+                              data-invoice="${so.id}">🧾 Invoice</button>`);
       }
 
       if (d.status === 'issued') {
@@ -105,6 +110,9 @@ async function renderList() {
     wrap.querySelectorAll('[data-print]').forEach(btn => {
       btn.addEventListener('click', () => onPrint(Number(btn.dataset.print)));
     });
+    wrap.querySelectorAll('[data-invoice]').forEach(btn => {
+      btn.addEventListener('click', () => onInvoice(Number(btn.dataset.invoice)));
+    });
     wrap.querySelectorAll('[data-deliver]').forEach(btn => {
       btn.addEventListener('click', () => onDeliver(Number(btn.dataset.deliver)));
     });
@@ -116,9 +124,14 @@ async function renderList() {
   }
 }
 
-async function onPrint(doId) {
+function onPrint(doId) {
   if (!state.canPrint) { toast('Tidak ada akses cetak DO', true); return; }
   window.open(`./delivery-print.html?id=${doId}`, '_blank');
+}
+
+function onInvoice(soId) {
+  if (!state.canPrint) { toast('Tidak ada akses invoice', true); return; }
+  window.open(`./invoice-print.html?id=${soId}`, '_blank');
 }
 
 async function onDeliver(doId) {
