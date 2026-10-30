@@ -58,17 +58,20 @@ function periodLabel(from, to) {
   await renderNav(document.getElementById('mainNav'), 'reports');
 
   // Muat permission
-  state.perms.export          = await hasPermission('reports.export');
-  state.perms.periodSet       = await hasPermission('reports.period.set');
-  state.perms.trialBalance    = await hasPermission('reports.trial_balance');
-  state.perms.cashflow        = await hasPermission('reports.cashflow');
-  state.perms.aging           = await hasPermission('reports.aging_piutang');
-  state.perms.agingHutang     = await hasPermission('finance.hutang.detail');
+  state.perms.export           = await hasPermission('reports.export');
+  state.perms.periodSet        = await hasPermission('reports.period.set');
+  state.perms.trialBalance     = await hasPermission('reports.trial_balance');
+  state.perms.cashflow         = await hasPermission('reports.cashflow');
+  state.perms.aging            = await hasPermission('reports.aging_piutang');
+  state.perms.agingHutang      = await hasPermission('finance.hutang.detail');
   state.perms.salesPerformance = await hasPermission('reports.view');
-  state.perms.labaRugi        = await hasPermission('reports.laba_rugi');
-  state.perms.neraca          = await hasPermission('reports.neraca');
+  state.perms.labaRugi         = await hasPermission('reports.laba_rugi');
+  state.perms.neraca           = await hasPermission('reports.neraca');
 
-  if (!state.perms.export) document.getElementById('exportCsv').style.display = 'none';
+  if (!state.perms.export) {
+    document.getElementById('exportCsv').style.display = 'none';
+    document.getElementById('printReportBtn').style.display = 'none';
+  }
   if (!state.perms.periodSet) {
     document.getElementById('applyFilter').disabled = true;
     document.getElementById('resetFilter').disabled = true;
@@ -132,6 +135,7 @@ function periodLabel(from, to) {
     loadActive();
   });
   document.getElementById('exportCsv').addEventListener('click', exportCsv);
+  document.getElementById('printReportBtn').addEventListener('click', printReport);
 
   await loadActive();
 })();
@@ -440,6 +444,33 @@ async function loadNeraca() {
 }
 
 // ============================================================
+// CETAK PDF
+// ============================================================
+function printReport() {
+  if (!state.perms.export) {
+    toast('Tidak ada akses cetak laporan', true);
+    return;
+  }
+
+  const typeMap = {
+    tb: 'tb', cf: 'cf', ar: 'ar', ap: 'ap', sp: 'sp', lr: 'lr', nc: 'nc'
+  };
+
+  const type = typeMap[state.activeTab];
+  if (!type) {
+    toast('Tipe laporan tidak dikenal', true);
+    return;
+  }
+
+  const params = new URLSearchParams();
+  params.set('type', type);
+  if (state.from) params.set('from', state.from);
+  if (state.to) params.set('to', state.to);
+
+  window.open(`./reports-print.html?${params.toString()}`, '_blank');
+}
+
+// ============================================================
 // EXPORT CSV
 // ============================================================
 function exportCsv() {
@@ -472,7 +503,6 @@ function exportCsv() {
       r.sales_name, r.sales_email, r.total_so, r.draft, r.pending, r.approved,
       r.posted, r.rejected, r.cancelled, r.total_posted, r.total_all
     ]);
-    // Tambah baris TOTAL
     if (d.totals) {
       rows.push([
         'TOTAL', '', d.totals.total_so, d.totals.draft, d.totals.pending,
