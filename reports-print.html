@@ -1,0 +1,584 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cetak Laporan — Sanno Accounting</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Segoe UI', Arial, sans-serif;
+      font-size: 11px;
+      color: #1a1a1a;
+      background: #f4f6f8;
+      padding: 20px;
+    }
+
+    .toolbar {
+      max-width: 210mm;
+      margin: 0 auto 12px;
+      display: flex;
+      gap: 8px;
+      justify-content: flex-end;
+    }
+    .toolbar button {
+      padding: 8px 16px;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 600;
+    }
+    .btn-print { background: #2563eb; color: #fff; }
+    .btn-print:hover { background: #1d4ed8; }
+    .btn-close { background: #e5e7eb; color: #374151; }
+    .btn-close:hover { background: #d1d5db; }
+
+    .paper {
+      max-width: 210mm;
+      min-height: 297mm;
+      margin: 0 auto;
+      background: #fff;
+      padding: 15mm 15mm;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+    }
+
+    /* Header */
+    .company-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      border-bottom: 3px solid #2563eb;
+      padding-bottom: 10px;
+      margin-bottom: 16px;
+    }
+    .company-left { flex: 1; }
+    .company-logo { max-height: 50px; max-width: 130px; margin-bottom: 6px; }
+    .company-name { font-size: 16px; font-weight: 700; color: #1a1a1a; margin-bottom: 3px; }
+    .company-info { font-size: 10px; color: #4b5563; line-height: 1.5; }
+    .company-right { text-align: right; flex-shrink: 0; }
+    .doc-title { font-size: 16px; font-weight: 700; color: #2563eb; margin-bottom: 3px; }
+    .doc-period { font-size: 11px; color: #4b5563; }
+    .doc-date { font-size: 10px; color: #6b7280; margin-top: 2px; }
+
+    /* Tabel */
+    .report-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: 16px;
+      font-size: 11px;
+    }
+    .report-table thead { background: #f3f4f6; }
+    .report-table th {
+      padding: 6px 8px;
+      text-align: left;
+      font-weight: 600;
+      font-size: 10px;
+      color: #374151;
+      border-bottom: 2px solid #d1d5db;
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+    }
+    .report-table th.num { text-align: right; }
+    .report-table td {
+      padding: 5px 8px;
+      border-bottom: 1px solid #e5e7eb;
+      vertical-align: top;
+    }
+    .report-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+    .report-table tbody tr:last-child td { border-bottom: 1px solid #d1d5db; }
+
+    .report-table tfoot td {
+      padding: 6px 8px;
+      font-weight: 700;
+      background: #f9fafb;
+      border-top: 2px solid #d1d5db;
+    }
+    .report-table tfoot td.num { text-align: right; font-variant-numeric: tabular-nums; }
+
+    .report-section-title {
+      background: #eef2ff;
+      color: #1e40af;
+      font-weight: 700;
+      font-size: 11px;
+      padding: 6px 8px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .report-subtotal td {
+      font-weight: 600;
+      background: #f9fafb;
+    }
+    .report-grandtotal td {
+      font-weight: 700;
+      background: #dbeafe;
+      color: #1e40af;
+      font-size: 12px;
+    }
+
+    .neg { color: #dc2626; }
+    .pos { color: #059669; }
+
+    /* Footer */
+    .signatures {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 40px;
+      margin-top: 40px;
+    }
+    .sig-box { text-align: center; }
+    .sig-label { font-size: 10px; color: #6b7280; margin-bottom: 50px; }
+    .sig-line { border-top: 1px solid #374151; padding-top: 5px; font-size: 10px; color: #374151; }
+
+    .printed-at {
+      margin-top: 12px;
+      font-size: 9px;
+      color: #9ca3af;
+      text-align: right;
+    }
+
+    .empty {
+      text-align: center;
+      padding: 30px;
+      color: #9ca3af;
+      font-size: 12px;
+    }
+
+    .loading, .error {
+      text-align: center;
+      padding: 60px 20px;
+      font-size: 14px;
+      color: #6b7280;
+    }
+    .error { color: #b91c1c; }
+
+    @media print {
+      body { background: #fff; padding: 0; }
+      .toolbar { display: none; }
+      .paper {
+        box-shadow: none;
+        margin: 0;
+        padding: 0;
+        max-width: 100%;
+        min-height: auto;
+      }
+      @page {
+        size: A4;
+        margin: 12mm;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <div class="toolbar">
+    <button class="btn-close" onclick="window.close()">Tutup</button>
+    <button class="btn-print" onclick="window.print()">🖨 Cetak / Save PDF</button>
+  </div>
+
+  <div class="paper" id="paper">
+    <div class="loading">Memuat laporan...</div>
+  </div>
+
+  <script type="module">
+    import { requireAuth } from './js/auth.js';
+    import { getCompanyProfile } from './js/company.js';
+    import {
+      trialBalance, cashflow, agingPiutang, agingHutang,
+      salesReport, labaRugi, neraca
+    } from './js/reports.js';
+
+    // ============================================================
+    // UTIL
+    // ============================================================
+    const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({
+      '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+    }[c]));
+
+    function fmt(n) {
+      const v = Number(n || 0);
+      return v.toLocaleString('id-ID', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+    }
+    function fmtInt(n) {
+      return Number(n || 0).toLocaleString('id-ID');
+    }
+    function fmtDate(d) {
+      if (!d) return '—';
+      return new Date(d).toLocaleDateString('id-ID', {
+        day: '2-digit', month: 'long', year: 'numeric'
+      });
+    }
+    function periodLabel(from, to) {
+      if (!from && !to) return 'Semua Periode';
+      return `${from ? fmtDate(from) : '...'} s/d ${to ? fmtDate(to) : '...'}`;
+    }
+
+    function headerHtml(company, title, from, to) {
+      return `
+        <div class="company-header">
+          <div class="company-left">
+            ${company.logo_url ? `<img src="${esc(company.logo_url)}" alt="Logo" class="company-logo">` : ''}
+            <div class="company-name">${esc(company.name || 'Perusahaan')}</div>
+            <div class="company-info">
+              ${company.address ? esc(company.address) + '<br>' : ''}
+              ${company.phone ? 'Telp: ' + esc(company.phone) : ''}
+              ${company.phone && company.email ? ' · ' : ''}
+              ${company.email ? 'Email: ' + esc(company.email) : ''}
+              ${company.tax_id ? '<br>NPWP: ' + esc(company.tax_id) : ''}
+            </div>
+          </div>
+          <div class="company-right">
+            <div class="doc-title">${esc(title)}</div>
+            <div class="doc-period">Periode: ${periodLabel(from, to)}</div>
+            <div class="doc-date">Dicetak: ${new Date().toLocaleString('id-ID')}</div>
+          </div>
+        </div>`;
+    }
+
+    function footerHtml(company) {
+      return `
+        <div class="signatures">
+          <div class="sig-box">
+            <div class="sig-label">Dibuat Oleh,</div>
+            <div class="sig-line">( _________________________ )</div>
+          </div>
+          <div class="sig-box">
+            <div class="sig-label">Disetujui Oleh,</div>
+            <div class="sig-line">( _________________________ )</div>
+          </div>
+        </div>
+        ${company.notes ? `<div style="margin-top:20px;padding-top:8px;border-top:1px dashed #d1d5db;font-size:9px;color:#6b7280;font-style:italic;">${esc(company.notes)}</div>` : ''}`;
+    }
+
+    // ============================================================
+    // RENDER PER TIPE
+    // ============================================================
+    function renderTrialBalance(rows) {
+      let sumD = 0, sumC = 0;
+      const body = rows.map(r => {
+        sumD += Number(r.total_debit);
+        sumC += Number(r.total_credit);
+        const balCls = r.balance < 0 ? 'neg' : (r.balance > 0 ? 'pos' : '');
+        return `
+          <tr>
+            <td>${esc(r.code)}</td>
+            <td>${esc(r.name)}</td>
+            <td>${esc(r.type)}</td>
+            <td class="num">${fmt(r.total_debit)}</td>
+            <td class="num">${fmt(r.total_credit)}</td>
+            <td class="num ${balCls}">${fmt(r.balance)}</td>
+          </tr>`;
+      }).join('');
+
+      return `
+        <table class="report-table">
+          <thead>
+            <tr>
+              <th style="width:80px;">Kode</th>
+              <th>Nama Akun</th>
+              <th style="width:80px;">Tipe</th>
+              <th class="num" style="width:110px;">Debit</th>
+              <th class="num" style="width:110px;">Kredit</th>
+              <th class="num" style="width:110px;">Saldo</th>
+            </tr>
+          </thead>
+          <tbody>${body || '<tr><td colspan="6" class="empty">Tidak ada data</td></tr>'}</tbody>
+          <tfoot>
+            <tr>
+              <td colspan="3">TOTAL</td>
+              <td class="num">${fmt(sumD)}</td>
+              <td class="num">${fmt(sumC)}</td>
+              <td class="num">${fmt(sumD - sumC)}</td>
+            </tr>
+          </tfoot>
+        </table>`;
+    }
+
+    function renderCashflow(summary, rows) {
+      const summaryHtml = summary.map(s => {
+        const cls = s.net < 0 ? 'neg' : (s.net > 0 ? 'pos' : '');
+        return `
+          <tr>
+            <td>${esc(s.code)}</td>
+            <td>${esc(s.name)}</td>
+            <td class="num pos">${fmt(s.inflow)}</td>
+            <td class="num neg">${fmt(s.outflow)}</td>
+            <td class="num ${cls}">${fmt(s.net)}</td>
+          </tr>`;
+      }).join('');
+
+      const detailHtml = rows.map(r => `
+        <tr>
+          <td>${esc(r.journal_date)}</td>
+          <td>${esc(r.journal_no)}</td>
+          <td>${esc(r.account_code)} — ${esc(r.account_name)}</td>
+          <td>${esc(r.description || '')}</td>
+          <td class="num">${fmt(r.debit)}</td>
+          <td class="num">${fmt(r.credit)}</td>
+        </tr>`).join('');
+
+      return `
+        <div style="font-size:12px;font-weight:700;color:#1e40af;margin-bottom:6px;">Ringkasan Kas & Bank</div>
+        <table class="report-table">
+          <thead>
+            <tr>
+              <th style="width:80px;">Kode</th>
+              <th>Akun</th>
+              <th class="num" style="width:110px;">Masuk</th>
+              <th class="num" style="width:110px;">Keluar</th>
+              <th class="num" style="width:110px;">Net</th>
+            </tr>
+          </thead>
+          <tbody>${summaryHtml || '<tr><td colspan="5" class="empty">Tidak ada data</td></tr>'}</tbody>
+        </table>
+
+        <div style="font-size:12px;font-weight:700;color:#1e40af;margin-top:14px;margin-bottom:6px;">Detail Mutasi</div>
+        <table class="report-table">
+          <thead>
+            <tr>
+              <th style="width:70px;">Tanggal</th>
+              <th style="width:110px;">No. Jurnal</th>
+              <th>Akun</th>
+              <th>Deskripsi</th>
+              <th class="num" style="width:100px;">Debit</th>
+              <th class="num" style="width:100px;">Kredit</th>
+            </tr>
+          </thead>
+          <tbody>${detailHtml || '<tr><td colspan="6" class="empty">Tidak ada mutasi</td></tr>'}</tbody>
+        </table>`;
+    }
+
+    function renderAging(rows, label) {
+      let t0 = 0, t31 = 0, t60 = 0, tAll = 0;
+      const body = rows.map(r => {
+        t0 += r.b0_30; t31 += r.b31_60; t60 += r.b60p; tAll += r.total;
+        return `
+          <tr>
+            <td>${esc(r.name)}</td>
+            <td class="num">${fmt(r.b0_30)}</td>
+            <td class="num">${fmt(r.b31_60)}</td>
+            <td class="num">${fmt(r.b60p)}</td>
+            <td class="num">${fmt(r.total)}</td>
+          </tr>`;
+      }).join('');
+
+      return `
+        <table class="report-table">
+          <thead>
+            <tr>
+              <th>${label}</th>
+              <th class="num" style="width:110px;">0–30 hari</th>
+              <th class="num" style="width:110px;">31–60 hari</th>
+              <th class="num" style="width:110px;">60+ hari</th>
+              <th class="num" style="width:110px;">Total</th>
+            </tr>
+          </thead>
+          <tbody>${body || `<tr><td colspan="5" class="empty">Tidak ada data</td></tr>`}</tbody>
+          <tfoot>
+            <tr>
+              <td>TOTAL</td>
+              <td class="num">${fmt(t0)}</td>
+              <td class="num">${fmt(t31)}</td>
+              <td class="num">${fmt(t60)}</td>
+              <td class="num">${fmt(tAll)}</td>
+            </tr>
+          </tfoot>
+        </table>`;
+    }
+
+    function renderSalesReport(rows, totals) {
+      const body = rows.map(r => `
+        <tr>
+          <td>
+            <div style="font-weight:600;">${esc(r.sales_name)}</div>
+            <div style="font-size:9px;color:#6b7280;">${esc(r.sales_email)}</div>
+          </td>
+          <td class="num">${fmtInt(r.total_so)}</td>
+          <td class="num">${fmtInt(r.draft)}</td>
+          <td class="num">${fmtInt(r.pending)}</td>
+          <td class="num">${fmtInt(r.approved)}</td>
+          <td class="num pos">${fmtInt(r.posted)}</td>
+          <td class="num">${fmtInt(r.rejected)}</td>
+          <td class="num">${fmtInt(r.cancelled)}</td>
+          <td class="num">${fmt(r.total_posted)}</td>
+          <td class="num">${fmt(r.total_all)}</td>
+        </tr>`).join('');
+
+      const totalHtml = totals ? `
+        <tfoot>
+          <tr>
+            <td>TOTAL</td>
+            <td class="num">${fmtInt(totals.total_so)}</td>
+            <td class="num">${fmtInt(totals.draft)}</td>
+            <td class="num">${fmtInt(totals.pending)}</td>
+            <td class="num">${fmtInt(totals.approved)}</td>
+            <td class="num">${fmtInt(totals.posted)}</td>
+            <td class="num">${fmtInt(totals.rejected)}</td>
+            <td class="num">${fmtInt(totals.cancelled)}</td>
+            <td class="num">${fmt(totals.total_posted)}</td>
+            <td class="num">${fmt(totals.total_all)}</td>
+          </tr>
+        </tfoot>` : '';
+
+      return `
+        <table class="report-table">
+          <thead>
+            <tr>
+              <th>Sales</th>
+              <th class="num">Total SO</th>
+              <th class="num">Draft</th>
+              <th class="num">Pending</th>
+              <th class="num">Approved</th>
+              <th class="num">Posted</th>
+              <th class="num">Rejected</th>
+              <th class="num">Cancelled</th>
+              <th class="num">Total Posted</th>
+              <th class="num">Total All</th>
+            </tr>
+          </thead>
+          <tbody>${body || '<tr><td colspan="10" class="empty">Tidak ada SO dalam periode ini</td></tr>'}</tbody>
+          ${totalHtml}
+        </table>`;
+    }
+
+    function renderLabaRugi(r) {
+      const row = (label, val, cls = '') =>
+        `<tr class="${cls}"><td>${esc(label)}</td><td class="num">${fmt(val)}</td></tr>`;
+      const sectionTitle = t =>
+        `<tr><td colspan="2" class="report-section-title">${esc(t)}</td></tr>`;
+
+      let html = '';
+      html += sectionTitle('Pendapatan');
+      html += r.revenue.map(x => row(`${x.code} — ${x.name}`, x.balance)).join('');
+      html += row('Total Pendapatan', r.totalRevenue, 'report-subtotal');
+      html += sectionTitle('Harga Pokok Penjualan');
+      html += r.hpp.map(x => row(`${x.code} — ${x.name}`, x.balance)).join('');
+      html += row('Total HPP', r.totalHpp, 'report-subtotal');
+      html += row('LABA KOTOR', r.grossProfit, 'report-grandtotal');
+      html += sectionTitle('Beban Operasional');
+      html += r.opex.map(x => row(`${x.code} — ${x.name}`, x.balance)).join('');
+      html += row('Total Beban Operasional', r.totalOpex, 'report-subtotal');
+      html += row('LABA OPERASIONAL', r.operatingProfit, 'report-grandtotal');
+      if (r.otherExp.length) {
+        html += sectionTitle('Beban Lain-lain');
+        html += r.otherExp.map(x => row(`${x.code} — ${x.name}`, x.balance)).join('');
+        html += row('Total Beban Lain-lain', r.totalOtherExp, 'report-subtotal');
+      }
+      html += row('LABA BERSIH', r.netProfit, 'report-grandtotal');
+
+      return `
+        <table class="report-table">
+          <tbody>${html}</tbody>
+        </table>`;
+    }
+
+    function renderNeraca(n) {
+      const row = (label, val, cls = '') =>
+        `<tr class="${cls}"><td>${esc(label)}</td><td class="num">${fmt(val)}</td></tr>`;
+      const sectionTitle = t =>
+        `<tr><td colspan="2" class="report-section-title">${esc(t)}</td></tr>`;
+
+      let html = '';
+      html += sectionTitle('ASET');
+      html += n.asset.map(x => row(`${x.code} — ${x.name}`, x.balance)).join('');
+      html += row('TOTAL ASET', n.totalAsset, 'report-grandtotal');
+      html += sectionTitle('LIABILITAS');
+      html += n.liability.map(x => row(`${x.code} — ${x.name}`, x.balance)).join('');
+      html += row('Total Liabilitas', n.totalLiability, 'report-subtotal');
+      html += sectionTitle('EKUITAS');
+      html += n.equity.map(x => row(`${x.code} — ${x.name}`, x.balance)).join('');
+      html += row('Laba Tahun Berjalan', n.currentProfit);
+      html += row('TOTAL EKUITAS', n.totalEquity, 'report-subtotal');
+      html += row('TOTAL LIABILITAS + EKUITAS', n.totalLiability + n.totalEquity, 'report-grandtotal');
+
+      const status = n.balanced
+        ? `<div style="margin-top:10px;padding:8px 12px;background:#d1fae5;color:#065f46;border-radius:6px;font-size:11px;font-weight:600;">✓ Neraca Balance (Aset = Liabilitas + Ekuitas)</div>`
+        : `<div style="margin-top:10px;padding:8px 12px;background:#fee2e2;color:#991b1b;border-radius:6px;font-size:11px;font-weight:600;">⚠ Neraca Tidak Balance: selisih ${fmt(n.totalAsset - (n.totalLiability + n.totalEquity))}</div>`;
+
+      return `
+        <table class="report-table">
+          <tbody>${html}</tbody>
+        </table>
+        ${status}`;
+    }
+
+    // ============================================================
+    // INIT
+    // ============================================================
+    (async () => {
+      const user = await requireAuth();
+      if (!user) return;
+
+      const paper = document.getElementById('paper');
+
+      try {
+        const params = new URLSearchParams(window.location.search);
+        const type = params.get('type') || 'tb';
+        const from = params.get('from') || null;
+        const to   = params.get('to')   || null;
+
+        const company = await getCompanyProfile();
+
+        const titles = {
+          tb: 'TRIAL BALANCE',
+          cf: 'LAPORAN CASHFLOW',
+          ar: 'AGING PIUTANG',
+          ap: 'AGING HUTANG',
+          sp: 'PENJUALAN PER SALES',
+          lr: 'LAPORAN LABA RUGI',
+          nc: 'NERACA'
+        };
+
+        const title = titles[type] || 'LAPORAN';
+
+        let content = '';
+
+        if (type === 'tb') {
+          const rows = await trialBalance({ from, to });
+          content = renderTrialBalance(rows);
+        } else if (type === 'cf') {
+          const { summary, rows } = await cashflow({ from, to });
+          content = renderCashflow(summary, rows);
+        } else if (type === 'ar') {
+          const rows = await agingPiutang({ asOf: to });
+          content = renderAging(rows, 'Pelanggan');
+        } else if (type === 'ap') {
+          const rows = await agingHutang({ asOf: to });
+          content = renderAging(rows, 'Vendor');
+        } else if (type === 'sp') {
+          const { rows, totals } = await salesReport({ from, to });
+          content = renderSalesReport(rows, totals);
+        } else if (type === 'lr') {
+          const r = await labaRugi({ from, to });
+          content = renderLabaRugi(r);
+        } else if (type === 'nc') {
+          const n = await neraca({ asOf: to });
+          content = renderNeraca(n);
+        } else {
+          throw new Error(`Tipe laporan tidak dikenal: ${type}`);
+        }
+
+        paper.innerHTML = `
+          ${headerHtml(company, title, from, to)}
+          ${content}
+          ${footerHtml(company)}
+        `;
+
+        document.title = `${title} — ${company.name || 'Sanno Accounting'}`;
+
+      } catch (err) {
+        console.error('[report-print] error:', err);
+        paper.innerHTML = `
+          <div class="error">
+            <div style="font-size:16px;font-weight:600;margin-bottom:8px;">Gagal memuat laporan</div>
+            <div>${esc(err.message || err)}</div>
+            <div style="margin-top:16px;font-size:12px;color:#9ca3af;">
+              Pastikan URL memiliki parameter <code>?type=</code> yang valid (tb/cf/ar/ap/sp/lr/nc).
+            </div>
+          </div>`;
+      }
+    })();
+  </script>
+</body>
+</html>
