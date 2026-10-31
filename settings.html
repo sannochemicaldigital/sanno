@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Pengaturan — Sanno Accounting</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>⚙️</text></svg>">
   <link rel="stylesheet" href="./css/style.css">
 </head>
 <body>
@@ -23,6 +24,7 @@
       <button data-tab="company">Perusahaan</button>
       <button data-tab="bank">Bank</button>
       <button data-tab="periods">Periode</button>
+      <button data-tab="audit">Audit</button>
     </div>
 
     <!-- ==================== TAB SISTEM ==================== -->
@@ -295,6 +297,66 @@
       <div class="card">
         <h3 style="margin-top:0;font-size:16px;">Periode Terkunci</h3>
         <div id="lockedPeriodsList"></div>
+      </div>
+    </section>
+
+    <!-- ==================== TAB AUDIT ==================== -->
+    <section id="tab-audit" class="tab-panel" style="display:none;">
+      <div class="card">
+        <h3 style="margin-top:0;font-size:16px;">Audit Log</h3>
+        <p style="font-size:13px;color:#6b7280;margin-top:0;">
+          Riwayat semua aksi write penting: jurnal, SO approve/reject, DO issue/deliver/expire/reissue.
+        </p>
+
+        <!-- Filter bar -->
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin-bottom:12px;">
+          <div>
+            <label style="font-size:12px;color:#6b7280;display:block;margin-bottom:4px;">Aksi</label>
+            <select id="auditAction" class="input" style="width:100%;padding:8px;border:1px solid #d0d5dd;border-radius:6px;">
+              <option value="">Semua</option>
+            </select>
+          </div>
+          <div>
+            <label style="font-size:12px;color:#6b7280;display:block;margin-bottom:4px;">Entitas</label>
+            <select id="auditEntity" class="input" style="width:100%;padding:8px;border:1px solid #d0d5dd;border-radius:6px;">
+              <option value="">Semua</option>
+            </select>
+          </div>
+          <div>
+            <label style="font-size:12px;color:#6b7280;display:block;margin-bottom:4px;">Dari tanggal</label>
+            <input type="date" id="auditDateFrom" class="input" style="width:100%;padding:8px;border:1px solid #d0d5dd;border-radius:6px;">
+          </div>
+          <div>
+            <label style="font-size:12px;color:#6b7280;display:block;margin-bottom:4px;">Sampai tanggal</label>
+            <input type="date" id="auditDateTo" class="input" style="width:100%;padding:8px;border:1px solid #d0d5dd;border-radius:6px;">
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;margin-bottom:12px;">
+          <button type="button" class="btn btn-secondary" id="auditResetBtn" style="padding:6px 12px;font-size:13px;">Reset</button>
+          <span id="auditInfo" style="font-size:12px;color:#6b7280;align-self:center;"></span>
+        </div>
+
+        <!-- Tabel audit -->
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th style="white-space:nowrap;">Waktu</th>
+                <th>User</th>
+                <th>Aksi</th>
+                <th>Entitas</th>
+                <th class="num">ID</th>
+                <th>Payload</th>
+              </tr>
+            </thead>
+            <tbody id="tbody-audit"></tbody>
+          </table>
+        </div>
+        <div style="margin-top:12px;text-align:center;">
+          <button type="button" class="btn btn-secondary" id="auditMoreBtn" style="display:none;padding:8px 16px;font-size:13px;">
+            Muat lebih banyak
+          </button>
+        </div>
       </div>
     </section>
   </div>
