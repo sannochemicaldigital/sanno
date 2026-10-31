@@ -152,10 +152,12 @@ function renderInventoryTable() {
       statusHtml = '<span style="color:#059669;">OK</span>';
     }
 
+    // badge reserved (highlight kalau ada reservasi)
     const reservedHtml = reserved > 0
       ? `<span style="background:#fef3c7;color:#92400e;padding:2px 8px;border-radius:4px;font-weight:600;">${fmt(reserved)}</span>`
       : `<span style="color:#9ca3af;">0</span>`;
 
+    // available highlight kalau < min
     const availableHtml = i.is_low_stock
       ? `<span style="color:#b45309;font-weight:600;">${fmt(available)}</span>`
       : fmt(available);
