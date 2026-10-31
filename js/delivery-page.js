@@ -4,7 +4,7 @@ import { requireAuth, logout } from './auth.js';
 import { renderNav, requirePageAccess } from './access.js';
 import { hasPermission } from './permissions.js';
 import { markDelivered, cancelDO } from './delivery.js';
-import { supabase } from './supabase.js';   // sesuaikan path bila perlu
+import { supabase } from './supabase-client.js';   // sesuaikan path bila perlu
 
 function toast(msg, isError = false) {
   const el = document.getElementById('toast');
