@@ -73,22 +73,22 @@ function bindInventoryFilters() {
     let t = null;
     inpSearch.addEventListener('input', () => {
       clearTimeout(t);
-      t = setTimeout(() => {
+      t = setTimeout(async () => {
         invFilter.search = inpSearch.value.trim();
-        renderInventoryTable();
+        await renderInventory();   // RPC ulang (server-side filter)
       }, 300);
     });
   }
   if (chkReserved) {
-    chkReserved.addEventListener('change', () => {
+    chkReserved.addEventListener('change', async () => {
       invFilter.onlyReserved = chkReserved.checked;
-      renderInventoryTable();
+      await renderInventory();     // RPC ulang (server-side filter)
     });
   }
   if (chkLow) {
     chkLow.addEventListener('change', () => {
       invFilter.onlyLowStock = chkLow.checked;
-      renderInventoryTable();
+      renderInventoryTable();      // client-side saja
     });
   }
 }
@@ -126,7 +126,7 @@ function renderInventoryTable() {
   const tbody = document.getElementById('tbody-inventory');
   if (!tbody) return;
 
-  // filter client-side untuk low stock (RPC belum punya param)
+  // only-low-stock: filter client-side (RPC belum punya param)
   let rows = inventoryRows;
   if (invFilter.onlyLowStock) {
     rows = rows.filter(r => r.is_low_stock);
@@ -152,12 +152,10 @@ function renderInventoryTable() {
       statusHtml = '<span style="color:#059669;">OK</span>';
     }
 
-    // badge reserved (highlight kalau ada reservasi)
     const reservedHtml = reserved > 0
       ? `<span style="background:#fef3c7;color:#92400e;padding:2px 8px;border-radius:4px;font-weight:600;">${fmt(reserved)}</span>`
       : `<span style="color:#9ca3af;">0</span>`;
 
-    // available highlight kalau < min
     const availableHtml = i.is_low_stock
       ? `<span style="color:#b45309;font-weight:600;">${fmt(available)}</span>`
       : fmt(available);
@@ -188,7 +186,6 @@ async function loadItemsForDropdown() {
         `<option value="${i.id}">${esc(i.sku)} — ${esc(i.name)} (stok: ${Number(i.stock_qty).toLocaleString('id-ID')})</option>`
       ).join('');
   } catch (err) {
-    // silent — dropdown kosong lebih baik daripada crash
     console.error('loadItemsForDropdown:', err);
   }
 }
