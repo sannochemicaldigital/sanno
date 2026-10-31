@@ -17,6 +17,28 @@
 
     <div class="card">
       <h3 style="margin-top:0;font-size:16px;">Daftar Delivery Order</h3>
+
+      <!-- ===== Filter bar ===== -->
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;align-items:center;">
+        <select id="filterStatus" class="input" style="max-width:180px;">
+          <option value="">Semua status</option>
+          <option value="issued">Issued</option>
+          <option value="delivered">Delivered</option>
+          <option value="expired">Expired</option>
+          <option value="cancelled">Cancelled</option>
+        </select>
+
+        <label style="display:flex;align-items:center;gap:4px;font-size:13px;">
+          <input type="checkbox" id="filterOnlyActive">
+          Hanya DO aktif (issued &amp; belum expired)
+        </label>
+
+        <input type="text" id="filterSearch" class="input"
+               placeholder="Cari DO / SO / partner..."
+               style="flex:1;min-width:180px;">
+      </div>
+
+      <!-- ===== List DO ===== -->
       <div id="doList"></div>
     </div>
   </div>
