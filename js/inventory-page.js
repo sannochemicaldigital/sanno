@@ -1,4 +1,5 @@
 // js/inventory-page.js
+import './input-clear.js';                                  // ← TAMBAH: tombol clear (×)
 import { requireAuth, logout } from './auth.js';
 import { renderNav, requirePageAccess } from './access.js';
 import { hasPermission } from './permissions.js';
@@ -20,8 +21,8 @@ function fmt(n) {
   return Number(n || 0).toLocaleString('id-ID', { maximumFractionDigits: 2 });
 }
 
-let allItems = [];        // semua item (untuk dropdown stok masuk)
-let inventoryRows = [];   // baris tabel inventory (dari RPC)
+let allItems = [];
+let inventoryRows = [];
 const perms = {
   create: false, stockIn: false, viewPrice: false, viewMovement: false
 };
@@ -126,7 +127,6 @@ function renderInventoryTable() {
   const tbody = document.getElementById('tbody-inventory');
   if (!tbody) return;
 
-  // only-low-stock: filter client-side (RPC belum punya param)
   let rows = inventoryRows;
   if (invFilter.onlyLowStock) {
     rows = rows.filter(r => r.is_low_stock);
@@ -152,12 +152,10 @@ function renderInventoryTable() {
       statusHtml = '<span style="color:#059669;">OK</span>';
     }
 
-    // badge reserved (highlight kalau ada reservasi)
     const reservedHtml = reserved > 0
       ? `<span style="background:#fef3c7;color:#92400e;padding:2px 8px;border-radius:4px;font-weight:600;">${fmt(reserved)}</span>`
       : `<span style="color:#9ca3af;">0</span>`;
 
-    // available highlight kalau < min
     const availableHtml = i.is_low_stock
       ? `<span style="color:#b45309;font-weight:600;">${fmt(available)}</span>`
       : fmt(available);

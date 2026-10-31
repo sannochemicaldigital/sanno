@@ -1,5 +1,6 @@
 // js/delivery-page.js
 // PATCH: countdown expires_at + tombol Re-issue (pakai RPC get_do_with_expiry + reissue_do)
+import './input-clear.js';
 import { requireAuth, logout } from './auth.js';
 import { renderNav, requirePageAccess } from './access.js';
 import { hasPermission } from './permissions.js';
