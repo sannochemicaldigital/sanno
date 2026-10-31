@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Inventory — Sanno Accounting</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>📦</text></svg>">
   <link rel="stylesheet" href="./css/style.css">
 </head>
 <body>
@@ -86,6 +87,24 @@
     <!-- DAFTAR STOK -->
     <div class="card">
       <h3 style="margin-top:0;font-size:16px;">Daftar Stok</h3>
+
+      <!-- Filter bar -->
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;align-items:center;">
+        <input type="text" id="invSearch" class="input"
+               placeholder="Cari SKU / nama..."
+               style="flex:1;min-width:180px;">
+
+        <label style="display:flex;align-items:center;gap:4px;font-size:13px;">
+          <input type="checkbox" id="invOnlyReserved">
+          Hanya ada reservasi
+        </label>
+
+        <label style="display:flex;align-items:center;gap:4px;font-size:13px;">
+          <input type="checkbox" id="invOnlyLowStock">
+          Hanya low stock
+        </label>
+      </div>
+
       <div class="table-wrap">
         <table>
           <thead>
@@ -94,6 +113,8 @@
               <th>Nama</th>
               <th>Satuan</th>
               <th class="num">Stok</th>
+              <th class="num">Reserved</th>
+              <th class="num">Available</th>
               <th class="num">Min</th>
               <th>Status</th>
             </tr>
