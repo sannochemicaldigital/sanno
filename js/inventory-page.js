@@ -20,9 +20,15 @@ function fmt(n) {
   return Number(n || 0).toLocaleString('id-ID', { maximumFractionDigits: 2 });
 }
 
-let allItems = [];
+let allItems = [];        // semua item (untuk dropdown stok masuk)
+let inventoryRows = [];   // baris tabel inventory (dari RPC)
 const perms = {
   create: false, stockIn: false, viewPrice: false, viewMovement: false
+};
+const invFilter = {
+  search: '',
+  onlyReserved: false,
+  onlyLowStock: false
 };
 
 (async () => {
@@ -47,62 +53,147 @@ const perms = {
     if (histCard) histCard.style.display = 'none';
   }
 
-  // Sembunyikan kolom harga di riwayat kalau tidak punya izin
-  if (!perms.viewPrice) {
-    document.querySelectorAll('#tbody-movements').forEach(() => {});
-  }
-
   document.querySelector('#form-stock-in [name=movement_date]').value =
     new Date().toISOString().slice(0, 10);
 
   if (perms.create)  document.getElementById('form-new-item').addEventListener('submit', onCreateItem);
   if (perms.stockIn) document.getElementById('form-stock-in').addEventListener('submit', onStockIn);
 
+  bindInventoryFilters();
   await loadAll();
 })();
 
+// ---------- filter binding ----------
+function bindInventoryFilters() {
+  const inpSearch = document.getElementById('invSearch');
+  const chkReserved = document.getElementById('invOnlyReserved');
+  const chkLow = document.getElementById('invOnlyLowStock');
+
+  if (inpSearch) {
+    let t = null;
+    inpSearch.addEventListener('input', () => {
+      clearTimeout(t);
+      t = setTimeout(() => {
+        invFilter.search = inpSearch.value.trim();
+        renderInventoryTable();
+      }, 300);
+    });
+  }
+  if (chkReserved) {
+    chkReserved.addEventListener('change', () => {
+      invFilter.onlyReserved = chkReserved.checked;
+      renderInventoryTable();
+    });
+  }
+  if (chkLow) {
+    chkLow.addEventListener('change', () => {
+      invFilter.onlyLowStock = chkLow.checked;
+      renderInventoryTable();
+    });
+  }
+}
+
 async function loadAll() {
-  const tasks = [renderInventory()];
+  const tasks = [renderInventory(), loadItemsForDropdown()];
   if (perms.viewMovement) tasks.push(renderMovements());
   await Promise.all(tasks);
 }
 
+// ---------- RPC: inventory dengan reservasi ----------
+async function rpcInventory() {
+  const { data, error } = await supabase.rpc('get_inventory_with_reservation', {
+    p_search: invFilter.search || null,
+    p_only_reserved: invFilter.onlyReserved,
+    p_limit: 500,
+    p_offset: 0
+  });
+  if (error) throw error;
+  return data || [];
+}
+
 async function renderInventory() {
   const tbody = document.getElementById('tbody-inventory');
-  tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#9ca3af;">Memuat...</td></tr>';
+  tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:#9ca3af;">Memuat...</td></tr>';
   try {
-    allItems = await listItems();
-    tbody.innerHTML = allItems.map(i => {
-      const qty = Number(i.stock_qty);
-      const min = Number(i.min_stock);
-      let status = '<span style="color:#059669;">OK</span>';
-      if (qty === 0) status = '<span style="color:#b91c1c;font-weight:600;">KOSONG</span>';
-      else if (qty <= min) status = '<span style="color:#b45309;font-weight:600;">RENDAH</span>';
-      return `
-        <tr>
-          <td data-label="SKU">${esc(i.sku)}</td>
-          <td data-label="Nama">${esc(i.name)}</td>
-          <td data-label="Satuan">${esc(i.unit)}</td>
-          <td data-label="Stok" class="num">${qty.toLocaleString('id-ID')}</td>
-          <td data-label="Min" class="num">${min.toLocaleString('id-ID')}</td>
-          <td data-label="Status">${status}</td>
-        </tr>`;
-    }).join('') || '<tr><td colspan="6" style="text-align:center;color:#9ca3af;">Belum ada item</td></tr>';
-
-    if (perms.stockIn) {
-      const sel = document.getElementById('stockInItem');
-      if (sel) {
-        sel.innerHTML = '<option value="">— pilih item —</option>' +
-          allItems.map(i =>
-            `<option value="${i.id}">${esc(i.sku)} — ${esc(i.name)} (stok: ${Number(i.stock_qty).toLocaleString('id-ID')})</option>`
-          ).join('');
-      }
-    }
+    inventoryRows = await rpcInventory();
+    renderInventoryTable();
   } catch (err) {
-    tbody.innerHTML = `<tr><td colspan="6" style="color:#b91c1c;">${esc(err.message)}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="8" style="color:#b91c1c;">${esc(err.message)}</td></tr>`;
   }
 }
 
+function renderInventoryTable() {
+  const tbody = document.getElementById('tbody-inventory');
+  if (!tbody) return;
+
+  // filter client-side untuk low stock (RPC belum punya param)
+  let rows = inventoryRows;
+  if (invFilter.onlyLowStock) {
+    rows = rows.filter(r => r.is_low_stock);
+  }
+
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:#9ca3af;">Tidak ada item cocok</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = rows.map(i => {
+    const stock = Number(i.stock_qty);
+    const reserved = Number(i.reserved_qty);
+    const available = Number(i.available_qty);
+    const min = Number(i.min_stock);
+
+    let statusHtml;
+    if (stock === 0) {
+      statusHtml = '<span style="color:#b91c1c;font-weight:600;">KOSONG</span>';
+    } else if (i.is_low_stock) {
+      statusHtml = '<span style="color:#b45309;font-weight:600;">RENDAH</span>';
+    } else {
+      statusHtml = '<span style="color:#059669;">OK</span>';
+    }
+
+    // badge reserved (highlight kalau ada reservasi)
+    const reservedHtml = reserved > 0
+      ? `<span style="background:#fef3c7;color:#92400e;padding:2px 8px;border-radius:4px;font-weight:600;">${fmt(reserved)}</span>`
+      : `<span style="color:#9ca3af;">0</span>`;
+
+    // available highlight kalau < min
+    const availableHtml = i.is_low_stock
+      ? `<span style="color:#b45309;font-weight:600;">${fmt(available)}</span>`
+      : fmt(available);
+
+    return `
+      <tr>
+        <td data-label="SKU">${esc(i.sku)}</td>
+        <td data-label="Nama">${esc(i.name)}</td>
+        <td data-label="Satuan">${esc(i.unit)}</td>
+        <td data-label="Stok" class="num">${fmt(stock)}</td>
+        <td data-label="Reserved" class="num">${reservedHtml}</td>
+        <td data-label="Available" class="num">${availableHtml}</td>
+        <td data-label="Min" class="num">${fmt(min)}</td>
+        <td data-label="Status">${statusHtml}</td>
+      </tr>`;
+  }).join('');
+}
+
+// ---------- dropdown stok masuk ----------
+async function loadItemsForDropdown() {
+  if (!perms.stockIn) return;
+  try {
+    allItems = await listItems();
+    const sel = document.getElementById('stockInItem');
+    if (!sel) return;
+    sel.innerHTML = '<option value="">— pilih item —</option>' +
+      allItems.map(i =>
+        `<option value="${i.id}">${esc(i.sku)} — ${esc(i.name)} (stok: ${Number(i.stock_qty).toLocaleString('id-ID')})</option>`
+      ).join('');
+  } catch (err) {
+    // silent — dropdown kosong lebih baik daripada crash
+    console.error('loadItemsForDropdown:', err);
+  }
+}
+
+// ---------- movements ----------
 async function renderMovements() {
   const tbody = document.getElementById('tbody-movements');
   if (!tbody) return;
@@ -137,6 +228,7 @@ async function renderMovements() {
   }
 }
 
+// ---------- form handlers ----------
 async function onCreateItem(e) {
   e.preventDefault();
   if (!perms.create) { toast('Tidak ada akses buat item', true); return; }
