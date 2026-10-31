@@ -1,4 +1,5 @@
 // js/settings-page.js
+import './input-clear.js';
 import { requireAuth, logout, getCurrentRole } from './auth.js';
 import { renderNav, requirePageAccess } from './access.js';
 import { SETTING_DEFS, getAllSettings, updateSetting } from './settings.js';
@@ -12,6 +13,168 @@ import {
 } from './bank-accounts.js';
 import { hasPermission } from './permissions.js';
 import { supabase } from './supabase-client.js';
+
+// ============================================================
+// AUDIT LOG
+// ============================================================
+
+// SESUDAH
+let auditInitialized = false;   // [FIX] ganti auditLoaded — dipakai di tab switcher
+let auditCanView = false;
+let auditOffset = 0;
+let auditReqSeq = 0;            // [FIX] race guard (opsional tapi direkomendasikan)
+const AUDIT_LIMIT = 50;
+const auditFilters = { action: '', entity: '', dateFrom: '', dateTo: '' };
+
+async function initAuditTab() {
+  auditCanView = await hasPermission('admin.audit.view');
+  if (!auditCanView) {
+    document.getElementById('tbody-audit').innerHTML =
+      '<tr><td colspan="6" style="text-align:center;color:#b91c1c;">Tidak ada akses melihat audit log.</td></tr>';
+    document.getElementById('auditMoreBtn').style.display = 'none';
+    return;
+  }
+
+  // Load opsi filter (actions[], entities[])
+  await loadAuditFilterOptions();
+
+  // Bind filter
+  document.getElementById('auditAction').addEventListener('change', (e) => {
+    auditFilters.action = e.target.value;
+    reloadAudit();
+  });
+  document.getElementById('auditEntity').addEventListener('change', (e) => {
+    auditFilters.entity = e.target.value;
+    reloadAudit();
+  });
+  document.getElementById('auditDateFrom').addEventListener('change', (e) => {
+    auditFilters.dateFrom = e.target.value;
+    reloadAudit();
+  });
+  document.getElementById('auditDateTo').addEventListener('change', (e) => {
+    auditFilters.dateTo = e.target.value;
+    reloadAudit();
+  });
+  document.getElementById('auditResetBtn').addEventListener('click', () => {
+    auditFilters.action = '';
+    auditFilters.entity = '';
+    auditFilters.dateFrom = '';
+    auditFilters.dateTo = '';
+    document.getElementById('auditAction').value = '';
+    document.getElementById('auditEntity').value = '';
+    document.getElementById('auditDateFrom').value = '';
+    document.getElementById('auditDateTo').value = '';
+    reloadAudit();
+  });
+  document.getElementById('auditMoreBtn').addEventListener('click', () => loadAudit(true));
+
+  // Load awal
+  await reloadAudit();
+}
+
+async function loadAuditFilterOptions() {
+  try {
+    const { data, error } = await supabase.rpc('get_audit_filter_options');
+    if (error) throw error;
+    const actions = data?.actions || [];
+    const entities = data?.entities || [];
+
+    const selA = document.getElementById('auditAction');
+    selA.innerHTML = '<option value="">Semua</option>' +
+      actions.map(a => `<option value="${esc(a)}">${esc(a)}</option>`).join('');
+
+    const selE = document.getElementById('auditEntity');
+    selE.innerHTML = '<option value="">Semua</option>' +
+      entities.map(e => `<option value="${esc(e)}">${esc(e)}</option>`).join('');
+  } catch (err) {
+    console.error('loadAuditFilterOptions:', err);
+  }
+}
+
+async function reloadAudit() {
+  auditOffset = 0;
+  document.getElementById('tbody-audit').innerHTML =
+    '<tr><td colspan="6" style="text-align:center;color:#9ca3af;">Memuat...</td></tr>';
+  document.getElementById('auditMoreBtn').style.display = 'none';
+  document.getElementById('auditInfo').textContent = '';
+  await loadAudit(false);
+}
+
+async function loadAudit(append = false) {
+  const tbody = document.getElementById('tbody-audit');
+  if (!append) tbody.innerHTML = '';
+const seq = ++auditReqSeq;
+  try {
+    const { data, error } = await supabase.rpc('get_audit_logs', {
+      p_user_id: null,
+      p_action: auditFilters.action || null,
+      p_entity: auditFilters.entity || null,
+      p_date_from: auditFilters.dateFrom || null,
+      p_date_to: auditFilters.dateTo || null,
+      p_limit: AUDIT_LIMIT,
+      p_offset: auditOffset
+    });
+    if (error) throw error;
+
+    const rows = data || [];
+    if (seq !== auditReqSeq) return;   // abaikan respons basi
+    const totalCount = rows[0]?.total_count ?? rows.length;
+
+    if (!append && !rows.length) {
+      tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#9ca3af;">Tidak ada audit log cocok</td></tr>';
+      document.getElementById('auditInfo').textContent = '';
+      return;
+    }
+
+    const html = rows.map(r => renderAuditRow(r)).join('');
+    if (append) tbody.insertAdjacentHTML('beforeend', html);
+    else tbody.innerHTML = html;
+
+    auditOffset += rows.length;
+    document.getElementById('auditInfo').textContent =
+      `Menampilkan ${Math.min(auditOffset, totalCount)} dari ${totalCount}`;
+
+    document.getElementById('auditMoreBtn').style.display =
+      auditOffset < totalCount ? 'inline-block' : 'none';
+  } catch (err) {
+    tbody.innerHTML += `<tr><td colspan="6" style="color:#b91c1c;">${esc(err.message)}</td></tr>`;
+  }
+}
+
+function renderAuditRow(r) {
+  const ts = r.created_at ? new Date(r.created_at).toLocaleString('id-ID') : '—';
+  const userName = r.user_name || r.user_email || r.user_id || '—';
+  const entityId = r.entity_id != null ? r.entity_id : '—';
+  const payloadStr = r.payload ? JSON.stringify(r.payload, null, 2) : '{}';
+  const payloadId = 'payload-' + Math.random().toString(36).slice(2, 9);
+
+  return `
+    <tr>
+      <td style="white-space:nowrap;font-size:12px;">${esc(ts)}</td>
+      <td style="font-size:13px;">${esc(userName)}</td>
+      <td><code style="font-size:12px;background:#eef2ff;padding:2px 6px;border-radius:4px;">${esc(r.action)}</code></td>
+      <td style="font-size:13px;">${esc(r.entity)}</td>
+      <td class="num">${esc(entityId)}</td>
+      <td style="font-size:12px;">
+        <button type="button" class="btn btn-secondary"
+                style="padding:2px 8px;font-size:11px;"
+                data-toggle-payload="${payloadId}">Lihat</button>
+        <pre id="${payloadId}" style="display:none;margin:4px 0 0;padding:8px;background:#f9fafb;border-radius:4px;font-size:11px;max-width:400px;overflow:auto;">${esc(payloadStr)}</pre>
+      </td>
+    </tr>`;
+}
+
+// Toggle payload (delegated event)
+document.addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-toggle-payload]');
+  if (!btn) return;
+  const id = btn.dataset.togglePayload;
+  const el = document.getElementById(id);
+  if (!el) return;
+  const showing = el.style.display === 'block';
+  el.style.display = showing ? 'none' : 'block';
+  btn.textContent = showing ? 'Lihat' : 'Sembunyikan';
+});
 
 // ============================================================
 // UTIL
@@ -85,6 +248,14 @@ let bankEditId = null;
         periodsLoaded = true;
         await renderPeriods();
       }
+      if (btn.dataset.tab === 'audit' && !auditInitialized) {
+  auditInitialized = true;
+  try { await initAuditTab(); }
+  catch (err) {
+    document.getElementById('tbody-audit').innerHTML =
+      `<tr><td colspan="6" style="color:#b91c1c;">Gagal: ${esc(err.message)}</td></tr>`;
+  }
+}
     });
   });
 
