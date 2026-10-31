@@ -11,24 +11,34 @@ function attachClearButton(input) {
 
   input.dataset.clearAttached = '1';
 
-  // Bungkus input dalam wrapper relatif
+  // Bungkus input dalam wrapper relatif yang selebar input
   const wrap = document.createElement('span');
   wrap.className = 'input-clear-wrap';
   wrap.style.position = 'relative';
-  wrap.style.display = 'inline-block';
-  wrap.style.width = input.style.width || '100%';
+  wrap.style.display = 'block';
+  wrap.style.width = '100%';
 
-  input.parentNode.insertBefore(wrap, input);
+  // Simpan referensi ke parent & posisi
+  const parent = input.parentNode;
+  const next = input.nextSibling;
+
+  // Input mengisi wrapper
+  input.style.width = '100%';
+  input.style.boxSizing = 'border-box';
+  input.style.paddingRight = '28px';   // ruang untuk X di dalam field
+
+  // Pindahkan input ke dalam wrapper
+  parent.insertBefore(wrap, input);
   wrap.appendChild(input);
 
-  // Tombol X
+  // Tombol X — posisi di dalam field, kanan
   const btn = document.createElement('button');
   btn.type = 'button';
   btn.className = 'input-clear-btn';
   btn.setAttribute('aria-label', 'Hapus isi');
   btn.innerHTML = '&times;';
   btn.style.position = 'absolute';
-  btn.style.right = '8px';
+  btn.style.right = '6px';
   btn.style.top = '50%';
   btn.style.transform = 'translateY(-50%)';
   btn.style.border = 'none';
@@ -53,9 +63,6 @@ function attachClearButton(input) {
 
   wrap.appendChild(btn);
 
-  // Padding kanan supaya teks tidak tabrakan dengan X
-  input.style.paddingRight = '28px';
-
   // Tampilkan X hanya jika ada value
   const sync = () => {
     btn.style.display = (input.value && input.value.length > 0) ? 'block' : 'none';
@@ -76,7 +83,6 @@ if (document.readyState === 'loading') {
   scanAndAttach();
 }
 
-// Observer supaya input yang dibuat dinamis (mis. setelah render tabel) juga dapat tombol
 const obs = new MutationObserver((mutations) => {
   for (const m of mutations) {
     for (const node of m.addedNodes) {
