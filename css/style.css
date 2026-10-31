@@ -208,3 +208,45 @@ tbody tr:hover { background: #f9fafb; }
 }
 .balance-indicator.ok { background: #d1fae5; color: #065f46; }
 .balance-indicator.bad { background: #fee2e2; color: #991b1b; }
+
+/* ============================================================
+   INPUT CLEAR (×) — tombol hapus isi input
+   ============================================================ */
+.input-clear-wrap {
+  display: block;
+  position: relative;
+  width: 100%;
+}
+
+.input-clear-wrap > input {
+  width: 100%;
+  box-sizing: border-box;
+  padding-right: 28px; /* ruang untuk tombol X di dalam field */
+}
+
+.input-clear-btn {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  color: #9ca3af;
+  padding: 2px 4px;
+  display: none;
+  z-index: 2;
+}
+
+.input-clear-btn:hover {
+  color: #374151;
+}
+
+/* Kalau .form-row pakai flex/grid, pastikan wrapper ikut mengisi */
+.form-row .input-clear-wrap,
+.filter-row .input-clear-wrap {
+  flex: 1;
+  min-width: 0;
+}
