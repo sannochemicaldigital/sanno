@@ -684,6 +684,7 @@ async function loadOpnameDetail() {
     if (!header) throw new Error('Opname tidak ditemukan');
 
     opnameLinesCache = Array.isArray(header.lines) ? header.lines : [];
+    window.__currentOpnameHeader = header;   // ← TAMBAH: simpan utk cetak
 
     currentOpnameStatus = header.status || '';
     renderOpnameHeader(header);
@@ -737,10 +738,13 @@ function renderOpnameActions(h) {
   const s = h.status;
   const btns = [];
 
-  if (s === 'draft' && perms.opnameCreate) {
-    btns.push(`<button type="button" class="btn btn-primary" id="opnameSaveDraftBtn">Simpan Draft</button>`);
-    btns.push(`<button type="button" class="btn btn-primary" id="opnameSubmitBtn" style="background:#0891b2;">Submit</button>`);
-    btns.push(`<button type="button" class="btn btn-danger" id="opnameCancelBtn">Cancel</button>`);
+    if (s === 'draft') {
+    btns.push(`<button type="button" class="btn btn-secondary" id="opnamePrintBtn">🖨️ Cetak Form</button>`);
+    if (perms.opnameCreate) {
+      btns.push(`<button type="button" class="btn btn-primary" id="opnameSaveDraftBtn">Simpan Draft</button>`);
+      btns.push(`<button type="button" class="btn btn-primary" id="opnameSubmitBtn" style="background:#0891b2;">Submit</button>`);
+      btns.push(`<button type="button" class="btn btn-danger" id="opnameCancelBtn">Cancel</button>`);
+    }
   }
   if (s === 'submitted' && perms.opnameApprove) {
     btns.push(`<button type="button" class="btn btn-primary" id="opnameExecuteBtn" style="background:#059669;">Approve &amp; Eksekusi</button>`);
@@ -760,6 +764,7 @@ function renderOpnameActions(h) {
   document.getElementById('opnameExecuteBtn')?.addEventListener('click', () => executeOpnameHandler());
   document.getElementById('opnameRejectBtn')?.addEventListener('click', () => rejectOpnameHandler());
   document.getElementById('opnameCancelBtn')?.addEventListener('click', () => cancelOpnameHandler());
+  document.getElementById('opnamePrintBtn')?.addEventListener('click', () => printOpnameForm());
 }
 function renderOpnameLines(status) {
   const tbody = document.getElementById('tbody-opname-lines');
@@ -873,6 +878,125 @@ async function saveOpnameDraft() {
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = 'Simpan Draft'; }
   }
+}
+// ---------- Cetak form fisik opname ----------
+function printOpnameForm() {
+  if (!currentOpnameId) return;
+  const header = {
+    opname_no:   document.querySelector('#opnameDetailHeader b')?.textContent || '',
+    opname_date: currentOpnameStatus === 'draft' ? (window.__currentOpnameDate || '') : '',
+    notes:       ''
+  };
+  // Ambil header lengkap dari cache render terakhir (disimpan saat loadOpnameDetail)
+  const h = window.__currentOpnameHeader || {};
+  const tanggal = h.opname_date || '';
+  const catatan = h.notes || '';
+
+  const rowsHtml = opnameLinesCache.map((r, idx) => {
+    const sys = Number(r.qty_system);
+    const phys = r.qty_physical == null ? '' : Number(r.qty_physical);
+    const delta = (r.qty_physical == null) ? '' : (Number(r.qty_physical) - sys);
+    return `
+      <tr>
+        <td class="c">${idx + 1}</td>
+        <td>${esc(r.sku)}</td>
+        <td>${esc(r.item_name)}</td>
+        <td class="c">${esc(r.unit)}</td>
+        <td class="r">${fmt(sys)}</td>
+        <td class="phys">${phys === '' ? '' : fmt(phys)}</td>
+        <td class="r">${delta === '' ? '' : ((delta > 0 ? '+' : '') + fmt(delta))}</td>
+        <td class="c">${r.reason ? esc(reasonLabel(r.reason).charAt(0)) : ''}</td>
+        <td>${esc(r.memo || '')}</td>
+      </tr>`;
+  }).join('');
+
+  const html = `<!DOCTYPE html>
+<html lang="id"><head><meta charset="UTF-8">
+<title>Form Opname ${esc(h.opname_no || '')}</title>
+<style>
+  @page { size: A4 landscape; margin: 12mm; }
+  * { box-sizing: border-box; }
+  body { font-family: Arial, Helvetica, sans-serif; font-size: 11px; color: #000; margin: 0; }
+  .head { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px; }
+  .head h1 { font-size: 16px; margin: 0 0 4px; }
+  .head .meta { font-size: 11px; line-height: 1.5; }
+  .head .meta b { display: inline-block; min-width: 60px; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { border: 1px solid #000; padding: 4px 6px; vertical-align: top; }
+  th { background: #eee; font-weight: 700; font-size: 11px; }
+  td.c { text-align: center; }
+  td.r { text-align: right; }
+  td.phys { min-width: 70px; background: #fff; }
+  tr { page-break-inside: avoid; }
+  thead { display: table-header-group; }
+  .legend { margin-top: 8px; font-size: 10px; }
+  .sign { display: flex; justify-content: space-between; margin-top: 32px; }
+  .sign div { text-align: center; width: 40%; }
+  .sign .line { margin-top: 48px; border-top: 1px solid #000; padding-top: 4px; }
+  .actions { position: fixed; top: 8px; right: 8px; }
+  .actions button { padding: 6px 12px; font-size: 13px; cursor: pointer; }
+  @media print { .actions { display: none; } }
+</style></head>
+<body>
+  <div class="actions">
+    <button onclick="window.print()">🖨️ Cetak</button>
+  </div>
+  <div class="head">
+    <div>
+      <h1>FORM OPNAME MASSAL</h1>
+      <div class="meta">
+        <div><b>No.</b> ${esc(h.opname_no || '')}</div>
+        <div><b>Tanggal</b> ${esc(tanggal)}</div>
+        ${catatan ? `<div><b>Catatan</b> ${esc(catatan)}</div>` : ''}
+      </div>
+    </div>
+    <div class="meta" style="text-align:right;">
+      <div>Total item: <b>${opnameLinesCache.length}</b></div>
+      <div>Dicetak: ${new Date().toLocaleString('id-ID')}</div>
+    </div>
+  </div>
+  <table>
+    <thead>
+      <tr>
+        <th style="width:32px;">No</th>
+        <th style="width:90px;">SKU</th>
+        <th>Nama</th>
+        <th style="width:50px;">Satuan</th>
+        <th style="width:70px;">Stok Sistem</th>
+        <th style="width:80px;">Qty Fisik</th>
+        <th style="width:70px;">Selisih</th>
+        <th style="width:50px;">Alasan</th>
+        <th style="width:110px;">Memo</th>
+      </tr>
+    </thead>
+    <tbody>${rowsHtml}</tbody>
+  </table>
+  <div class="legend">
+    Kode alasan: <b>R</b> = Rusak, <b>H</b> = Hilang, <b>S</b> = Salah input, <b>L</b> = Lainnya.
+  </div>
+  <div class="sign">
+    <div>
+      <div>Petugas Opname</div>
+      <div class="line">(____________________)</div>
+    </div>
+    <div>
+      <div>Penyelia / Supervisor</div>
+      <div class="line">(____________________)</div>
+    </div>
+  </div>
+  <script>
+    window.addEventListener('load', () => {
+      // biarkan user klik tombol cetak; auto-print hanya kalau mau:
+      // setTimeout(() => window.print(), 300);
+    });
+  </script>
+</body></html>`;
+
+  const w = window.open('', '_blank');
+  if (!w) { toast('Popup diblokir browser. Izinkan popup untuk mencetak.', true); return; }
+  w.document.open();
+  w.document.write(html);
+  w.document.close();
 }
 
 async function submitOpnameHandler() {
