@@ -916,8 +916,19 @@ function printOpnameForm() {
 <title>Form Opname ${esc(h.opname_no || '')}</title>
 <style>
   @page { size: A4 portrait; margin: 10mm 8mm; }
+  html, body { margin: 0; padding: 0; background: #f3f4f6; }
   * { box-sizing: border-box; }
-  body { font-family: Arial, Helvetica, sans-serif; font-size: 9px; color: #000; margin: 0; }
+  .sheet {
+    width: 210mm;
+    min-height: 297mm;
+    margin: 12px auto;
+    padding: 10mm 8mm;
+    background: #fff;
+    box-shadow: 0 1px 4px rgba(0,0,0,.15);
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 9px;
+    color: #000;
+  }
   .head { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 6px; }
   .head h1 { font-size: 13px; margin: 0 0 3px; letter-spacing: .3px; }
   .head .meta { font-size: 9px; line-height: 1.4; }
@@ -936,14 +947,19 @@ function printOpnameForm() {
   .sign { display: flex; justify-content: space-between; margin-top: 24px; page-break-inside: avoid; }
   .sign div { text-align: center; width: 40%; font-size: 9px; }
   .sign .line { margin-top: 40px; border-top: 1px solid #000; padding-top: 3px; }
-  .actions { position: fixed; top: 8px; right: 8px; }
+  .actions { position: fixed; top: 8px; right: 8px; z-index: 10; }
   .actions button { padding: 6px 12px; font-size: 13px; cursor: pointer; }
-  @media print { .actions { display: none; } }
+  @media print {
+    html, body { background: #fff; }
+    .sheet { width: auto; min-height: 0; margin: 0; padding: 0; box-shadow: none; }
+    .actions { display: none; }
+  }
 </style></head>
 <body>
   <div class="actions">
     <button onclick="window.print()">🖨️ Cetak</button>
   </div>
+  <div class="sheet">
   <div class="head">
     <div>
       <h1>FORM OPNAME MASSAL</h1>
@@ -988,7 +1004,7 @@ function printOpnameForm() {
   <div class="legend">
     Kode alasan: <b>R</b> = Rusak, <b>H</b> = Hilang, <b>S</b> = Salah input, <b>L</b> = Lainnya.
   </div>
-  <div class="sign">
+    <div class="sign">
     <div>
       <div>Petugas Opname</div>
       <div class="line">(____________________)</div>
@@ -998,6 +1014,7 @@ function printOpnameForm() {
       <div class="line">(____________________)</div>
     </div>
   </div>
+  </div><!-- /.sheet -->
   <script>
     window.addEventListener('load', () => {
       // auto-print hanya kalau mau (uncomment):
