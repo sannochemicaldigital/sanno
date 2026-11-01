@@ -68,6 +68,7 @@ export async function getSO(soId) {
 
 // ============================================================
 // CREATE SO
+// Return: { id, so_no } — user-facing pakai so_no, sistem pakai id
 // ============================================================
 export async function createSO({
   so_date, partner_id, description, lines, payment_terms_days = 30
@@ -80,7 +81,19 @@ export async function createSO({
     p_payment_terms_days: payment_terms_days
   });
   if (error) throw error;
-  return data;
+
+  const soId = data;
+  // Ambil so_no untuk ditampilkan ke user (user tidak perlu tahu id internal)
+  const { data: so } = await supabase
+    .from('sales_orders')
+    .select('so_no')
+    .eq('id', soId)
+    .single();
+
+  return {
+    id: soId,
+    so_no: so?.so_no || `#${soId}`
+  };
 }
 
 // ============================================================
@@ -149,4 +162,18 @@ export async function rejectSO(soId, reason) {
 export async function voidSO(soId, reason) {
   const { error } = await supabase.rpc('void_so', { p_so_id: soId, p_reason: reason });
   if (error) throw error;
+}
+
+// ============================================================
+// PRICE LIST HELPER
+// Ambil harga price list untuk 1 item (dipakai form SO)
+// Return: { item_id, sku, item_name, unit, price, discount_pct, effective_price, has_price } | null
+// ============================================================
+export async function getPriceForItem(itemId) {
+  const { data, error } = await supabase.rpc('get_price_for_item', {
+    p_item_id: itemId
+  });
+  if (error) throw error;
+  const row = Array.isArray(data) ? data[0] : data;
+  return row || null;
 }
