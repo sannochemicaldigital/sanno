@@ -215,12 +215,16 @@
       <!-- Riwayat koreksi (read-only untuk semua role inventory) -->
       <div class="card">
         <h3 style="margin-top:0;font-size:16px;">Riwayat Koreksi Stok</h3>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;align-items:center;">
+                <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;align-items:center;">
           <input type="text" id="saSearch" class="input"
                  placeholder="Cari SKU / nama..."
                  style="flex:1;min-width:180px;">
           <input type="date" id="saFrom" class="input" title="Dari tanggal">
           <input type="date" id="saTo" class="input" title="Sampai tanggal">
+          <label style="display:flex;align-items:center;gap:4px;font-size:13px;">
+            <input type="checkbox" id="saOnlyUnjournaled">
+            Hanya belum dijurnal
+          </label>
           <button type="button" class="btn btn-secondary" id="saRefreshBtn"
                   style="padding:8px 14px;font-size:13px;">Muat ulang</button>
         </div>
@@ -238,6 +242,7 @@
                 <th>Alasan</th>
                 <th>Memo</th>
                 <th>Oleh</th>
+                <th>Jurnal</th>
               </tr>
             </thead>
             <tbody id="tbody-stock-adjust"></tbody>
