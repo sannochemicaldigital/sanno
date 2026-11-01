@@ -879,34 +879,35 @@ async function saveOpnameDraft() {
     if (btn) { btn.disabled = false; btn.textContent = 'Simpan Draft'; }
   }
 }
-// ---------- Cetak form fisik opname ----------
+// ---------- Cetak form fisik opname (portrait, padat) ----------
 function printOpnameForm() {
   if (!currentOpnameId) return;
-  const header = {
-    opname_no:   document.querySelector('#opnameDetailHeader b')?.textContent || '',
-    opname_date: currentOpnameStatus === 'draft' ? (window.__currentOpnameDate || '') : '',
-    notes:       ''
-  };
-  // Ambil header lengkap dari cache render terakhir (disimpan saat loadOpnameDetail)
   const h = window.__currentOpnameHeader || {};
   const tanggal = h.opname_date || '';
   const catatan = h.notes || '';
+
+  // Pendekkan nama produk: maks 40 karakter, sisanya "..."
+  const shortName = (s, max = 40) => {
+    const str = String(s || '');
+    return str.length > max ? str.slice(0, max - 1) + '…' : str;
+  };
 
   const rowsHtml = opnameLinesCache.map((r, idx) => {
     const sys = Number(r.qty_system);
     const phys = r.qty_physical == null ? '' : Number(r.qty_physical);
     const delta = (r.qty_physical == null) ? '' : (Number(r.qty_physical) - sys);
+    const fullName = r.item_name || '';
     return `
       <tr>
         <td class="c">${idx + 1}</td>
-        <td>${esc(r.sku)}</td>
-        <td>${esc(r.item_name)}</td>
+        <td class="sku">${esc(r.sku)}</td>
+        <td title="${esc(fullName)}">${esc(shortName(fullName))}</td>
         <td class="c">${esc(r.unit)}</td>
         <td class="r">${fmt(sys)}</td>
         <td class="phys">${phys === '' ? '' : fmt(phys)}</td>
         <td class="r">${delta === '' ? '' : ((delta > 0 ? '+' : '') + fmt(delta))}</td>
         <td class="c">${r.reason ? esc(reasonLabel(r.reason).charAt(0)) : ''}</td>
-        <td>${esc(r.memo || '')}</td>
+        <td class="memo">${esc(r.memo || '')}</td>
       </tr>`;
   }).join('');
 
@@ -914,25 +915,27 @@ function printOpnameForm() {
 <html lang="id"><head><meta charset="UTF-8">
 <title>Form Opname ${esc(h.opname_no || '')}</title>
 <style>
-  @page { size: A4 landscape; margin: 12mm; }
+  @page { size: A4 portrait; margin: 10mm 8mm; }
   * { box-sizing: border-box; }
-  body { font-family: Arial, Helvetica, sans-serif; font-size: 11px; color: #000; margin: 0; }
-  .head { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px; }
-  .head h1 { font-size: 16px; margin: 0 0 4px; }
-  .head .meta { font-size: 11px; line-height: 1.5; }
-  .head .meta b { display: inline-block; min-width: 60px; }
-  table { width: 100%; border-collapse: collapse; }
-  th, td { border: 1px solid #000; padding: 4px 6px; vertical-align: top; }
-  th { background: #eee; font-weight: 700; font-size: 11px; }
+  body { font-family: Arial, Helvetica, sans-serif; font-size: 9px; color: #000; margin: 0; }
+  .head { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 6px; }
+  .head h1 { font-size: 13px; margin: 0 0 3px; letter-spacing: .3px; }
+  .head .meta { font-size: 9px; line-height: 1.4; }
+  .head .meta b { display: inline-block; min-width: 52px; }
+  table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+  th, td { border: 1px solid #000; padding: 2px 3px; vertical-align: top; font-size: 8.5px; }
+  th { background: #eee; font-weight: 700; font-size: 8.5px; }
   td.c { text-align: center; }
   td.r { text-align: right; }
-  td.phys { min-width: 70px; background: #fff; }
-  tr { page-break-inside: avoid; }
+  td.sku { font-family: "Courier New", monospace; font-size: 8px; word-break: break-all; }
+  td.memo { font-size: 8px; }
+  td.phys { background: #fff; }
   thead { display: table-header-group; }
-  .legend { margin-top: 8px; font-size: 10px; }
-  .sign { display: flex; justify-content: space-between; margin-top: 32px; }
-  .sign div { text-align: center; width: 40%; }
-  .sign .line { margin-top: 48px; border-top: 1px solid #000; padding-top: 4px; }
+  tr { page-break-inside: avoid; }
+  .legend { margin-top: 6px; font-size: 8.5px; }
+  .sign { display: flex; justify-content: space-between; margin-top: 24px; page-break-inside: avoid; }
+  .sign div { text-align: center; width: 40%; font-size: 9px; }
+  .sign .line { margin-top: 40px; border-top: 1px solid #000; padding-top: 3px; }
   .actions { position: fixed; top: 8px; right: 8px; }
   .actions button { padding: 6px 12px; font-size: 13px; cursor: pointer; }
   @media print { .actions { display: none; } }
@@ -956,17 +959,28 @@ function printOpnameForm() {
     </div>
   </div>
   <table>
+    <colgroup>
+      <col style="width:24px;">
+      <col style="width:70px;">
+      <col>
+      <col style="width:36px;">
+      <col style="width:52px;">
+      <col style="width:60px;">
+      <col style="width:52px;">
+      <col style="width:38px;">
+      <col style="width:80px;">
+    </colgroup>
     <thead>
       <tr>
-        <th style="width:32px;">No</th>
-        <th style="width:90px;">SKU</th>
+        <th>No</th>
+        <th>SKU</th>
         <th>Nama</th>
-        <th style="width:50px;">Satuan</th>
-        <th style="width:70px;">Stok Sistem</th>
-        <th style="width:80px;">Qty Fisik</th>
-        <th style="width:70px;">Selisih</th>
-        <th style="width:50px;">Alasan</th>
-        <th style="width:110px;">Memo</th>
+        <th>Sat.</th>
+        <th>Stok<br>Sistem</th>
+        <th>Qty<br>Fisik</th>
+        <th>Selisih</th>
+        <th>Alasan</th>
+        <th>Memo</th>
       </tr>
     </thead>
     <tbody>${rowsHtml}</tbody>
@@ -986,7 +1000,7 @@ function printOpnameForm() {
   </div>
   <script>
     window.addEventListener('load', () => {
-      // biarkan user klik tombol cetak; auto-print hanya kalau mau:
+      // auto-print hanya kalau mau (uncomment):
       // setTimeout(() => window.print(), 300);
     });
   </script>
@@ -998,7 +1012,6 @@ function printOpnameForm() {
   w.document.write(html);
   w.document.close();
 }
-
 async function submitOpnameHandler() {
   if (!perms.opnameCreate) { toast('Tidak ada akses', true); return; }
   if (!confirm('Submit opname ini? Setelah submit, qty fisik tidak bisa diedit.')) return;
