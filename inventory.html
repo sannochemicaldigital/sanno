@@ -16,16 +16,16 @@
 
     <nav class="nav" id="mainNav"></nav>
 
-        <!-- ==================== TABS ==================== -->
+    <!-- ==================== TABS ==================== -->
     <div class="tabs">
       <button data-tab="stock" class="active">Stok & Item</button>
       <button data-tab="adjust">Koreksi Stok</button>
     </div>
 
-    <!-- ==================== TAB: STOK & ITEM (existing, dibungkus) ==================== -->
+    <!-- ==================== TAB: STOK & ITEM ==================== -->
     <section id="tab-stock" class="tab-panel">
 
-      <!-- FORM ITEM BARU (existing, tidak diubah) -->
+      <!-- FORM ITEM BARU -->
       <div class="card">
         <h3 style="margin-top:0;font-size:16px;">Tambah Item Baru</h3>
         <p style="font-size:13px;color:#6b7280;margin-top:0;">
@@ -56,7 +56,7 @@
         </form>
       </div>
 
-      <!-- FORM STOK MASUK (existing, tidak diubah) -->
+      <!-- FORM STOK MASUK -->
       <div class="card">
         <h3 style="margin-top:0;font-size:16px;">Stok Masuk</h3>
         <p style="font-size:13px;color:#6b7280;margin-top:0;">
@@ -93,7 +93,7 @@
         </form>
       </div>
 
-      <!-- DAFTAR STOK (existing, tidak diubah) -->
+      <!-- DAFTAR STOK -->
       <div class="card">
         <h3 style="margin-top:0;font-size:16px;">Daftar Stok</h3>
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;align-items:center;">
@@ -113,7 +113,9 @@
           <table>
             <thead>
               <tr>
-                <th>SKU</th><th>Nama</th><th>Satuan</th>
+                <th>SKU</th>
+                <th>Nama</th>
+                <th>Satuan</th>
                 <th class="num">Stok</th>
                 <th class="num">Reserved</th>
                 <th class="num">Available</th>
@@ -126,14 +128,15 @@
         </div>
       </div>
 
-      <!-- RIWAYAT STOK MASUK (existing, tidak diubah) -->
+      <!-- RIWAYAT STOK MASUK -->
       <div class="card">
         <h3 style="margin-top:0;font-size:16px;">Riwayat Stok Masuk</h3>
         <div class="table-wrap">
           <table>
             <thead>
               <tr>
-                <th>Tanggal</th><th>Item</th>
+                <th>Tanggal</th>
+                <th>Item</th>
                 <th class="num">Qty</th>
                 <th class="num">Harga</th>
                 <th class="num">Total</th>
@@ -147,7 +150,7 @@
 
     </section>
 
-    <!-- ==================== TAB: KOREKSI STOK (Phase 1, BARU) ==================== -->
+    <!-- ==================== TAB: KOREKSI STOK (Phase 1) ==================== -->
     <section id="tab-adjust" class="tab-panel" style="display:none;">
 
       <!-- Form koreksi (di-gate permission) -->
@@ -246,104 +249,6 @@
       </div>
 
     </section>
-  </div>
-
-    <!-- FORM STOK MASUK -->
-    <div class="card">
-      <h3 style="margin-top:0;font-size:16px;">Stok Masuk</h3>
-      <p style="font-size:13px;color:#6b7280;margin-top:0;">
-        Menambah qty stok item yang sudah ada. Harga satuan dipakai untuk menghitung HPP rata-rata.
-      </p>
-      <form id="form-stock-in">
-        <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(140px,1fr));">
-          <div class="form-row">
-            <label>Tanggal</label>
-            <input type="date" name="movement_date" required>
-          </div>
-          <div class="form-row">
-            <label>Item</label>
-            <select name="item_id" id="stockInItem" required>
-              <option value="">— pilih item —</option>
-            </select>
-          </div>
-          <div class="form-row">
-            <label>Qty</label>
-            <input type="number" name="qty" step="0.0001" min="0.0001" required>
-          </div>
-          <div class="form-row">
-            <label>Harga Satuan</label>
-            <input type="number" name="unit_cost" step="0.01" min="0" required>
-          </div>
-          <div class="form-row" style="grid-column: span 2;">
-            <label>Memo (opsional)</label>
-            <input name="memo" placeholder="mis. Pembelian dari PT Sumber Jaya">
-          </div>
-        </div>
-        <div class="form-actions">
-          <button type="submit" class="btn btn-primary" id="stockInBtn">Tambah Stok</button>
-        </div>
-      </form>
-    </div>
-
-    <!-- DAFTAR STOK -->
-    <div class="card">
-      <h3 style="margin-top:0;font-size:16px;">Daftar Stok</h3>
-
-      <!-- Filter bar -->
-      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;align-items:center;">
-        <input type="text" id="invSearch" class="input"
-               placeholder="Cari SKU / nama..."
-               style="flex:1;min-width:180px;">
-
-        <label style="display:flex;align-items:center;gap:4px;font-size:13px;">
-          <input type="checkbox" id="invOnlyReserved">
-          Hanya ada reservasi
-        </label>
-
-        <label style="display:flex;align-items:center;gap:4px;font-size:13px;">
-          <input type="checkbox" id="invOnlyLowStock">
-          Hanya low stock
-        </label>
-      </div>
-
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>SKU</th>
-              <th>Nama</th>
-              <th>Satuan</th>
-              <th class="num">Stok</th>
-              <th class="num">Reserved</th>
-              <th class="num">Available</th>
-              <th class="num">Min</th>
-              <th>Status</th>
-            </tr>
-          </thead>
-          <tbody id="tbody-inventory"></tbody>
-        </table>
-      </div>
-    </div>
-
-    <!-- RIWAYAT STOK MASUK -->
-    <div class="card">
-      <h3 style="margin-top:0;font-size:16px;">Riwayat Stok Masuk</h3>
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Tanggal</th>
-              <th>Item</th>
-              <th class="num">Qty</th>
-              <th class="num">Harga</th>
-              <th class="num">Total</th>
-              <th>Memo</th>
-            </tr>
-          </thead>
-          <tbody id="tbody-movements"></tbody>
-        </table>
-      </div>
-    </div>
   </div>
 
   <div class="toast" id="toast"></div>
