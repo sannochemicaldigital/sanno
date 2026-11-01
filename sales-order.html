@@ -53,20 +53,38 @@
           <button type="button" class="btn btn-secondary" id="addLineBtn">+ Tambah Item</button>
         </div>
 
-        <!-- Header kolom baris item (desktop) -->
-        <div class="so-line-header" style="display:grid;grid-template-columns:minmax(140px,1.4fr) 70px 110px 110px 70px 110px minmax(140px,1fr) minmax(140px,1fr) 32px;gap:6px;margin-top:8px;margin-bottom:4px;font-size:11px;color:#6b7280;font-weight:600;">
-          <div>Item</div>
-          <div>Qty</div>
-          <div>Harga PL</div>
-          <div>Harga Diajukan</div>
-          <div>Diskon %</div>
-          <div>Harga Efektif</div>
-          <div>Status</div>
-          <div>Alasan Override</div>
-          <div></div>
+        <!-- Tabel baris item -->
+        <div class="table-wrap" style="margin-top:8px;">
+          <table class="so-line-table">
+            <colgroup>
+              <col style="width:22%;">   <!-- Item -->
+              <col style="width:8%;">    <!-- Qty -->
+              <col style="width:11%;">   <!-- Harga PL -->
+              <col style="width:12%;">   <!-- Harga Diajukan -->
+              <col style="width:8%;">    <!-- Diskon % -->
+              <col style="width:12%;">   <!-- Harga Efektif -->
+              <col style="width:12%;">   <!-- Status -->
+              <col style="width:15%;">   <!-- Alasan Override -->
+              <col style="width:40px;">  <!-- Hapus -->
+            </colgroup>
+            <thead>
+              <tr>
+                <th>Item</th>
+                <th class="num">Qty</th>
+                <th class="num">Harga PL</th>
+                <th class="num">Harga Diajukan</th>
+                <th class="num">Diskon %</th>
+                <th class="num">Harga Efektif</th>
+                <th>Status</th>
+                <th>Alasan Override</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="soLines">
+              <!-- baris di-render oleh JS (v5.F3) -->
+            </tbody>
+          </table>
         </div>
-
-        <div class="so-lines" id="soLines"></div>
 
         <div class="journal-summary" style="margin-top:12px;">
           <div>Total: <span id="totalAmount">Rp 0</span></div>
@@ -91,89 +109,77 @@
 
   <!-- CSS tambahan untuk baris item SO -->
   <style>
-    .so-line-row {
-      display: grid;
-      grid-template-columns: minmax(140px,1.4fr) 70px 110px 110px 70px 110px minmax(140px,1fr) minmax(140px,1fr) 32px;
-      gap: 6px;
-      align-items: center;
-      padding: 6px 0;
-      border-bottom: 1px solid #f3f4f6;
-    }
-    .so-line-row select,
-    .so-line-row input {
+    .so-line-table {
       width: 100%;
-      padding: 6px 8px;
+      border-collapse: collapse;
+      table-layout: fixed;
+    }
+    .so-line-table th,
+    .so-line-table td {
+      padding: 6px 4px;
+      font-size: 12px;
+      vertical-align: middle;
+    }
+    .so-line-table th {
+      text-align: left;
+      font-size: 11px;
+      color: #6b7280;
+      font-weight: 600;
+      border-bottom: 1px solid #e5e7eb;
+      white-space: nowrap;
+    }
+    .so-line-table th.num { text-align: right; }
+    .so-line-table td.num { text-align: right; }
+    .so-line-table input,
+    .so-line-table select {
+      width: 100%;
+      padding: 5px 6px;
       border: 1px solid #d0d5dd;
-      border-radius: 6px;
-      font-size: 13px;
+      border-radius: 5px;
+      font-size: 12px;
       box-sizing: border-box;
     }
-    .so-line-row .pl-readonly {
+    .so-line-table input.pl-readonly,
+    .so-line-table input.line-eff {
       background: #f9fafb;
       color: #374151;
       text-align: right;
       font-family: "Courier New", monospace;
-      font-size: 12px;
     }
-    .so-line-row .line-disc {
-      text-align: right;
-    }
-    .so-line-row .line-eff {
-      background: #f9fafb;
-      text-align: right;
+    .so-line-table input.line-eff {
       font-weight: 600;
-      font-size: 13px;
     }
-    .so-line-row .line-subtotal {
-      display: none; /* subtotal dihapus, diganti Total di bawah */
-    }
-    .so-line-row .line-remove {
+    .so-line-table .line-remove {
       background: #fee2e2;
       color: #991b1b;
       border: none;
-      border-radius: 6px;
-      width: 28px;
-      height: 28px;
-      font-size: 16px;
+      border-radius: 5px;
+      width: 26px;
+      height: 26px;
+      font-size: 14px;
       cursor: pointer;
       font-weight: 700;
+      padding: 0;
     }
-    .so-line-row .line-remove:hover {
-      background: #fecaca;
-    }
+    .so-line-table .line-remove:hover { background: #fecaca; }
     .so-badge {
       display: inline-block;
-      padding: 3px 8px;
+      padding: 3px 6px;
       border-radius: 4px;
       font-size: 11px;
       font-weight: 600;
       white-space: nowrap;
-      text-align: center;
     }
     .so-badge.ok      { background: #d1fae5; color: #065f46; }
     .so-badge.pending { background: #fef3c7; color: #92400e; }
     .so-badge.no-pl   { background: #fee2e2; color: #991b1b; }
-    .so-line-row .line-override-reason {
+    .so-line-table input.line-override-reason {
       font-size: 12px;
     }
-    .so-line-row .line-override-reason[disabled] {
+    .so-line-table input.line-override-reason[disabled] {
       background: #f9fafb;
       cursor: not-allowed;
-    }
-    /* Mobile: stack */
-    @media (max-width: 900px) {
-      .so-line-header { display: none; }
-      .so-line-row {
-        grid-template-columns: 1fr 1fr;
-        gap: 8px;
-        padding: 10px;
-        background: #f9fafb;
-        border-radius: 8px;
-        margin-bottom: 8px;
-      }
-      .so-line-row > * {
-        min-width: 0;
-      }
+      opacity: 0.6;
     }
   </style>
 
