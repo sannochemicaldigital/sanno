@@ -223,7 +223,7 @@ async function loadItemsForDropdown() {
 async function renderMovements() {
   const tbody = document.getElementById('tbody-movements');
   if (!tbody) return;
-  tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#9ca3af;">Memuat...</td></tr>';
+  tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#9ca3af;">Memuat...</td></tr>';
   try {
     const { data, error } = await supabase
       .from('stock_movements')
