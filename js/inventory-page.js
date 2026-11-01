@@ -1,5 +1,5 @@
 // js/inventory-page.js
-import './input-clear.js';                                  // ← TAMBAH: tombol clear (×)
+import './input-clear.js';                                  // ← tombol clear (×)
 import { requireAuth, logout } from './auth.js';
 import { renderNav, requirePageAccess } from './access.js';
 import { hasPermission } from './permissions.js';
@@ -32,6 +32,7 @@ const invFilter = {
   onlyReserved: false,
   onlyLowStock: false
 };
+
 // ---------- state tab koreksi stok (Phase 1) ----------
 let stockAdjustInitialized = false;
 let allItemsForAdjust = [];
@@ -69,8 +70,7 @@ let adjustReqSeq = 0;
   if (perms.create)  document.getElementById('form-new-item').addEventListener('submit', onCreateItem);
   if (perms.stockIn) document.getElementById('form-stock-in').addEventListener('submit', onStockIn);
 
-  bindInventoryFilters();
-    // Tab switcher (Koreksi Stok lazy-init)
+  // Tab switcher (Koreksi Stok lazy-init)
   document.querySelectorAll('.tabs button').forEach(btn => {
     btn.addEventListener('click', async () => {
       document.querySelectorAll('.tabs button').forEach(b => b.classList.remove('active'));
@@ -88,6 +88,8 @@ let adjustReqSeq = 0;
       }
     });
   });
+
+  bindInventoryFilters();
   await loadAll();
 })();
 
@@ -308,6 +310,7 @@ async function onStockIn(e) {
     btn.textContent = 'Tambah Stok';
   }
 }
+
 // ============================================================
 // TAB KOREKSI STOK (Phase 1)
 // ============================================================
@@ -377,7 +380,6 @@ function wireStockAdjustForm() {
     const delta = after - sys;
     deltaEl.value = (delta > 0 ? '+' : '') + fmt(delta);
     deltaEl.style.color = delta === 0 ? '#6b7280' : (delta > 0 ? '#059669' : '#b91c1c');
-    // Disable kalau delta 0 atau field wajib kosong
     btn.disabled = (delta === 0)
       || !document.getElementById('saReason').value
       || !document.getElementById('saDate').value;
@@ -415,7 +417,7 @@ function wireStockAdjustForm() {
       document.getElementById('saDate').value = today;
       btn.disabled = true;
 
-      // Reload riwayat + daftar stok utama (biar angka di tab "Stok & Item" ikut update)
+      // Reload riwayat + daftar stok utama
       await Promise.all([reloadStockAdjust(), renderInventory()]);
     } catch (err) {
       toast('Gagal koreksi: ' + (err.message || err), true);
