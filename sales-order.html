@@ -57,15 +57,15 @@
         <div class="table-wrap" style="margin-top:8px;">
           <table class="so-line-table">
             <colgroup>
-              <col style="width:22%;">   <!-- Item -->
-              <col style="width:8%;">    <!-- Qty -->
-              <col style="width:11%;">   <!-- Harga PL -->
+              <col style="width:24%;">   <!-- Item -->
+              <col style="width:60px;">  <!-- Qty (fixed sempit) -->
+              <col style="width:10%;">   <!-- Harga PL -->
               <col style="width:12%;">   <!-- Harga Diajukan -->
-              <col style="width:8%;">    <!-- Diskon % -->
-              <col style="width:12%;">   <!-- Harga Efektif -->
-              <col style="width:12%;">   <!-- Status -->
-              <col style="width:15%;">   <!-- Alasan Override -->
-              <col style="width:40px;">  <!-- Hapus -->
+              <col style="width:70px;">  <!-- Diskon % (fixed sempit) -->
+              <col style="width:11%;">   <!-- Harga Efektif -->
+              <col style="width:10%;">   <!-- Status -->
+              <col>                       <!-- Alasan Override (sisa) -->
+              <col style="width:36px;">  <!-- Hapus -->
             </colgroup>
             <thead>
               <tr>
@@ -81,7 +81,17 @@
               </tr>
             </thead>
             <tbody id="soLines">
-              <!-- baris di-render oleh JS (v5.F3) -->
+              <tr class="so-line-placeholder">
+                <td><select disabled><option>— pilih item —</option></select></td>
+                <td class="num"><input type="number" disabled placeholder="0" style="text-align:right;"></td>
+                <td class="num"><input type="text" disabled class="pl-readonly" placeholder="—"></td>
+                <td class="num"><input type="number" disabled placeholder="0" style="text-align:right;"></td>
+                <td class="num"><input type="number" disabled placeholder="0" style="text-align:right;"></td>
+                <td class="num"><input type="text" disabled class="line-eff" placeholder="0"></td>
+                <td><span class="so-badge ok">Sesuai</span></td>
+                <td><input type="text" disabled class="line-override-reason" placeholder="—"></td>
+                <td><button type="button" class="line-remove" disabled>×</button></td>
+              </tr>
             </tbody>
           </table>
         </div>
@@ -180,6 +190,14 @@
       background: #f9fafb;
       cursor: not-allowed;
       opacity: 0.6;
+    }
+        .so-line-table .so-line-placeholder td {
+      padding: 6px 4px;
+    }
+    .so-line-table .so-line-placeholder input,
+    .so-line-table .so-line-placeholder select {
+      background: #f9fafb;
+      opacity: 0.7;
     }
   </style>
 
