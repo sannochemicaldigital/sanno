@@ -1384,6 +1384,7 @@ async function loadPriceList(append = false) {
 }
 
 // ---------- Render tabel ----------
+// ---------- Render tabel ----------
 function renderPriceListRows() {
   const tbody = document.getElementById('tbody-price-list');
   if (!tbody) return;
@@ -1415,14 +1416,14 @@ function renderPriceListRows() {
           <input type="number" step="0.01" min="0" ${dis}
                  class="pl-price" value="${priceVal === '' ? '' : priceVal}"
                  placeholder="${hasPrice ? '' : '—'}"
-                 style="width:160px;padding:8px 10px;font-size:14px;border:1px solid #d0d5dd;border-radius:6px;text-align:right;">
+                 style="width:180px;min-width:180px;padding:10px 12px;font-size:15px;border:1px solid #d0d5dd;border-radius:6px;text-align:right;box-sizing:border-box;">
         </td>
         <td data-label="Diskon %" class="num">
           <input type="number" step="0.01" min="0" max="100" ${dis}
                  class="pl-disc" value="${discVal}"
-                 style="width:100px;padding:8px 10px;font-size:14px;border:1px solid #d0d5dd;border-radius:6px;text-align:right;">
+                 style="width:110px;min-width:110px;padding:10px 12px;font-size:15px;border:1px solid #d0d5dd;border-radius:6px;text-align:right;box-sizing:border-box;">
         </td>
-        <td data-label="Harga Efektif" class="num pl-eff" style="font-weight:600;${hasPrice ? '' : 'color:#9ca3af;'}">
+        <td data-label="Harga Efektif" class="num pl-eff" style="font-weight:600;white-space:nowrap;${hasPrice ? '' : 'color:#9ca3af;'}">
           ${hasPrice ? fmt(effVal) : '—'}
         </td>
         <td data-label="Diperbarui" style="white-space:nowrap;">
