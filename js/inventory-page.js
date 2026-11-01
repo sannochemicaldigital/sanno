@@ -46,7 +46,8 @@ let inventoryRows = [];
 const perms = {
   create: false, stockIn: false, viewPrice: false, viewMovement: false,
   stockAdjust: false,
-  opnameView: false, opnameCreate: false, opnameApprove: false
+  opnameView: false, opnameCreate: false, opnameApprove: false,
+  priceListView: false, priceListManage: false
 };
 const invFilter = {
   search: '',
@@ -87,6 +88,21 @@ const OPNAME_HIST_LIMIT = 50;
 let opnameHistOffset = 0;
 let opnameHistReqSeq = 0;
 
+// ---------- state tab price list (Phase 3) ----------
+let priceListInitialized = false;
+let priceListRowsCache = [];
+const priceListFilter = { search: '', onlyWithPrice: false };
+const PRICE_LIST_LIMIT = 200;
+let priceListOffset = 0;
+let priceListTotalCount = 0;
+let priceListReqSeq = 0;
+let priceListDirty = new Set();     // item_id yang berubah
+const priceListHistFilter = { search: '', itemId: null };
+const PRICE_LIST_HIST_LIMIT = 100;
+let priceListHistOffset = 0;
+let priceListHistTotalCount = 0;
+let priceListHistReqSeq = 0;
+
 (async () => {
   const user = await requireAuth();
   if (!user) return;
@@ -105,12 +121,20 @@ let opnameHistReqSeq = 0;
   perms.opnameView   = await hasPermission('inventory.opname.view');
   perms.opnameCreate = await hasPermission('inventory.opname.create');
   perms.opnameApprove= await hasPermission('inventory.opname.approve');
+  perms.priceListView   = await hasPermission('inventory.price_list.view');
+  perms.priceListManage = await hasPermission('inventory.price_list.manage');
 
   if (!perms.create)  document.getElementById('form-new-item').style.display = 'none';
   if (!perms.stockIn) document.getElementById('form-stock-in').style.display = 'none';
   if (!perms.viewMovement) {
     const histCard = document.getElementById('tbody-movements')?.closest('.card');
     if (histCard) histCard.style.display = 'none';
+  }
+
+  // Sembunyikan tab Price List kalau tidak punya permission view
+  if (!perms.priceListView) {
+    const plTabBtn = document.querySelector('.tabs button[data-tab="pricelist"]');
+    if (plTabBtn) plTabBtn.style.display = 'none';
   }
 
   const stockInDate = document.querySelector('#form-stock-in [name=movement_date]');
@@ -143,6 +167,15 @@ let opnameHistReqSeq = 0;
         catch (err) {
           const el = document.getElementById('tbody-opname-lines');
           if (el) el.innerHTML = `<tr><td colspan="8" style="color:#b91c1c;">Gagal memuat: ${esc(err.message)}</td></tr>`;
+        }
+      }
+
+      if (btn.dataset.tab === 'pricelist' && !priceListInitialized) {
+        priceListInitialized = true;
+        try { await initPriceListTab(); }
+        catch (err) {
+          const el = document.getElementById('tbody-price-list');
+          if (el) el.innerHTML = `<tr><td colspan="9" style="color:#b91c1c;">Gagal memuat: ${esc(err.message)}</td></tr>`;
         }
       }
     });
@@ -1249,4 +1282,649 @@ async function loadOpnameHistory(append = false) {
   } catch (err) {
     tbody.innerHTML += `<tr><td colspan="9" style="color:#b91c1c;">${esc(err.message)}</td></tr>`;
   }
+}
+
+// ============================================================
+// TAB PRICE LIST (Phase 3)
+// ============================================================
+
+// ---------- Init tab ----------
+async function initPriceListTab() {
+  // Sembunyikan toolbar edit kalau tidak punya manage
+  if (!perms.priceListManage) {
+    const reasonEl = document.getElementById('plReason');
+    if (reasonEl) reasonEl.style.display = 'none';
+    const saveBtn = document.getElementById('plSaveBtn');
+    if (saveBtn) saveBtn.style.display = 'none';
+  }
+
+  wirePriceListToolbar();
+  wirePriceListHistory();
+  await Promise.all([reloadPriceList(), reloadPriceListHistory()]);
+}
+
+// ---------- Toolbar Card 1 ----------
+function wirePriceListToolbar() {
+  const searchEl = document.getElementById('plSearch');
+  const chkOnly = document.getElementById('plOnlyWithPrice');
+  const refreshBtn = document.getElementById('plRefreshBtn');
+  const printBtn = document.getElementById('plPrintBtn');
+  const moreBtn = document.getElementById('plMoreBtn');
+  const saveBtn = document.getElementById('plSaveBtn');
+  const reasonEl = document.getElementById('plReason');
+
+  if (searchEl) {
+    let t = null;
+    searchEl.addEventListener('input', () => {
+      clearTimeout(t);
+      t = setTimeout(async () => {
+        priceListFilter.search = searchEl.value.trim();
+        await reloadPriceList();
+      }, 300);
+    });
+  }
+  if (chkOnly) {
+    chkOnly.addEventListener('change', async () => {
+      priceListFilter.onlyWithPrice = chkOnly.checked;
+      await reloadPriceList();
+    });
+  }
+  if (refreshBtn) refreshBtn.addEventListener('click', () => reloadPriceList());
+  if (printBtn)   printBtn.addEventListener('click', () => printPriceListForm());
+  if (moreBtn)    moreBtn.addEventListener('click', () => loadPriceList(true));
+  if (reasonEl)   reasonEl.addEventListener('input', updatePriceListSaveBtn);
+  if (saveBtn)    saveBtn.addEventListener('click', () => savePriceListHandler('bulk'));
+}
+
+// ---------- Reload (reset offset) ----------
+async function reloadPriceList() {
+  priceListOffset = 0;
+  priceListDirty = new Set();
+  priceListRowsCache = [];
+  const tbody = document.getElementById('tbody-price-list');
+  if (tbody) tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:#9ca3af;">Memuat...</td></tr>';
+  const moreBtn = document.getElementById('plMoreBtn');
+  if (moreBtn) moreBtn.style.display = 'none';
+  const info = document.getElementById('plInfo');
+  if (info) info.textContent = '';
+  updatePriceListSaveBtn();
+  await loadPriceList(false);
+}
+
+// ---------- Load (append atau replace) ----------
+async function loadPriceList(append = false) {
+  const tbody = document.getElementById('tbody-price-list');
+  if (!tbody) return;
+  if (!append) tbody.innerHTML = '';
+  const seq = ++priceListReqSeq;
+
+  try {
+    const { data, error } = await supabase.rpc('list_price_list', {
+      p_search: priceListFilter.search || null,
+      p_only_with_price: priceListFilter.onlyWithPrice,
+      p_limit: PRICE_LIST_LIMIT,
+      p_offset: priceListOffset
+    });
+    if (error) throw error;
+    if (seq !== priceListReqSeq) return;
+
+    const rows = data || [];
+    const totalCount = rows[0]?.total_count != null ? Number(rows[0].total_count) : rows.length;
+
+    if (append) priceListRowsCache = priceListRowsCache.concat(rows);
+    else priceListRowsCache = rows;
+
+    priceListTotalCount = totalCount;
+    priceListOffset += rows.length;
+
+    renderPriceListRows();
+  } catch (err) {
+    tbody.innerHTML += `<tr><td colspan="9" style="color:#b91c1c;">${esc(err.message)}</td></tr>`;
+  }
+}
+
+// ---------- Render tabel ----------
+function renderPriceListRows() {
+  const tbody = document.getElementById('tbody-price-list');
+  if (!tbody) return;
+
+  if (!priceListRowsCache.length) {
+    tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:#9ca3af;">Tidak ada item cocok</td></tr>';
+    updatePriceListSaveBtn();
+    return;
+  }
+
+  const canManage = perms.priceListManage;
+
+  tbody.innerHTML = priceListRowsCache.map(r => {
+    const itemId = Number(r.item_id);
+    const hasPrice = r.has_price === true;
+    const priceVal = hasPrice ? Number(r.price) : '';
+    const discVal  = hasPrice ? Number(r.discount_pct) : 0;
+    const effVal   = hasPrice ? Number(r.effective_price) : 0;
+    const dis = canManage ? '' : 'disabled';
+    const isDirty = priceListDirty.has(itemId);
+
+    return `
+      <tr data-item-id="${itemId}" class="${isDirty ? 'pl-dirty' : ''}"
+          style="${isDirty ? 'background:#fef3c7;' : ''}">
+        <td data-label="SKU">${esc(r.sku)}</td>
+        <td data-label="Nama">${esc(r.item_name)}</td>
+        <td data-label="Satuan">${esc(r.unit)}</td>
+        <td data-label="Harga" class="num">
+          <input type="number" step="0.01" min="0" ${dis}
+                 class="pl-price" value="${priceVal === '' ? '' : priceVal}"
+                 placeholder="${hasPrice ? '' : '—'}"
+                 style="width:110px;padding:6px;border:1px solid #d0d5dd;border-radius:6px;text-align:right;">
+        </td>
+        <td data-label="Diskon %" class="num">
+          <input type="number" step="0.01" min="0" max="100" ${dis}
+                 class="pl-disc" value="${discVal}"
+                 style="width:80px;padding:6px;border:1px solid #d0d5dd;border-radius:6px;text-align:right;">
+        </td>
+        <td data-label="Harga Efektif" class="num pl-eff" style="font-weight:600;${hasPrice ? '' : 'color:#9ca3af;'}">
+          ${hasPrice ? fmt(effVal) : '—'}
+        </td>
+        <td data-label="Diperbarui" style="white-space:nowrap;">
+          ${hasPrice ? esc(fmtDateTime(r.updated_at)) : '—'}
+        </td>
+        <td data-label="Riwayat">
+          <button type="button" class="btn btn-secondary pl-hist-btn"
+                  data-item-id="${itemId}" style="padding:4px 10px;font-size:12px;">Riwayat</button>
+        </td>
+        <td data-label="Aksi">
+          ${canManage ? `
+            <button type="button" class="btn btn-primary pl-save-one"
+                    data-item-id="${itemId}" disabled
+                    style="padding:4px 10px;font-size:12px;margin-right:4px;">Simpan</button>
+            ${hasPrice ? `
+              <button type="button" class="btn btn-danger pl-delete"
+                      data-item-id="${itemId}" data-sku="${esc(r.sku)}"
+                      style="padding:4px 10px;font-size:12px;">Hapus</button>
+            ` : ''}
+          ` : '<span style="color:#9ca3af;">—</span>'}
+        </td>
+      </tr>`;
+  }).join('');
+
+  wirePriceListInputs();
+
+  // Info & tombol "Muat lebih banyak"
+  const info = document.getElementById('plInfo');
+  if (info) info.textContent = `Menampilkan ${Math.min(priceListOffset, priceListTotalCount)} dari ${priceListTotalCount}`;
+  const moreBtn = document.getElementById('plMoreBtn');
+  if (moreBtn) moreBtn.style.display = priceListOffset < priceListTotalCount ? 'inline-block' : 'none';
+
+  updatePriceListSaveBtn();
+}
+
+// ---------- Update tombol Simpan (bulk) ----------
+function updatePriceListSaveBtn() {
+  const saveBtn = document.getElementById('plSaveBtn');
+  if (!saveBtn) return;
+  saveBtn.disabled = priceListDirty.size === 0;
+  saveBtn.textContent = priceListDirty.size > 0
+    ? `Simpan Perubahan (${priceListDirty.size})`
+    : 'Simpan Perubahan';
+}
+
+// ---------- Wire input harga/diskon + tombol per baris ----------
+function wirePriceListInputs() {
+  const tbody = document.getElementById('tbody-price-list');
+  if (!tbody) return;
+
+  tbody.querySelectorAll('tr[data-item-id]').forEach(tr => {
+    const itemId = Number(tr.dataset.itemId);
+    const priceEl = tr.querySelector('.pl-price');
+    const discEl  = tr.querySelector('.pl-disc');
+    const effEl   = tr.querySelector('.pl-eff');
+    const saveOneBtn = tr.querySelector('.pl-save-one');
+    const histBtn = tr.querySelector('.pl-hist-btn');
+    const delBtn  = tr.querySelector('.pl-delete');
+
+    const row = priceListRowsCache.find(x => Number(x.item_id) === itemId);
+    if (!row) return;
+
+    // Snapshot nilai awal (dari cache) untuk deteksi dirty
+    const origPrice = row.has_price ? Number(row.price) : null;
+    const origDisc  = row.has_price ? Number(row.discount_pct) : 0;
+
+    const recompute = () => {
+      const priceRaw = priceEl?.value ?? '';
+      const discRaw  = discEl?.value ?? '';
+      const price = priceRaw === '' ? null : Number(priceRaw);
+      const disc  = discRaw === '' ? 0 : Number(discRaw);
+
+      // Harga efektif (read-only)
+      if (effEl) {
+        if (price == null) {
+          effEl.textContent = '—';
+          effEl.style.color = '#9ca3af';
+        } else {
+          const eff = price * (1 - disc / 100);
+          effEl.textContent = fmt(eff);
+          effEl.style.color = '';
+        }
+      }
+
+      // Deteksi dirty (bandingkan dengan snapshot awal)
+      const changed = (price !== origPrice) || (disc !== origDisc);
+      if (changed) {
+        priceListDirty.add(itemId);
+        tr.style.background = '#fef3c7';
+      } else {
+        priceListDirty.delete(itemId);
+        tr.style.background = '';
+      }
+
+      // Update tombol simpan per baris
+      if (saveOneBtn) saveOneBtn.disabled = !changed;
+
+      updatePriceListSaveBtn();
+    };
+
+    priceEl?.addEventListener('input', recompute);
+    discEl?.addEventListener('input', recompute);
+
+    // Tombol Simpan per baris (U1 hybrid)
+    saveOneBtn?.addEventListener('click', () => savePriceListHandler('single', itemId));
+
+    // Tombol Riwayat per baris (U5)
+    histBtn?.addEventListener('click', () => {
+      priceListHistFilter.itemId = itemId;
+      const skuTxt = row.sku || '';
+      const nameTxt = row.item_name || '';
+      const infoEl = document.getElementById('plHistFilterInfo');
+      if (infoEl) {
+        infoEl.style.display = 'block';
+        infoEl.innerHTML = `Filter aktif: <b>${esc(skuTxt)} — ${esc(nameTxt)}</b>`;
+      }
+      const resetBtn = document.getElementById('plHistResetBtn');
+      if (resetBtn) resetBtn.style.display = 'inline-block';
+      reloadPriceListHistory();
+    });
+
+    // Tombol Hapus (U4 — hanya untuk manage)
+    delBtn?.addEventListener('click', () => deletePriceListItemHandler(itemId, row.sku));
+  });
+}
+
+// ---------- Kumpulkan payload perubahan ----------
+function collectPriceListChanges(itemIdOnly = null) {
+  const result = [];
+  for (const itemId of priceListDirty) {
+    if (itemIdOnly != null && itemId !== itemIdOnly) continue;
+
+    const tr = document.querySelector(`#tbody-price-list tr[data-item-id="${itemId}"]`);
+    if (!tr) continue;
+    const priceEl = tr.querySelector('.pl-price');
+    const discEl  = tr.querySelector('.pl-disc');
+    if (!priceEl) continue;
+
+    const priceRaw = priceEl.value;
+    const discRaw  = discEl?.value ?? '0';
+    const price = priceRaw === '' ? 0 : Number(priceRaw);
+    const disc  = discRaw === '' ? 0 : Number(discRaw);
+
+    // Validasi dasar
+    if (isNaN(price) || price < 0) {
+      toast(`Harga tidak valid untuk item ${itemId}`, true);
+      return null;
+    }
+    if (isNaN(disc) || disc < 0 || disc > 100) {
+      toast(`Diskon harus 0–100 untuk item ${itemId}`, true);
+      return null;
+    }
+
+    result.push({ item_id: itemId, price, discount_pct: disc });
+  }
+  return result;
+}
+
+// ---------- Simpan (bulk / single) ----------
+async function savePriceListHandler(mode = 'bulk', itemIdOnly = null) {
+  if (!perms.priceListManage) { toast('Tidak ada akses ubah harga', true); return; }
+
+  const lines = collectPriceListChanges(itemIdOnly);
+  if (lines === null) return; // validasi gagal
+  if (!lines.length) { toast('Tidak ada perubahan', true); return; }
+
+  if (mode === 'bulk' && lines.length > 20) {
+    if (!confirm(`Simpan ${lines.length} perubahan harga?`)) return;
+  }
+
+  const reason = document.getElementById('plReason')?.value.trim() || null;
+  const bulkBtn = document.getElementById('plSaveBtn');
+  const singleBtn = itemIdOnly != null
+    ? document.querySelector(`#tbody-price-list tr[data-item-id="${itemIdOnly}"] .pl-save-one`)
+    : null;
+
+  const activeBtn = mode === 'single' ? singleBtn : bulkBtn;
+  const origText = activeBtn?.textContent;
+  if (activeBtn) { activeBtn.disabled = true; activeBtn.textContent = 'Menyimpan...'; }
+
+  try {
+    const { data, error } = await supabase.rpc('save_price_list', {
+      p_lines: lines,
+      p_reason: reason
+    });
+    if (error) throw error;
+
+    const row = Array.isArray(data) ? data[0] : data;
+    const savedCount = Number(row?.saved_count ?? lines.length);
+    const changedCount = Number(row?.changed_count ?? 0);
+
+    toast(`✓ Tersimpan: ${savedCount} baris (${changedCount} berubah)`);
+
+    // Clear reason input
+    const reasonEl = document.getElementById('plReason');
+    if (reasonEl) reasonEl.value = '';
+
+    // Hapus dirty untuk item yang baru disimpan
+    if (mode === 'single' && itemIdOnly != null) {
+      priceListDirty.delete(itemIdOnly);
+      updatePriceListSaveBtn();
+    } else {
+      priceListDirty.clear();
+      updatePriceListSaveBtn();
+    }
+
+    // Reload tabel + riwayat
+    await Promise.all([reloadPriceList(), reloadPriceListHistory()]);
+  } catch (err) {
+    toast('Gagal simpan: ' + (err.message || err), true);
+  } finally {
+    if (activeBtn) {
+      activeBtn.disabled = false;
+      activeBtn.textContent = origText || (mode === 'single' ? 'Simpan' : 'Simpan Perubahan');
+    }
+    updatePriceListSaveBtn();
+  }
+}
+
+// ---------- Hapus price list item ----------
+async function deletePriceListItemHandler(itemId, sku) {
+  if (!perms.priceListManage) { toast('Tidak ada akses hapus', true); return; }
+  const ok = confirm(
+    `Hapus harga untuk item ${sku || itemId}?\n\n` +
+    `Setelah dihapus, item ini TIDAK BISA dijual sampai harga diisi kembali (D7).\n` +
+    `Riwayat perubahan tetap tersimpan.`
+  );
+  if (!ok) return;
+
+  try {
+    const { data, error } = await supabase.rpc('delete_price_list_item', { p_item_id: itemId });
+    if (error) throw error;
+    const row = Array.isArray(data) ? data[0] : data;
+    if (row?.deleted) {
+      toast('✓ Harga item dihapus');
+    } else {
+      toast('Item tidak ditemukan atau sudah tanpa harga', true);
+    }
+    priceListDirty.delete(itemId);
+    await Promise.all([reloadPriceList(), reloadPriceListHistory()]);
+  } catch (err) {
+    toast('Gagal hapus: ' + (err.message || err), true);
+  }
+}
+
+// ---------- Wire toolbar Card 2 (riwayat) ----------
+function wirePriceListHistory() {
+  const searchEl = document.getElementById('plHistSearch');
+  const resetBtn = document.getElementById('plHistResetBtn');
+  const moreBtn  = document.getElementById('plHistMoreBtn');
+
+  if (searchEl) {
+    let t = null;
+    searchEl.addEventListener('input', () => {
+      clearTimeout(t);
+      t = setTimeout(async () => {
+        priceListHistFilter.search = searchEl.value.trim();
+        await reloadPriceListHistory();
+      }, 300);
+    });
+  }
+
+  if (resetBtn) {
+    resetBtn.addEventListener('click', async () => {
+      priceListHistFilter.itemId = null;
+      priceListHistFilter.search = '';
+      const searchField = document.getElementById('plHistSearch');
+      if (searchField) searchField.value = '';
+      const infoEl = document.getElementById('plHistFilterInfo');
+      if (infoEl) { infoEl.style.display = 'none'; infoEl.innerHTML = ''; }
+      resetBtn.style.display = 'none';
+      await reloadPriceListHistory();
+    });
+  }
+
+  if (moreBtn) moreBtn.addEventListener('click', () => loadPriceListHistory(true));
+}
+
+// ---------- Reload riwayat (reset offset) ----------
+async function reloadPriceListHistory() {
+  priceListHistOffset = 0;
+  const tbody = document.getElementById('tbody-price-list-history');
+  if (tbody) tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#9ca3af;">Memuat...</td></tr>';
+  const moreBtn = document.getElementById('plHistMoreBtn');
+  if (moreBtn) moreBtn.style.display = 'none';
+  const info = document.getElementById('plHistInfo');
+  if (info) info.textContent = '';
+  await loadPriceListHistory(false);
+}
+
+// ---------- Load riwayat ----------
+async function loadPriceListHistory(append = false) {
+  const tbody = document.getElementById('tbody-price-list-history');
+  if (!tbody) return;
+  if (!append) tbody.innerHTML = '';
+  const seq = ++priceListHistReqSeq;
+
+  try {
+    const { data, error } = await supabase.rpc('list_price_list_history', {
+      p_item_id: priceListHistFilter.itemId ?? null,
+      p_limit:   PRICE_LIST_HIST_LIMIT,
+      p_offset:  priceListHistOffset
+    });
+    if (error) throw error;
+    if (seq !== priceListHistReqSeq) return;
+
+    const rows = data || [];
+    const totalCount = rows[0]?.total_count != null ? Number(rows[0].total_count) : rows.length;
+
+    if (!append && !rows.length) {
+      tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#9ca3af;">Belum ada riwayat perubahan</td></tr>';
+      if (priceListHistFilter.itemId != null) {
+        // filter per item tapi kosong — beri hint
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#9ca3af;">Belum ada riwayat untuk item ini</td></tr>';
+      }
+      return;
+    }
+
+    // Filter client-side by search (RPC tidak punya p_search di handoff)
+    let filtered = rows;
+    if (priceListHistFilter.search) {
+      const q = priceListHistFilter.search.toLowerCase();
+      filtered = rows.filter(r =>
+        String(r.sku || '').toLowerCase().includes(q) ||
+        String(r.item_name || '').toLowerCase().includes(q)
+      );
+    }
+
+    const html = filtered.map(r => {
+      const oldPrice = r.old_price == null ? '—' : fmt(r.old_price);
+      const newPrice = r.new_price == null ? '—' : fmt(r.new_price);
+      const oldDisc  = r.old_discount == null ? '—' : fmt(r.old_discount);
+      const newDisc  = r.new_discount == null ? '—' : fmt(r.new_discount);
+      return `
+        <tr>
+          <td data-label="Waktu" style="white-space:nowrap;">${esc(fmtDateTime(r.changed_at))}</td>
+          <td data-label="SKU">${esc(r.sku)}</td>
+          <td data-label="Nama">${esc(r.item_name)}</td>
+          <td data-label="Harga" class="num">${oldPrice} → <b>${newPrice}</b></td>
+          <td data-label="Diskon" class="num">${oldDisc}% → <b>${newDisc}%</b></td>
+          <td data-label="Oleh">${esc(r.changed_by_name || '—')}</td>
+          <td data-label="Alasan">${esc(r.reason || '—')}</td>
+        </tr>`;
+    }).join('');
+
+    if (append) tbody.insertAdjacentHTML('beforeend', html);
+    else tbody.innerHTML = html || '<tr><td colspan="7" style="text-align:center;color:#9ca3af;">Tidak ada hasil cocok</td></tr>';
+
+    priceListHistOffset += rows.length;
+    const info = document.getElementById('plHistInfo');
+    if (info) info.textContent = `Menampilkan ${Math.min(priceListHistOffset, totalCount)} dari ${totalCount}`;
+    const moreBtn = document.getElementById('plHistMoreBtn');
+    if (moreBtn) moreBtn.style.display = priceListHistOffset < totalCount ? 'inline-block' : 'none';
+  } catch (err) {
+    tbody.innerHTML += `<tr><td colspan="7" style="color:#b91c1c;">${esc(err.message)}</td></tr>`;
+  }
+}
+
+// ---------- Cetak form price list (portrait, padat) ----------
+function printPriceListForm() {
+  if (!priceListRowsCache.length) {
+    toast('Tidak ada data untuk dicetak', true);
+    return;
+  }
+
+  const shortName = (s, max = 40) => {
+    const str = String(s || '');
+    return str.length > max ? str.slice(0, max - 1) + '…' : str;
+  };
+
+  const filterInfo = [];
+  if (priceListFilter.search) filterInfo.push(`Cari: "${priceListFilter.search}"`);
+  if (priceListFilter.onlyWithPrice) filterInfo.push('Hanya yang sudah ada harga');
+
+  const rowsHtml = priceListRowsCache.map((r, idx) => {
+    const hasPrice = r.has_price === true;
+    const price = hasPrice ? fmt(r.price) : '';
+    const disc  = hasPrice ? fmt(r.discount_pct) : '';
+    const eff   = hasPrice ? fmt(r.effective_price) : '';
+    const fullName = r.item_name || '';
+    return `
+      <tr>
+        <td class="c">${idx + 1}</td>
+        <td class="sku">${esc(r.sku)}</td>
+        <td title="${esc(fullName)}">${esc(shortName(fullName))}</td>
+        <td class="c">${esc(r.unit)}</td>
+        <td class="r">${price}</td>
+        <td class="r">${disc}</td>
+        <td class="r">${eff}</td>
+        <td class="new"></td>
+        <td class="memo"></td>
+      </tr>`;
+  }).join('');
+
+  const html = `<!DOCTYPE html>
+<html lang="id"><head><meta charset="UTF-8">
+<title>Daftar Harga</title>
+<style>
+  @page { size: A4 portrait; margin: 10mm 8mm; }
+  html, body { margin: 0; padding: 0; background: #f3f4f6; }
+  * { box-sizing: border-box; }
+  .sheet {
+    width: 210mm;
+    min-height: 297mm;
+    margin: 12px auto;
+    padding: 10mm 8mm;
+    background: #fff;
+    box-shadow: 0 1px 4px rgba(0,0,0,.15);
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 9px;
+    color: #000;
+  }
+  .head { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 6px; }
+  .head h1 { font-size: 13px; margin: 0 0 3px; letter-spacing: .3px; }
+  .head .meta { font-size: 9px; line-height: 1.4; }
+  .head .meta b { display: inline-block; min-width: 52px; }
+  table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+  th, td { border: 1px solid #000; padding: 2px 3px; vertical-align: top; font-size: 8.5px; }
+  th { background: #eee; font-weight: 700; font-size: 8.5px; }
+  td.c { text-align: center; }
+  td.r { text-align: right; }
+  td.sku { font-family: "Courier New", monospace; font-size: 8px; word-break: break-all; }
+  td.memo { font-size: 8px; }
+  td.new { background: #fff; }
+  thead { display: table-header-group; }
+  tr { page-break-inside: avoid; }
+  .legend { margin-top: 6px; font-size: 8.5px; }
+  .sign { display: flex; justify-content: space-between; margin-top: 24px; page-break-inside: avoid; }
+  .sign div { text-align: center; width: 40%; font-size: 9px; }
+  .sign .line { margin-top: 40px; border-top: 1px solid #000; padding-top: 3px; }
+  .actions { position: fixed; top: 8px; right: 8px; z-index: 10; }
+  .actions button { padding: 6px 12px; font-size: 13px; cursor: pointer; }
+  @media print {
+    html, body { background: #fff; }
+    .sheet { width: auto; min-height: 0; margin: 0; padding: 0; box-shadow: none; }
+    .actions { display: none; }
+  }
+</style></head>
+<body>
+  <div class="actions">
+    <button onclick="window.print()">🖨️ Cetak</button>
+  </div>
+  <div class="sheet">
+  <div class="head">
+    <div>
+      <h1>DAFTAR HARGA</h1>
+      <div class="meta">
+        <div><b>Tanggal</b> ${esc(new Date().toLocaleDateString('id-ID'))}</div>
+        ${filterInfo.length ? `<div><b>Filter</b> ${esc(filterInfo.join(' · '))}</div>` : ''}
+      </div>
+    </div>
+    <div class="meta" style="text-align:right;">
+      <div>Total item: <b>${priceListRowsCache.length}</b></div>
+      <div>Dicetak: ${new Date().toLocaleString('id-ID')}</div>
+    </div>
+  </div>
+  <table>
+    <colgroup>
+      <col style="width:24px;">
+      <col style="width:70px;">
+      <col>
+      <col style="width:36px;">
+      <col style="width:64px;">
+      <col style="width:44px;">
+      <col style="width:64px;">
+      <col style="width:64px;">
+      <col style="width:80px;">
+    </colgroup>
+    <thead>
+      <tr>
+        <th>No</th>
+        <th>SKU</th>
+        <th>Nama</th>
+        <th>Sat.</th>
+        <th>Harga<br>Sekarang</th>
+        <th>Diskon<br>%</th>
+        <th>Harga<br>Efektif</th>
+        <th>Harga Baru</th>
+        <th>Memo</th>
+      </tr>
+    </thead>
+    <tbody>${rowsHtml}</tbody>
+  </table>
+  <div class="legend">
+    Harga belum termasuk PPN. Kolom <b>Harga Baru</b> &amp; <b>Memo</b> diisi manual saat rapat penyesuaian harga.
+  </div>
+  <div class="sign">
+    <div>
+      <div>Disiapkan oleh</div>
+      <div class="line">(____________________)</div>
+    </div>
+    <div>
+      <div>Disetujui oleh</div>
+      <div class="line">(____________________)</div>
+    </div>
+  </div>
+  </div><!-- /.sheet -->
+</body></html>`;
+
+  const w = window.open('', '_blank');
+  if (!w) { toast('Popup diblokir browser. Izinkan popup untuk mencetak.', true); return; }
+  w.document.open();
+  w.document.write(html);
+  w.document.close();
 }
