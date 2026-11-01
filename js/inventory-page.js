@@ -1421,7 +1421,7 @@ function renderPriceListRows() {
         <td data-label="Diskon %" class="num">
           <input type="number" step="0.01" min="0" max="100" ${dis}
                  class="pl-disc" value="${discVal}"
-                 style="width:110px;min-width:110px;padding:10px 12px;font-size:15px;border:1px solid #d0d5dd;border-radius:6px;text-align:right;box-sizing:border-box;">
+                 style="width:80px;min-width:80px;padding:10px 8px;font-size:15px;border:1px solid #d0d5dd;border-radius:6px;text-align:right;box-sizing:border-box;">
         </td>
         <td data-label="Harga Efektif" class="num pl-eff" style="font-weight:600;white-space:nowrap;${hasPrice ? '' : 'color:#9ca3af;'}">
           ${hasPrice ? fmt(effVal) : '—'}
