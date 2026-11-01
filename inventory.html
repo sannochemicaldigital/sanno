@@ -20,6 +20,7 @@
     <div class="tabs">
       <button data-tab="stock" class="active">Stok & Item</button>
       <button data-tab="adjust">Koreksi Stok</button>
+      <button data-tab="opname">Opname Massal</button>
     </div>
 
     <!-- ==================== TAB: STOK & ITEM ==================== -->
@@ -246,6 +247,138 @@
           <button type="button" class="btn btn-secondary" id="saMoreBtn"
                   style="display:none;padding:8px 16px;font-size:13px;">Muat lebih banyak</button>
           <div id="saInfo" style="font-size:12px;color:#6b7280;margin-top:8px;"></div>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- ==================== TAB: OPNAME MASSAL (Phase 2) ==================== -->
+    <section id="tab-opname" class="tab-panel" style="display:none;">
+
+      <!-- Toolbar atas: buat opname baru + info opname aktif -->
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
+          <div>
+            <h3 style="margin:0;font-size:16px;">Opname Massal</h3>
+            <p style="font-size:13px;color:#6b7280;margin:4px 0 0;">
+              Hitung stok fisik semua item aktif. Penyesuaian hanya dibuat untuk item dengan selisih.
+            </p>
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <button type="button" class="btn btn-primary" id="opnameNewBtn" style="display:none;">
+              + Buat Opname Baru
+            </button>
+            <button type="button" class="btn btn-secondary" id="opnameRefreshBtn"
+                    style="padding:8px 14px;font-size:13px;">Muat ulang</button>
+          </div>
+        </div>
+
+        <!-- Form buat opname baru (muncul saat tombol diklik) -->
+        <div id="opnameNewFormCard" style="display:none;margin-top:16px;padding:12px;background:#f9fafb;border-radius:8px;">
+          <form id="form-opname-new">
+            <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(160px,1fr));">
+              <div class="form-row">
+                <label>Tanggal Opname <span style="color:#dc2626;">*</span></label>
+                <input type="date" name="opname_date" id="opnameNewDate" required>
+              </div>
+              <div class="form-row" style="grid-column: span 2;">
+                <label>Catatan (opsional)</label>
+                <input name="notes" id="opnameNewNotes" maxlength="500"
+                       placeholder="mis. Opname akhir bulan">
+              </div>
+            </div>
+            <div class="form-actions">
+              <button type="submit" class="btn btn-primary" id="opnameCreateBtn">Buat Opname</button>
+              <button type="button" class="btn btn-secondary" id="opnameCancelCreateBtn">Batal</button>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <!-- Detail opname aktif -->
+      <div class="card" id="opnameDetailCard" style="display:none;">
+        <div id="opnameDetailHeader" style="margin-bottom:12px;"></div>
+
+        <!-- Toolbar aksi detail (render sesuai status & permission) -->
+        <div id="opnameActionBar" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;"></div>
+
+        <!-- Filter tabel lines -->
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px;">
+          <input type="text" id="opnameLineSearch" class="input"
+                 placeholder="Cari SKU / nama..."
+                 style="flex:1;min-width:180px;">
+          <label style="display:flex;align-items:center;gap:4px;font-size:13px;">
+            <input type="checkbox" id="opnameOnlyDiff">
+            Hanya tampilkan item dengan selisih
+          </label>
+        </div>
+
+        <!-- Tabel lines -->
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>SKU</th>
+                <th>Nama</th>
+                <th>Satuan</th>
+                <th class="num">Stok Sistem</th>
+                <th class="num">Qty Fisik</th>
+                <th class="num">Selisih</th>
+                <th>Alasan</th>
+                <th>Memo</th>
+              </tr>
+            </thead>
+            <tbody id="tbody-opname-lines"></tbody>
+          </table>
+        </div>
+        <div style="margin-top:12px;text-align:center;">
+          <button type="button" class="btn btn-secondary" id="opnameLinesMoreBtn"
+                  style="display:none;padding:8px 16px;font-size:13px;">Muat lebih banyak</button>
+          <div id="opnameLinesInfo" style="font-size:12px;color:#6b7280;margin-top:8px;"></div>
+        </div>
+      </div>
+
+      <!-- Riwayat opname -->
+      <div class="card">
+        <h3 style="margin-top:0;font-size:16px;">Riwayat Opname</h3>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px;">
+          <input type="text" id="opnameHistSearch" class="input"
+                 placeholder="Cari no opname / catatan..."
+                 style="flex:1;min-width:180px;">
+          <select id="opnameHistStatus" class="input" style="padding:8px;border:1px solid #d0d5dd;border-radius:6px;">
+            <option value="">Semua status</option>
+            <option value="draft">Draft</option>
+            <option value="submitted">Submitted</option>
+            <option value="executed">Executed</option>
+            <option value="cancelled">Cancelled</option>
+          </select>
+          <input type="date" id="opnameHistFrom" class="input" title="Dari tanggal">
+          <input type="date" id="opnameHistTo" class="input" title="Sampai tanggal">
+          <button type="button" class="btn btn-secondary" id="opnameHistRefreshBtn"
+                  style="padding:8px 14px;font-size:13px;">Muat ulang</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>No. Opname</th>
+                <th>Tanggal</th>
+                <th>Status</th>
+                <th class="num">Lines</th>
+                <th class="num">Adjusted</th>
+                <th class="num">Skipped</th>
+                <th>Dibuat</th>
+                <th>Dieksekusi</th>
+                <th>Aksi</th>
+              </tr>
+            </thead>
+            <tbody id="tbody-opname-history"></tbody>
+          </table>
+        </div>
+        <div style="margin-top:12px;text-align:center;">
+          <button type="button" class="btn btn-secondary" id="opnameHistMoreBtn"
+                  style="display:none;padding:8px 16px;font-size:13px;">Muat lebih banyak</button>
+          <div id="opnameHistInfo" style="font-size:12px;color:#6b7280;margin-top:8px;"></div>
         </div>
       </div>
 
