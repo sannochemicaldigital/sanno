@@ -66,6 +66,7 @@ let adjustReqSeq = 0;
 let opnameInitialized = false;
 let currentOpnameId = null;
 let opnameLinesCache = [];        // cache full lines utk filter client-side
+let currentOpnameStatus = '';
 const opnameFilter = { search: '', onlyDelta: false, lineOffset: 0 };
 const OPNAME_LINE_LIMIT = 200;
 let opnameLineReqSeq = 0;
@@ -559,12 +560,23 @@ async function loadStockAdjust(append = false) {
 // ============================================================
 async function initOpnameTab() {
   const btnNew = document.getElementById('opnameNewBtn');
-  if (btnNew && !perms.opnameCreate) btnNew.style.display = 'none';
+  if (btnNew) btnNew.style.display = perms.opnameCreate ? '' : 'none';
 
   const detail = document.getElementById('opnameDetailCard');
   if (detail) detail.style.display = 'none';
 
   if (perms.opnameCreate) wireOpnameCreateForm();
+
+  const refreshTop = document.getElementById('opnameRefreshBtn');
+  if (refreshTop) refreshTop.addEventListener('click', async () => {
+    await reloadOpnameHistory();
+    if (currentOpnameId) await loadOpnameDetail();
+  });
+  const refreshHist = document.getElementById('opnameHistRefreshBtn');
+  if (refreshHist) refreshHist.addEventListener('click', () => reloadOpnameHistory());
+  const moreLines = document.getElementById('opnameLinesMoreBtn');
+  if (moreLines) moreLines.style.display = 'none';
+
   wireOpnameHistory();
   await reloadOpnameHistory();
 }
@@ -572,8 +584,9 @@ async function initOpnameTab() {
 // ---------- Buat opname baru ----------
 function wireOpnameCreateForm() {
   const btnNew = document.getElementById('opnameNewBtn');
-  const card = document.getElementById('opnameCreateCard');
-  const form = document.getElementById('form-opname-create');
+  const card = document.getElementById('opnameNewFormCard');
+  const form = document.getElementById('form-opname-new');
+  const btnCancel = document.getElementById('opnameCancelCreateBtn');
   if (!btnNew || !card || !form) return;
 
   const dateEl = form.querySelector('[name=opname_date]');
@@ -588,11 +601,14 @@ function wireOpnameCreateForm() {
     }
   });
 
+  if (btnCancel) btnCancel.addEventListener('click', () => {
+    card.style.display = 'none';
+  });
+
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
-    const submitBtn = document.getElementById('opnameCreateSubmitBtn');
-    submitBtn.disabled = true;
-    submitBtn.textContent = 'Membuat...';
+    const submitBtn = document.getElementById('opnameCreateBtn');
+    if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Membuat...'; }
     try {
       const { data, error } = await supabase.rpc('create_opname', {
         p_opname_date: form.opname_date.value,
@@ -608,8 +624,7 @@ function wireOpnameCreateForm() {
     } catch (err) {
       toast('Gagal buat opname: ' + (err.message || err), true);
     } finally {
-      submitBtn.disabled = false;
-      submitBtn.textContent = 'Buat Opname';
+      if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Buat Opname'; }
     }
   });
 }
@@ -625,7 +640,7 @@ async function openOpnameDetail(opnameId) {
 async function loadOpnameDetail() {
   if (!currentOpnameId) return;
   const tbody = document.getElementById('tbody-opname-lines');
-  const headerEl = document.getElementById('opnameHeaderInfo');
+  const headerEl = document.getElementById('opnameDetailHeader');
   if (tbody) tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:#9ca3af;">Memuat...</td></tr>';
 
   try {
@@ -636,10 +651,11 @@ async function loadOpnameDetail() {
 
     opnameLinesCache = Array.isArray(header.lines) ? header.lines : [];
 
+    currentOpnameStatus = header.status || '';
     renderOpnameHeader(header);
     renderOpnameLines(header.status);
     renderOpnameActions(header);
-    renderOpnameMeta(header);
+    
   } catch (err) {
     if (tbody) tbody.innerHTML = `<tr><td colspan="8" style="color:#b91c1c;">${esc(err.message)}</td></tr>`;
     if (headerEl) headerEl.innerHTML = `<span style="color:#b91c1c;">${esc(err.message)}</span>`;
@@ -647,7 +663,7 @@ async function loadOpnameDetail() {
 }
 
 function renderOpnameHeader(h) {
-  const el = document.getElementById('opnameHeaderInfo');
+  const el = document.getElementById('opnameDetailHeader');
   if (!el) return;
   el.innerHTML = `
     <div style="display:flex;flex-wrap:wrap;gap:16px;align-items:center;">
@@ -673,7 +689,7 @@ function renderOpnameMeta(h) {
 }
 
 function renderOpnameActions(h) {
-  const el = document.getElementById('opnameActions');
+  const el = document.getElementById('opnameActionBar');
   if (!el) return;
   const s = h.status;
   const btns = [];
@@ -913,8 +929,7 @@ async function cancelOpnameHandler() {
 // ---------- Filter input tabel besar (client-side) ----------
 function wireOpnameLinesFilter() {
   const searchEl = document.getElementById('opnameLineSearch');
-  const chkDelta = document.getElementById('opnameLineOnlyDelta');
-  const refreshBtn = document.getElementById('opnameLineRefreshBtn');
+  const chkDelta = document.getElementById('opnameOnlyDiff');
 
   if (searchEl) {
     let t = null;
@@ -922,17 +937,16 @@ function wireOpnameLinesFilter() {
       clearTimeout(t);
       t = setTimeout(() => {
         opnameFilter.search = searchEl.value.trim();
-        if (currentOpnameId) renderOpnameLines(document.getElementById('opnameStatusHidden')?.value || '');
+        if (currentOpnameId) renderOpnameLines(currentOpnameStatus);
       }, 250);
     });
   }
   if (chkDelta) {
     chkDelta.addEventListener('change', () => {
       opnameFilter.onlyDelta = chkDelta.checked;
-      if (currentOpnameId) renderOpnameLines(document.getElementById('opnameStatusHidden')?.value || '');
+      if (currentOpnameId) renderOpnameLines(currentOpnameStatus);
     });
   }
-  if (refreshBtn) refreshBtn.addEventListener('click', () => loadOpnameDetail());
 }
 
 // ---------- Riwayat opname ----------
