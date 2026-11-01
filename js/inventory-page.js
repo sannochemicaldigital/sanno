@@ -53,14 +53,26 @@ const invFilter = {
   onlyReserved: false,
   onlyLowStock: false
 };
+function renderJournalBadge(r) {
+  if (!r.needs_journal) {
+    return '<span style="color:#9ca3af;">—</span>';
+  }
+  if (r.journal_entry_id != null) {
+    const tgl = r.journal_posted_at ? new Date(r.journal_posted_at).toLocaleDateString('id-ID') : '';
+    return `<span style="background:#d1fae5;color:#065f46;padding:2px 8px;border-radius:4px;font-weight:600;font-size:12px;">Sudah${tgl ? ' · ' + esc(tgl) : ''}</span>`;
+  }
+  return '<span style="background:#fee2e2;color:#991b1b;padding:2px 8px;border-radius:4px;font-weight:600;font-size:12px;">Belum dijurnal</span>';
+}
 
 // ---------- state tab koreksi stok (Phase 1) ----------
 let stockAdjustInitialized = false;
 let allItemsForAdjust = [];
-const adjustFilter = { search: '', from: '', to: '' };
+const adjustFilter = { search: '', from: '', to: '', onlyUnjournaled: false };
 const ADJUST_LIMIT = 50;
 let adjustOffset = 0;
 let adjustReqSeq = 0;
+let adjustRowsCache = [];
+let adjustTotalCount = 0;
 
 // ---------- state tab opname massal (Phase 2) ----------
 let opnameInitialized = false;
@@ -468,6 +480,7 @@ function wireStockAdjustHistory() {
   const inpSearch = document.getElementById('saSearch');
   const fromEl = document.getElementById('saFrom');
   const toEl = document.getElementById('saTo');
+  const chkUnjournaled = document.getElementById('saOnlyUnjournaled');
   const refreshBtn = document.getElementById('saRefreshBtn');
   const moreBtn = document.getElementById('saMoreBtn');
 
@@ -483,6 +496,10 @@ function wireStockAdjustHistory() {
   }
   if (fromEl) fromEl.addEventListener('change', async () => { adjustFilter.from = fromEl.value; await reloadStockAdjust(); });
   if (toEl)   toEl.addEventListener('change',   async () => { adjustFilter.to   = toEl.value;   await reloadStockAdjust(); });
+    if (chkUnjournaled) chkUnjournaled.addEventListener('change', () => {
+    adjustFilter.onlyUnjournaled = chkUnjournaled.checked;
+    renderStockAdjustRows(adjustTotalCount);
+  });
   if (refreshBtn) refreshBtn.addEventListener('click', () => reloadStockAdjust());
   if (moreBtn)    moreBtn.addEventListener('click', () => loadStockAdjust(true));
 }
@@ -490,11 +507,12 @@ function wireStockAdjustHistory() {
 async function reloadStockAdjust() {
   adjustOffset = 0;
   const tbody = document.getElementById('tbody-stock-adjust');
-  if (tbody) tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;color:#9ca3af;">Memuat...</td></tr>';
+  if (tbody) tbody.innerHTML = '<tr><td colspan="11" style="text-align:center;color:#9ca3af;">Memuat...</td></tr>';
   const moreBtn = document.getElementById('saMoreBtn');
   if (moreBtn) moreBtn.style.display = 'none';
   const info = document.getElementById('saInfo');
   if (info) info.textContent = '';
+  adjustRowsCache = [];
   await loadStockAdjust(false);
 }
 
@@ -517,17 +535,34 @@ async function loadStockAdjust(append = false) {
     const rows = data || [];
     const totalCount = rows[0]?.total_count != null ? Number(rows[0].total_count) : rows.length;
 
-    if (!append && !rows.length) {
-      tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;color:#9ca3af;">Belum ada koreksi stok</td></tr>';
-      const info = document.getElementById('saInfo');
-      if (info) info.textContent = '';
-      return;
-    }
+        if (append) adjustRowsCache = adjustRowsCache.concat(rows);
+    else adjustRowsCache = rows;
 
-    const html = rows.map(r => {
+    adjustTotalCount = totalCount;
+    adjustOffset += rows.length;
+    renderStockAdjustRows(totalCount);
+  } catch (err) {
+    tbody.innerHTML += `<tr><td colspan="11" style="color:#b91c1c;">${esc(err.message)}</td></tr>`;
+  }
+}
+
+function renderStockAdjustRows(totalCount) {
+  const tbody = document.getElementById('tbody-stock-adjust');
+  if (!tbody) return;
+
+  let rows = adjustRowsCache;
+  if (adjustFilter.onlyUnjournaled) {
+    rows = rows.filter(r => r.needs_journal === true && r.journal_entry_id == null);
+  }
+
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="11" style="text-align:center;color:#9ca3af;">Belum ada koreksi stok</td></tr>';
+  } else {
+    tbody.innerHTML = rows.map(r => {
       const d = Number(r.qty_delta);
       const dStr = (d > 0 ? '+' : '') + fmt(d);
       const dColor = d > 0 ? '#059669' : '#b91c1c';
+      const journalBadge = renderJournalBadge(r);
       return `
         <tr>
           <td data-label="Tanggal" style="white-space:nowrap;">${esc(r.adjust_date)}</td>
@@ -540,20 +575,19 @@ async function loadStockAdjust(append = false) {
           <td data-label="Alasan">${esc(reasonLabel(r.reason))}</td>
           <td data-label="Memo">${esc(r.memo || '—')}</td>
           <td data-label="Oleh">${esc(r.created_by_name || '—')}</td>
+          <td data-label="Jurnal">${journalBadge}</td>
         </tr>`;
     }).join('');
-
-    if (append) tbody.insertAdjacentHTML('beforeend', html);
-    else tbody.innerHTML = html;
-
-    adjustOffset += rows.length;
-    const info = document.getElementById('saInfo');
-    if (info) info.textContent = `Menampilkan ${Math.min(adjustOffset, totalCount)} dari ${totalCount}`;
-    const moreBtn = document.getElementById('saMoreBtn');
-    if (moreBtn) moreBtn.style.display = adjustOffset < totalCount ? 'inline-block' : 'none';
-  } catch (err) {
-    tbody.innerHTML += `<tr><td colspan="10" style="color:#b91c1c;">${esc(err.message)}</td></tr>`;
   }
+
+  const info = document.getElementById('saInfo');
+if (info) {
+  const shown = rows.length;
+  const total = adjustTotalCount || totalCount;
+  info.textContent = adjustFilter.onlyUnjournaled
+    ? `Menampilkan ${shown} (belum dijurnal) dari ${adjustRowsCache.length} termuat`
+    : `Menampilkan ${Math.min(adjustRowsCache.length, total)} dari ${total}`;
+}
 }
 // ============================================================
 // TAB OPNAME MASSAL (Phase 2)
@@ -665,9 +699,18 @@ async function loadOpnameDetail() {
 function renderOpnameHeader(h) {
   const el = document.getElementById('opnameDetailHeader');
   if (!el) return;
+  let journalBadge = '';
+  if (h.status === 'executed') {
+    if (h.journal_entry_id != null) {
+      const tgl = h.journal_posted_at ? new Date(h.journal_posted_at).toLocaleDateString('id-ID') : '';
+      journalBadge = `<span style="background:#d1fae5;color:#065f46;padding:2px 8px;border-radius:4px;font-weight:600;font-size:12px;">Jurnal sudah${tgl ? ' · ' + esc(tgl) : ''}</span>`;
+    } else {
+      journalBadge = `<span style="background:#fee2e2;color:#991b1b;padding:2px 8px;border-radius:4px;font-weight:600;font-size:12px;">Belum dijurnal</span>`;
+    }
+  }
   el.innerHTML = `
     <div style="display:flex;flex-wrap:wrap;gap:16px;align-items:center;">
-      <div><b>${esc(h.opname_no)}</b> ${statusBadge(h.status)}</div>
+      <div><b>${esc(h.opname_no)}</b> ${statusBadge(h.status)} ${journalBadge}</div>
       <div>Tanggal: <b>${esc(h.opname_date)}</b></div>
       <div>Dibuat: ${esc(fmtDateTime(h.created_at))}</div>
       ${h.submitted_at ? `<div>Submit: ${esc(fmtDateTime(h.submitted_at))}</div>` : ''}
