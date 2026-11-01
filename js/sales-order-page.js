@@ -5,7 +5,7 @@ import { hasPermission } from './permissions.js';
 import { listPartners } from './partners.js';
 import { listItems } from './items.js';
 import {
-  createSO, editSO, submitSO, cancelSO, getSO, listSOs
+  createSO, editSO, submitSO, cancelSO, getSO, listSOs, getPriceForItem
 } from './sales-order.js';
 import { supabase } from './supabase-client.js';
 
@@ -74,6 +74,7 @@ function fmtDate(d) {
     document.getElementById('addLineBtn').addEventListener('click', () => addLine());
     document.getElementById('cancelBtn').addEventListener('click', resetForm);
     document.getElementById('form-so').addEventListener('submit', onSubmit);
+    // Baris awal
     addLine();
   }
 
@@ -113,56 +114,220 @@ async function loadMaster() {
 // ============================================================
 function addLine() {
   state.lineCount++;
-  const id = state.lineCount;
-  const wrap = document.getElementById('soLines');
-  const div = document.createElement('div');
-  div.className = 'line-row';
-  div.dataset.lineId = id;
-  div.innerHTML = `
-    <select class="line-item" required>
-      <option value="">— pilih item —</option>
-      ${state.items.map(i =>
-        `<option value="${i.id}">${esc(i.sku)} — ${esc(i.name)}</option>`
-      ).join('')}
-    </select>
-    <input type="number" class="line-qty" placeholder="Qty" min="0.0001" step="0.0001" required>
-    <input type="number" class="line-price" placeholder="Harga satuan" min="0" step="0.01" required>
-    <div style="display:flex;align-items:center;font-size:13px;color:#6b7280;" class="line-subtotal">Rp 0</div>
-    <button type="button" class="line-remove" title="Hapus">×</button>
-  `;
-  wrap.appendChild(div);
+  const tbody = document.getElementById('soLines');
+  // Hapus placeholder kalau ada
+  const ph = tbody.querySelector('.so-line-placeholder');
+  if (ph) ph.remove();
 
-  div.querySelector('.line-remove').addEventListener('click', () => {
-    div.remove();
+  const tr = document.createElement('tr');
+  tr.className = 'so-line-row';
+  tr.dataset.lineId = state.lineCount;
+  tr.innerHTML = `
+    <td>
+      <select class="line-item" required>
+        <option value="">— pilih item —</option>
+        ${state.items.map(i =>
+          `<option value="${i.id}">${esc(i.sku)} — ${esc(i.name)}</option>`
+        ).join('')}
+      </select>
+    </td>
+    <td class="num">
+      <input type="number" class="line-qty" placeholder="0" min="0.0001" step="0.0001" required
+             style="text-align:right;">
+    </td>
+    <td class="num">
+      <input type="text" class="pl-readonly" placeholder="—" readonly tabindex="-1">
+    </td>
+    <td class="num">
+      <input type="number" class="line-price" placeholder="0" min="0" step="0.01" required
+             style="text-align:right;">
+    </td>
+    <td class="num">
+      <input type="number" class="line-disc" placeholder="0" min="0" max="100" step="0.01"
+             value="0" style="text-align:right;">
+    </td>
+    <td class="num">
+      <input type="text" class="line-eff" placeholder="0" readonly tabindex="-1">
+    </td>
+    <td class="line-status">
+      <span class="so-badge ok" style="display:none;">—</span>
+    </td>
+    <td>
+      <input type="text" class="line-override-reason" placeholder="—" maxlength="200" disabled>
+    </td>
+    <td>
+      <button type="button" class="line-remove" title="Hapus">×</button>
+    </td>
+  `;
+  tbody.appendChild(tr);
+
+  // Bind events
+  tr.querySelector('.line-item').addEventListener('change', onItemChange);
+  tr.querySelector('.line-qty').addEventListener('input', recalcTotals);
+  tr.querySelector('.line-price').addEventListener('input', () => {
+    recalcLine(tr);
     recalcTotals();
   });
-  div.querySelectorAll('input').forEach(inp => {
-    inp.addEventListener('input', recalcTotals);
+  tr.querySelector('.line-disc').addEventListener('input', () => {
+    recalcLine(tr);
+    recalcTotals();
   });
+  tr.querySelector('.line-remove').addEventListener('click', () => {
+    tr.remove();
+    recalcTotals();
+  });
+
+  recalcLine(tr);
   recalcTotals();
 }
 
+// Saat item dipilih → ambil harga price list + auto-isi
+async function onItemChange(e) {
+  const tr = e.target.closest('tr');
+  const itemId = Number(e.target.value) || 0;
+  if (!itemId) {
+    tr.querySelector('.pl-readonly').value = '';
+    tr.querySelector('.line-price').value = '';
+    tr.querySelector('.line-eff').value = '';
+    recalcLine(tr);
+    recalcTotals();
+    return;
+  }
+
+  try {
+    const pl = await getPriceForItem(itemId);
+    const plPriceEl = tr.querySelector('.pl-readonly');
+    const priceEl = tr.querySelector('.line-price');
+
+    if (!pl || pl.has_price === false) {
+      // Item belum punya price list (D7 — tidak boleh dijual)
+      plPriceEl.value = '—';
+      plPriceEl.title = 'Item belum punya price list';
+      tr.dataset.hasPrice = 'false';
+      // Jangan auto-isi harga; biarkan sales sadar
+      if (!priceEl.value) priceEl.value = '';
+      recalcLine(tr);
+      recalcTotals();
+      return;
+    }
+
+    tr.dataset.hasPrice = 'true';
+    tr.dataset.plPrice = pl.price;
+    tr.dataset.plDiscount = pl.discount_pct;
+    tr.dataset.plEffective = pl.effective_price;
+
+    plPriceEl.value = fmt(pl.effective_price);
+    plPriceEl.title = `Harga: ${fmt(pl.price)} · Diskon: ${pl.discount_pct}%`;
+
+    // Auto-isi harga diajukan dari effective_price (sales bisa ubah)
+    if (!priceEl.value || Number(priceEl.value) === 0) {
+      priceEl.value = pl.effective_price;
+    }
+
+    recalcLine(tr);
+    recalcTotals();
+  } catch (err) {
+    console.error('getPriceForItem:', err);
+    toast('Gagal ambil harga price list: ' + (err.message || err), true);
+  }
+}
+
+// Hitung harga efektif + badge selisih per baris
+function recalcLine(tr) {
+  const hasPrice = tr.dataset.hasPrice === 'true';
+  const plEff = hasPrice ? Number(tr.dataset.plEffective) : null;
+
+  const qty = Number(tr.querySelector('.line-qty').value) || 0;
+  const price = Number(tr.querySelector('.line-price').value) || 0;
+  const disc = Number(tr.querySelector('.line-disc').value) || 0;
+  const eff = price * (1 - disc / 100);
+
+  const effEl = tr.querySelector('.line-eff');
+  effEl.value = eff > 0 ? fmt(eff) : '0';
+
+  const badgeEl = tr.querySelector('.line-status .so-badge');
+  const reasonEl = tr.querySelector('.line-override-reason');
+
+  // Default: sembunyikan badge
+  badgeEl.style.display = 'none';
+  badgeEl.className = 'so-badge';
+
+  if (!hasPrice) {
+    // Belum ada PL atau belum pilih item
+    if (tr.querySelector('.line-item').value) {
+      badgeEl.textContent = '⚠ Belum ada PL';
+      badgeEl.className = 'so-badge no-pl';
+      badgeEl.style.display = 'inline-block';
+    }
+    reasonEl.disabled = true;
+    reasonEl.value = '';
+    return;
+  }
+
+  // Ada PL — hitung selisih
+  const diff = eff - plEff;
+  const diffPct = plEff > 0 ? (diff / plEff) * 100 : 0;
+
+  if (Math.abs(diff) < 0.01) {
+    // Sesuai
+    badgeEl.textContent = '✓ Sesuai';
+    badgeEl.className = 'so-badge ok';
+    badgeEl.style.display = 'inline-block';
+    reasonEl.disabled = true;
+    reasonEl.value = '';
+  } else if (diff < 0) {
+    // Di bawah PL — butuh approval
+    badgeEl.textContent = `−${Math.abs(diffPct).toFixed(1)}%`;
+    badgeEl.className = 'so-badge pending';
+    badgeEl.style.display = 'inline-block';
+    badgeEl.title = `Di bawah price list: ${fmt(diff)} (${diffPct.toFixed(2)}%). Butuh approval.`;
+    reasonEl.disabled = false;
+  } else {
+    // Di atas PL — butuh approval
+    badgeEl.textContent = `+${diffPct.toFixed(1)}%`;
+    badgeEl.className = 'so-badge pending';
+    badgeEl.style.display = 'inline-block';
+    badgeEl.title = `Di atas price list: ${fmt(diff)} (${diffPct.toFixed(2)}%). Butuh approval.`;
+    reasonEl.disabled = false;
+  }
+}
+
+// ============================================================
+// COLLECT LINES
+// ============================================================
 function collectLines() {
-  const rows = document.querySelectorAll('#soLines .line-row');
+  const rows = document.querySelectorAll('#soLines .so-line-row');
   const lines = [];
   rows.forEach(r => {
     const item_id = Number(r.querySelector('.line-item').value) || null;
     const qty = Number(r.querySelector('.line-qty').value) || 0;
     const unit_price = Number(r.querySelector('.line-price').value) || 0;
+    const so_discount_pct = Number(r.querySelector('.line-disc').value) || 0;
+    const reason = r.querySelector('.line-override-reason').value.trim() || null;
     if (!item_id && !qty) return;
-    lines.push({ item_id, qty, unit_price, memo: null });
+    lines.push({
+      item_id,
+      qty,
+      unit_price,
+      so_discount_pct,
+      price_override_reason: reason,
+      memo: null
+    });
   });
   return lines;
 }
 
+// ============================================================
+// RECALC TOTAL
+// ============================================================
 function recalcTotals() {
   let total = 0;
-  document.querySelectorAll('#soLines .line-row').forEach(r => {
+  document.querySelectorAll('#soLines .so-line-row').forEach(r => {
     const qty = Number(r.querySelector('.line-qty').value) || 0;
     const price = Number(r.querySelector('.line-price').value) || 0;
-    const sub = qty * price;
+    const disc = Number(r.querySelector('.line-disc').value) || 0;
+    const sub = qty * price * (1 - disc / 100);
     total += sub;
-    r.querySelector('.line-subtotal').textContent = fmt(sub);
   });
   const ppn = total * state.ppnRate / 100;
   const grand = total + ppn;
@@ -171,6 +336,9 @@ function recalcTotals() {
     `PPN ${state.ppnRate}%: ${fmt(ppn)} · Grand Total: <b>${fmt(grand)}</b>`;
 }
 
+// ============================================================
+// RESET FORM
+// ============================================================
 function resetForm() {
   document.getElementById('form-so').reset();
   document.querySelector('[name=so_date]').value = new Date().toISOString().slice(0, 10);
@@ -201,6 +369,19 @@ async function onSubmit(e) {
     const lines = collectLines();
     if (lines.length === 0) throw new Error('Minimal 1 item');
 
+    // Blokir kalau ada item tanpa price list (D7 — backend juga akan RAISE)
+    const rows = document.querySelectorAll('#soLines .so-line-row');
+    for (const r of rows) {
+      const itemId = Number(r.querySelector('.line-item').value);
+      if (!itemId) continue;
+      if (r.dataset.hasPrice === 'false') {
+        const it = state.itemsById[itemId];
+        throw new Error(
+          `Item ${it?.sku || itemId} belum punya price list. Tidak bisa dijual.`
+        );
+      }
+    }
+
     const payload = {
       so_date: f.so_date.value,
       partner_id: Number(f.partner_id.value),
@@ -213,8 +394,8 @@ async function onSubmit(e) {
       await editSO(state.editingId, payload);
       toast('✓ SO diupdate');
     } else {
-      const soId = await createSO(payload);
-      toast(`✓ SO dibuat (ID ${soId})`);
+      const result = await createSO(payload);
+      toast(`✓ SO ${result.so_no} dibuat (draft)`);
     }
     resetForm();
     await renderSOList();
@@ -305,6 +486,9 @@ async function renderSOList() {
   }
 }
 
+// ============================================================
+// EDIT SO
+// ============================================================
 async function onEdit(soId) {
   if (!state.perms.edit) { toast('Tidak ada akses edit SO', true); return; }
   try {
@@ -320,12 +504,29 @@ async function onEdit(soId) {
 
     document.getElementById('soLines').innerHTML = '';
     state.lineCount = 0;
+
     for (const l of so.lines) {
       addLine();
-      const row = document.querySelector(`#soLines .line-row[data-line-id="${state.lineCount}"]`);
+      const row = document.querySelector(`#soLines .so-line-row[data-line-id="${state.lineCount}"]`);
+      // Set dataset dari snapshot existing
+      if (l.price_list_price != null) {
+        row.dataset.hasPrice = 'true';
+        row.dataset.plPrice = l.price_list_price;
+        row.dataset.plDiscount = l.price_list_discount_pct;
+        row.dataset.plEffective = l.price_list_effective_price;
+        row.querySelector('.pl-readonly').value = fmt(l.price_list_effective_price);
+        row.querySelector('.pl-readonly').title =
+          `Harga: ${fmt(l.price_list_price)} · Diskon: ${l.price_list_discount_pct || 0}%`;
+      } else {
+        row.dataset.hasPrice = 'false';
+        row.querySelector('.pl-readonly').value = '—';
+      }
       row.querySelector('.line-item').value = l.item_id;
       row.querySelector('.line-qty').value = l.qty;
       row.querySelector('.line-price').value = l.unit_price;
+      row.querySelector('.line-disc').value = l.so_discount_pct || 0;
+      row.querySelector('.line-override-reason').value = l.price_override_reason || '';
+      recalcLine(row);
     }
     recalcTotals();
 
@@ -338,6 +539,9 @@ async function onEdit(soId) {
   }
 }
 
+// ============================================================
+// SUBMIT APPROVAL
+// ============================================================
 async function onSubmitApproval(soId) {
   if (!state.perms.submit) { toast('Tidak ada akses submit', true); return; }
   if (!confirm('Submit SO ini untuk approval?')) return;
@@ -350,6 +554,9 @@ async function onSubmitApproval(soId) {
   }
 }
 
+// ============================================================
+// CANCEL
+// ============================================================
 async function onCancel(soId) {
   if (!state.perms.cancel) { toast('Tidak ada akses batal SO', true); return; }
   const reason = prompt('Alasan batal:');
@@ -363,6 +570,9 @@ async function onCancel(soId) {
   }
 }
 
+// ============================================================
+// INVOICE
+// ============================================================
 function onInvoice(soId) {
   window.open(`./invoice-print.html?id=${soId}`, '_blank');
 }
