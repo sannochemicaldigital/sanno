@@ -233,22 +233,31 @@ async function renderMovements() {
       .limit(100);
     if (error) throw error;
 
-    tbody.innerHTML = (data || []).map(m => {
+        tbody.innerHTML = (data || []).map(m => {
       const priceCols = perms.viewPrice
         ? `<td data-label="Harga" class="num">${fmt(m.unit_cost)}</td>
            <td data-label="Total" class="num">${fmt(m.total_cost)}</td>`
         : `<td data-label="Harga" class="num">—</td>
            <td data-label="Total" class="num">—</td>`;
+
+      const typeLabel = m.type === 'in' ? 'Masuk'
+                      : m.type === 'out' ? 'Keluar'
+                      : m.type === 'adjust' ? 'Koreksi'
+                      : m.type;
+      const typeColor = m.type === 'in' ? '#059669'
+                      : m.type === 'out' ? '#b91c1c'
+                      : '#6b7280';
+
       return `
         <tr>
           <td data-label="Tanggal">${esc(m.movement_date)}</td>
           <td data-label="Item">${esc(m.items?.sku || '')} — ${esc(m.items?.name || '')}</td>
-          <td data-label="Tipe">${esc(m.type)}</td>
+          <td data-label="Tipe"><span style="color:${typeColor};font-weight:600;">${esc(typeLabel)}</span></td>
           <td data-label="Qty" class="num">${fmt(m.qty)}</td>
           ${priceCols}
           <td data-label="Memo">${esc(m.memo || '—')}</td>
         </tr>`;
-    }).join('') || '<tr><td colspan="7" style="text-align:center;color:#9ca3af;">Belum ada movement</td></tr>';
+    }).join('') || '<tr><td colspan="7" style="text-align:center;color:#9ca3af;">Belum ada mutasi stok</td></tr>';
   } catch (err) {
     tbody.innerHTML = `<tr><td colspan="7" style="color:#b91c1c;">${esc(err.message)}</td></tr>`;
   }
