@@ -1,5 +1,5 @@
 // js/inventory-page.js
-import './input-clear.js';                                  // ← tombol clear (×)
+import './input-clear.js';
 import { requireAuth, logout } from './auth.js';
 import { renderNav, requirePageAccess } from './access.js';
 import { hasPermission } from './permissions.js';
@@ -20,12 +20,33 @@ function esc(s) {
 function fmt(n) {
   return Number(n || 0).toLocaleString('id-ID', { maximumFractionDigits: 2 });
 }
+function todayISO() {
+  return new Date().toISOString().slice(0, 10);
+}
+function fmtDateTime(ts) {
+  if (!ts) return '—';
+  try { return new Date(ts).toLocaleString('id-ID'); } catch { return esc(ts); }
+}
+function statusBadge(status) {
+  const map = {
+    draft:     { bg:'#e5e7eb', fg:'#374151', label:'Draft' },
+    submitted: { bg:'#fef3c7', fg:'#92400e', label:'Submitted' },
+    executed:  { bg:'#d1fae5', fg:'#065f46', label:'Executed' },
+    cancelled: { bg:'#fee2e2', fg:'#991b1b', label:'Cancelled' }
+  };
+  const s = map[status] || { bg:'#e5e7eb', fg:'#374151', label: status || '—' };
+  return `<span style="background:${s.bg};color:${s.fg};padding:2px 8px;border-radius:4px;font-weight:600;font-size:12px;">${esc(s.label)}</span>`;
+}
+function reasonLabel(r) {
+  return ({ rusak:'Rusak', hilang:'Hilang', salah_input:'Salah input', lainnya:'Lainnya' })[r] || (r || '—');
+}
 
 let allItems = [];
 let inventoryRows = [];
 const perms = {
   create: false, stockIn: false, viewPrice: false, viewMovement: false,
-  stockAdjust: false
+  stockAdjust: false,
+  opnameView: false, opnameCreate: false, opnameApprove: false
 };
 const invFilter = {
   search: '',
@@ -40,6 +61,18 @@ const adjustFilter = { search: '', from: '', to: '' };
 const ADJUST_LIMIT = 50;
 let adjustOffset = 0;
 let adjustReqSeq = 0;
+
+// ---------- state tab opname massal (Phase 2) ----------
+let opnameInitialized = false;
+let currentOpnameId = null;
+let opnameLinesCache = [];        // cache full lines utk filter client-side
+const opnameFilter = { search: '', onlyDelta: false, lineOffset: 0 };
+const OPNAME_LINE_LIMIT = 200;
+let opnameLineReqSeq = 0;
+const opnameHistFilter = { search: '', status: '', from: '', to: '' };
+const OPNAME_HIST_LIMIT = 50;
+let opnameHistOffset = 0;
+let opnameHistReqSeq = 0;
 
 (async () => {
   const user = await requireAuth();
@@ -56,6 +89,9 @@ let adjustReqSeq = 0;
   perms.viewPrice    = await hasPermission('inventory.item.view_price');
   perms.viewMovement = await hasPermission('inventory.movement.view');
   perms.stockAdjust  = await hasPermission('inventory.stock_adjust');
+  perms.opnameView   = await hasPermission('inventory.opname.view');
+  perms.opnameCreate = await hasPermission('inventory.opname.create');
+  perms.opnameApprove= await hasPermission('inventory.opname.approve');
 
   if (!perms.create)  document.getElementById('form-new-item').style.display = 'none';
   if (!perms.stockIn) document.getElementById('form-stock-in').style.display = 'none';
@@ -64,19 +100,20 @@ let adjustReqSeq = 0;
     if (histCard) histCard.style.display = 'none';
   }
 
-  document.querySelector('#form-stock-in [name=movement_date]').value =
-    new Date().toISOString().slice(0, 10);
+  const stockInDate = document.querySelector('#form-stock-in [name=movement_date]');
+  if (stockInDate) stockInDate.value = todayISO();
 
   if (perms.create)  document.getElementById('form-new-item').addEventListener('submit', onCreateItem);
   if (perms.stockIn) document.getElementById('form-stock-in').addEventListener('submit', onStockIn);
 
-  // Tab switcher (Koreksi Stok lazy-init)
+  // Tab switcher (lazy-init per tab)
   document.querySelectorAll('.tabs button').forEach(btn => {
     btn.addEventListener('click', async () => {
       document.querySelectorAll('.tabs button').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       document.querySelectorAll('.tab-panel').forEach(p => p.style.display = 'none');
-      document.getElementById('tab-' + btn.dataset.tab).style.display = 'block';
+      const panel = document.getElementById('tab-' + btn.dataset.tab);
+      if (panel) panel.style.display = 'block';
 
       if (btn.dataset.tab === 'adjust' && !stockAdjustInitialized) {
         stockAdjustInitialized = true;
@@ -86,13 +123,21 @@ let adjustReqSeq = 0;
             `<tr><td colspan="10" style="color:#b91c1c;">Gagal memuat: ${esc(err.message)}</td></tr>`;
         }
       }
+
+      if (btn.dataset.tab === 'opname' && !opnameInitialized) {
+        opnameInitialized = true;
+        try { await initOpnameTab(); }
+        catch (err) {
+          const el = document.getElementById('tbody-opname-lines');
+          if (el) el.innerHTML = `<tr><td colspan="8" style="color:#b91c1c;">Gagal memuat: ${esc(err.message)}</td></tr>`;
+        }
+      }
     });
   });
 
   bindInventoryFilters();
   await loadAll();
 })();
-
 // ---------- filter binding ----------
 function bindInventoryFilters() {
   const inpSearch = document.getElementById('invSearch');
@@ -105,20 +150,20 @@ function bindInventoryFilters() {
       clearTimeout(t);
       t = setTimeout(async () => {
         invFilter.search = inpSearch.value.trim();
-        await renderInventory();   // RPC ulang (server-side filter)
+        await renderInventory();
       }, 300);
     });
   }
   if (chkReserved) {
     chkReserved.addEventListener('change', async () => {
       invFilter.onlyReserved = chkReserved.checked;
-      await renderInventory();     // RPC ulang (server-side filter)
+      await renderInventory();
     });
   }
   if (chkLow) {
     chkLow.addEventListener('change', () => {
       invFilter.onlyLowStock = chkLow.checked;
-      renderInventoryTable();      // client-side saja
+      renderInventoryTable();
     });
   }
 }
@@ -143,6 +188,7 @@ async function rpcInventory() {
 
 async function renderInventory() {
   const tbody = document.getElementById('tbody-inventory');
+  if (!tbody) return;
   tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:#9ca3af;">Memuat...</td></tr>';
   try {
     inventoryRows = await rpcInventory();
@@ -157,9 +203,7 @@ function renderInventoryTable() {
   if (!tbody) return;
 
   let rows = inventoryRows;
-  if (invFilter.onlyLowStock) {
-    rows = rows.filter(r => r.is_low_stock);
-  }
+  if (invFilter.onlyLowStock) rows = rows.filter(r => r.is_low_stock);
 
   if (!rows.length) {
     tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:#9ca3af;">Tidak ada item cocok</td></tr>';
@@ -173,13 +217,9 @@ function renderInventoryTable() {
     const min = Number(i.min_stock);
 
     let statusHtml;
-    if (stock === 0) {
-      statusHtml = '<span style="color:#b91c1c;font-weight:600;">KOSONG</span>';
-    } else if (i.is_low_stock) {
-      statusHtml = '<span style="color:#b45309;font-weight:600;">RENDAH</span>';
-    } else {
-      statusHtml = '<span style="color:#059669;">OK</span>';
-    }
+    if (stock === 0) statusHtml = '<span style="color:#b91c1c;font-weight:600;">KOSONG</span>';
+    else if (i.is_low_stock) statusHtml = '<span style="color:#b45309;font-weight:600;">RENDAH</span>';
+    else statusHtml = '<span style="color:#059669;">OK</span>';
 
     const reservedHtml = reserved > 0
       ? `<span style="background:#fef3c7;color:#92400e;padding:2px 8px;border-radius:4px;font-weight:600;">${fmt(reserved)}</span>`
@@ -219,7 +259,7 @@ async function loadItemsForDropdown() {
   }
 }
 
-// ---------- movements ----------
+// ---------- movements (riwayat mutasi stok) ----------
 async function renderMovements() {
   const tbody = document.getElementById('tbody-movements');
   if (!tbody) return;
@@ -233,7 +273,7 @@ async function renderMovements() {
       .limit(100);
     if (error) throw error;
 
-        tbody.innerHTML = (data || []).map(m => {
+    tbody.innerHTML = (data || []).map(m => {
       const priceCols = perms.viewPrice
         ? `<td data-label="Harga" class="num">${fmt(m.unit_cost)}</td>
            <td data-label="Total" class="num">${fmt(m.total_cost)}</td>`
@@ -324,27 +364,17 @@ async function onStockIn(e) {
 // TAB KOREKSI STOK (Phase 1)
 // ============================================================
 async function initStockAdjustTab() {
-  // Sembunyikan form kalau tidak berhak; riwayat tetap tampil.
   const formCard = document.getElementById('stock-adjust-form-card');
   if (!perms.stockAdjust && formCard) formCard.style.display = 'none';
 
-  // Set tanggal default = hari ini, max = hari ini (validasi final di server)
   const dateEl = document.getElementById('saDate');
   if (dateEl) {
-    const today = new Date().toISOString().slice(0, 10);
-    dateEl.value = today;
-    dateEl.max = today;
+    dateEl.value = todayISO();
+    dateEl.max = todayISO();
   }
 
-  // Isi dropdown item (pakai listItems existing, bukan RPC baru)
   await loadItemsForAdjust();
-
-  // Wiring form (hanya kalau berhak)
-  if (perms.stockAdjust) {
-    wireStockAdjustForm();
-  }
-
-  // Wiring riwayat + load awal
+  if (perms.stockAdjust) wireStockAdjustForm();
   wireStockAdjustHistory();
   await reloadStockAdjust();
 }
@@ -417,16 +447,13 @@ function wireStockAdjustForm() {
       const d = Number(row?.qty_delta ?? 0);
       toast(`✓ Stok dikoreksi (${d > 0 ? '+' : ''}${fmt(d)})`);
 
-      // Reset form
       form.reset();
       document.getElementById('saMemo').value = '';
       document.getElementById('saQtySystem').value = '';
       document.getElementById('saDelta').value = '';
-      const today = new Date().toISOString().slice(0, 10);
-      document.getElementById('saDate').value = today;
+      document.getElementById('saDate').value = todayISO();
       btn.disabled = true;
 
-      // Reload riwayat + daftar stok utama
       await Promise.all([reloadStockAdjust(), renderInventory()]);
     } catch (err) {
       toast('Gagal koreksi: ' + (err.message || err), true);
@@ -453,20 +480,10 @@ function wireStockAdjustHistory() {
       }, 300);
     });
   }
-  if (fromEl) {
-    fromEl.addEventListener('change', async () => {
-      adjustFilter.from = fromEl.value;
-      await reloadStockAdjust();
-    });
-  }
-  if (toEl) {
-    toEl.addEventListener('change', async () => {
-      adjustFilter.to = toEl.value;
-      await reloadStockAdjust();
-    });
-  }
+  if (fromEl) fromEl.addEventListener('change', async () => { adjustFilter.from = fromEl.value; await reloadStockAdjust(); });
+  if (toEl)   toEl.addEventListener('change',   async () => { adjustFilter.to   = toEl.value;   await reloadStockAdjust(); });
   if (refreshBtn) refreshBtn.addEventListener('click', () => reloadStockAdjust());
-  if (moreBtn) moreBtn.addEventListener('click', () => loadStockAdjust(true));
+  if (moreBtn)    moreBtn.addEventListener('click', () => loadStockAdjust(true));
 }
 
 async function reloadStockAdjust() {
@@ -494,7 +511,7 @@ async function loadStockAdjust(append = false) {
       p_offset: adjustOffset
     });
     if (error) throw error;
-    if (seq !== adjustReqSeq) return;   // abaikan respons basi
+    if (seq !== adjustReqSeq) return;
 
     const rows = data || [];
     const totalCount = rows[0]?.total_count != null ? Number(rows[0].total_count) : rows.length;
@@ -519,7 +536,7 @@ async function loadStockAdjust(append = false) {
           <td data-label="Sebelum" class="num">${fmt(r.qty_before)}</td>
           <td data-label="Sesudah" class="num">${fmt(r.qty_after)}</td>
           <td data-label="Delta" class="num" style="color:${dColor};font-weight:600;">${dStr}</td>
-          <td data-label="Alasan">${esc(r.reason)}</td>
+          <td data-label="Alasan">${esc(reasonLabel(r.reason))}</td>
           <td data-label="Memo">${esc(r.memo || '—')}</td>
           <td data-label="Oleh">${esc(r.created_by_name || '—')}</td>
         </tr>`;
@@ -535,5 +552,490 @@ async function loadStockAdjust(append = false) {
     if (moreBtn) moreBtn.style.display = adjustOffset < totalCount ? 'inline-block' : 'none';
   } catch (err) {
     tbody.innerHTML += `<tr><td colspan="10" style="color:#b91c1c;">${esc(err.message)}</td></tr>`;
+  }
+}
+// ============================================================
+// TAB OPNAME MASSAL (Phase 2)
+// ============================================================
+async function initOpnameTab() {
+  const btnNew = document.getElementById('opnameNewBtn');
+  if (btnNew && !perms.opnameCreate) btnNew.style.display = 'none';
+
+  const detail = document.getElementById('opnameDetailCard');
+  if (detail) detail.style.display = 'none';
+
+  if (perms.opnameCreate) wireOpnameCreateForm();
+  wireOpnameHistory();
+  await reloadOpnameHistory();
+}
+
+// ---------- Buat opname baru ----------
+function wireOpnameCreateForm() {
+  const btnNew = document.getElementById('opnameNewBtn');
+  const card = document.getElementById('opnameCreateCard');
+  const form = document.getElementById('form-opname-create');
+  if (!btnNew || !card || !form) return;
+
+  const dateEl = form.querySelector('[name=opname_date]');
+  if (dateEl) { dateEl.value = todayISO(); dateEl.max = todayISO(); }
+
+  btnNew.addEventListener('click', () => {
+    card.style.display = card.style.display === 'none' ? 'block' : 'none';
+    if (card.style.display === 'block') {
+      form.opname_date.value = todayISO();
+      form.notes.value = '';
+      form.opname_date.focus();
+    }
+  });
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const submitBtn = document.getElementById('opnameCreateSubmitBtn');
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Membuat...';
+    try {
+      const { data, error } = await supabase.rpc('create_opname', {
+        p_opname_date: form.opname_date.value,
+        p_notes: form.notes.value.trim() || null
+      });
+      if (error) throw error;
+      const row = Array.isArray(data) ? data[0] : data;
+      toast(`✓ Opname ${row.opname_no} dibuat (${row.line_count} item)`);
+      card.style.display = 'none';
+      form.reset();
+      await reloadOpnameHistory();
+      await openOpnameDetail(row.opname_id);
+    } catch (err) {
+      toast('Gagal buat opname: ' + (err.message || err), true);
+    } finally {
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Buat Opname';
+    }
+  });
+}
+
+// ---------- Detail opname ----------
+async function openOpnameDetail(opnameId) {
+  currentOpnameId = Number(opnameId);
+  const detail = document.getElementById('opnameDetailCard');
+  if (detail) detail.style.display = 'block';
+  await loadOpnameDetail();
+}
+
+async function loadOpnameDetail() {
+  if (!currentOpnameId) return;
+  const tbody = document.getElementById('tbody-opname-lines');
+  const headerEl = document.getElementById('opnameHeaderInfo');
+  if (tbody) tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:#9ca3af;">Memuat...</td></tr>';
+
+  try {
+    const { data, error } = await supabase.rpc('get_opname', { p_opname_id: currentOpnameId });
+    if (error) throw error;
+    const header = Array.isArray(data) ? data[0] : data;
+    if (!header) throw new Error('Opname tidak ditemukan');
+
+    opnameLinesCache = Array.isArray(header.lines) ? header.lines : [];
+
+    renderOpnameHeader(header);
+    renderOpnameLines(header.status);
+    renderOpnameActions(header);
+    renderOpnameMeta(header);
+  } catch (err) {
+    if (tbody) tbody.innerHTML = `<tr><td colspan="8" style="color:#b91c1c;">${esc(err.message)}</td></tr>`;
+    if (headerEl) headerEl.innerHTML = `<span style="color:#b91c1c;">${esc(err.message)}</span>`;
+  }
+}
+
+function renderOpnameHeader(h) {
+  const el = document.getElementById('opnameHeaderInfo');
+  if (!el) return;
+  el.innerHTML = `
+    <div style="display:flex;flex-wrap:wrap;gap:16px;align-items:center;">
+      <div><b>${esc(h.opname_no)}</b> ${statusBadge(h.status)}</div>
+      <div>Tanggal: <b>${esc(h.opname_date)}</b></div>
+      <div>Dibuat: ${esc(fmtDateTime(h.created_at))}</div>
+      ${h.submitted_at ? `<div>Submit: ${esc(fmtDateTime(h.submitted_at))}</div>` : ''}
+      ${h.executed_at ? `<div>Eksekusi: ${esc(fmtDateTime(h.executed_at))}</div>` : ''}
+      ${h.cancel_reason ? `<div style="color:#b91c1c;">Batal: ${esc(h.cancel_reason)}</div>` : ''}
+    </div>
+    ${h.notes ? `<div style="margin-top:6px;color:#6b7280;font-size:13px;">Catatan: ${esc(h.notes)}</div>` : ''}
+  `;
+}
+
+function renderOpnameMeta(h) {
+  const el = document.getElementById('opnameMetaInfo');
+  if (!el) return;
+  el.innerHTML = `
+    <span style="margin-right:12px;">Total item: <b>${opnameLinesCache.length}</b></span>
+    <span style="margin-right:12px;">Di-adjust: <b style="color:#059669;">${Number(h.adjusted_count)||0}</b></span>
+    <span style="margin-right:12px;">Dilewati: <b style="color:#6b7280;">${Number(h.skipped_count)||0}</b></span>
+  `;
+}
+
+function renderOpnameActions(h) {
+  const el = document.getElementById('opnameActions');
+  if (!el) return;
+  const s = h.status;
+  const btns = [];
+
+  if (s === 'draft' && perms.opnameCreate) {
+    btns.push(`<button type="button" class="btn btn-primary" id="opnameSaveDraftBtn">Simpan Draft</button>`);
+    btns.push(`<button type="button" class="btn btn-primary" id="opnameSubmitBtn" style="background:#0891b2;">Submit</button>`);
+    btns.push(`<button type="button" class="btn btn-danger" id="opnameCancelBtn">Cancel</button>`);
+  }
+  if (s === 'submitted' && perms.opnameApprove) {
+    btns.push(`<button type="button" class="btn btn-primary" id="opnameExecuteBtn" style="background:#059669;">Approve &amp; Eksekusi</button>`);
+    btns.push(`<button type="button" class="btn btn-danger" id="opnameRejectBtn">Reject</button>`);
+  }
+  if (s === 'submitted' && perms.opnameCreate) {
+    btns.push(`<button type="button" class="btn btn-danger" id="opnameCancelBtn">Cancel</button>`);
+  }
+  if (!btns.length) {
+    el.innerHTML = `<span style="color:#6b7280;font-size:13px;">Tidak ada aksi tersedia.</span>`;
+    return;
+  }
+  el.innerHTML = btns.join(' ');
+
+  document.getElementById('opnameSaveDraftBtn')?.addEventListener('click', () => saveOpnameDraft());
+  document.getElementById('opnameSubmitBtn')?.addEventListener('click', () => submitOpnameHandler());
+  document.getElementById('opnameExecuteBtn')?.addEventListener('click', () => executeOpnameHandler());
+  document.getElementById('opnameRejectBtn')?.addEventListener('click', () => rejectOpnameHandler());
+  document.getElementById('opnameCancelBtn')?.addEventListener('click', () => cancelOpnameHandler());
+}
+function renderOpnameLines(status) {
+  const tbody = document.getElementById('tbody-opname-lines');
+  if (!tbody) return;
+  const editable = status === 'draft' && perms.opnameCreate;
+
+  let rows = opnameLinesCache.slice();
+  if (opnameFilter.search) {
+    const q = opnameFilter.search.toLowerCase();
+    rows = rows.filter(r =>
+      String(r.sku || '').toLowerCase().includes(q) ||
+      String(r.item_name || '').toLowerCase().includes(q)
+    );
+  }
+  if (opnameFilter.onlyDelta) {
+    rows = rows.filter(r => {
+      if (r.qty_physical == null) return false;
+      return (Number(r.qty_physical) - Number(r.qty_system)) !== 0;
+    });
+  }
+
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:#9ca3af;">Tidak ada item cocok</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = rows.map(r => {
+    const sys = Number(r.qty_system);
+    const phys = r.qty_physical == null ? null : Number(r.qty_physical);
+    const delta = phys == null ? null : (phys - sys);
+    const deltaStr = delta == null ? '' : ((delta > 0 ? '+' : '') + fmt(delta));
+    const deltaColor = delta == null ? '#6b7280' : (delta === 0 ? '#6b7280' : (delta > 0 ? '#059669' : '#b91c1c'));
+    const reasonOpts = ['','rusak','hilang','salah_input','lainnya'].map(v =>
+      `<option value="${v}" ${v === (r.reason||'') ? 'selected' : ''}>${v ? reasonLabel(v) : '— pilih —'}</option>`
+    ).join('');
+    const dis = editable ? '' : 'disabled';
+    return `
+      <tr data-line-id="${r.line_id}">
+        <td data-label="SKU">${esc(r.sku)}</td>
+        <td data-label="Nama">${esc(r.item_name)}</td>
+        <td data-label="Satuan">${esc(r.unit)}</td>
+        <td data-label="Stok Sistem" class="num">${fmt(sys)}</td>
+        <td data-label="Qty Fisik">
+          <input type="number" step="0.0001" min="0" ${dis}
+                 class="opname-phys" value="${phys == null ? '' : phys}"
+                 style="width:100px;padding:6px;border:1px solid #d0d5dd;border-radius:6px;">
+        </td>
+        <td data-label="Selisih" class="num opname-delta" style="color:${deltaColor};font-weight:600;">${deltaStr}</td>
+        <td data-label="Alasan">
+          <select class="opname-reason" ${dis}
+                  style="padding:6px;border:1px solid #d0d5dd;border-radius:6px;">${reasonOpts}</select>
+        </td>
+        <td data-label="Memo">
+          <input type="text" ${dis} class="opname-memo" value="${esc(r.memo||'')}"
+                 maxlength="500" style="width:100%;padding:6px;border:1px solid #d0d5dd;border-radius:6px;">
+        </td>
+      </tr>`;
+  }).join('');
+
+  if (editable) wireOpnameLineInputs();
+}
+
+function wireOpnameLineInputs() {
+  document.querySelectorAll('#tbody-opname-lines tr[data-line-id]').forEach(tr => {
+    const lineId = Number(tr.dataset.lineId);
+    const physEl = tr.querySelector('.opname-phys');
+    const deltaEl = tr.querySelector('.opname-delta');
+    const line = opnameLinesCache.find(x => Number(x.line_id) === lineId);
+    if (!line || !physEl) return;
+
+    physEl.addEventListener('input', () => {
+      const sys = Number(line.qty_system);
+      const v = physEl.value === '' ? null : Number(physEl.value);
+      line.qty_physical = v;
+      if (v == null) { deltaEl.textContent = ''; deltaEl.style.color = '#6b7280'; return; }
+      const d = v - sys;
+      deltaEl.textContent = (d > 0 ? '+' : '') + fmt(d);
+      deltaEl.style.color = d === 0 ? '#6b7280' : (d > 0 ? '#059669' : '#b91c1c');
+    });
+    tr.querySelector('.opname-reason')?.addEventListener('change', (e) => { line.reason = e.target.value; });
+    tr.querySelector('.opname-memo')?.addEventListener('input', (e) => { line.memo = e.target.value; });
+  });
+}
+
+function collectOpnameLinePayload() {
+  return opnameLinesCache
+    .filter(l => l.qty_physical != null && l.qty_physical !== '')
+    .map(l => ({
+      line_id: l.line_id,
+      qty_physical: Number(l.qty_physical),
+      reason: l.reason || null,
+      memo: l.memo || null
+    }));
+}
+
+async function saveOpnameDraft() {
+  if (!perms.opnameCreate) { toast('Tidak ada akses', true); return; }
+  const btn = document.getElementById('opnameSaveDraftBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Menyimpan...'; }
+  try {
+    const { data, error } = await supabase.rpc('save_opname_lines', {
+      p_opname_id: currentOpnameId,
+      p_lines: collectOpnameLinePayload()
+    });
+    if (error) throw error;
+    const saved = Array.isArray(data) ? (data[0]?.saved_count ?? 0) : (data?.saved_count ?? 0);
+    toast(`✓ Draft tersimpan (${saved} line)`);
+    await loadOpnameDetail();
+  } catch (err) {
+    toast('Gagal simpan: ' + (err.message || err), true);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Simpan Draft'; }
+  }
+}
+
+async function submitOpnameHandler() {
+  if (!perms.opnameCreate) { toast('Tidak ada akses', true); return; }
+  if (!confirm('Submit opname ini? Setelah submit, qty fisik tidak bisa diedit.')) return;
+  const btn = document.getElementById('opnameSubmitBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Submit...'; }
+  try {
+    // simpan dulu, lalu submit
+    const { error: eSave } = await supabase.rpc('save_opname_lines', {
+      p_opname_id: currentOpnameId,
+      p_lines: collectOpnameLinePayload()
+    });
+    if (eSave) throw eSave;
+    const { error } = await supabase.rpc('submit_opname', { p_opname_id: currentOpnameId });
+    if (error) throw error;
+    toast('✓ Opname submitted');
+    await loadOpnameDetail();
+    await reloadOpnameHistory();
+  } catch (err) {
+    toast('Gagal submit: ' + (err.message || err), true);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Submit'; }
+  }
+}
+
+async function executeOpnameHandler() {
+  if (!perms.opnameApprove) { toast('Tidak ada akses eksekusi', true); return; }
+  const rowsWithDelta = opnameLinesCache.filter(l => {
+    if (l.qty_physical == null) return false;
+    return Number(l.qty_physical) !== Number(l.qty_system);
+  });
+  const msg = `Approve & eksekusi opname ini?\n\n${rowsWithDelta.length} item akan di-adjust.`;
+  if (!confirm(msg)) return;
+  const btn = document.getElementById('opnameExecuteBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Mengeksekusi...'; }
+  try {
+    const { data, error } = await supabase.rpc('execute_opname', { p_opname_id: currentOpnameId });
+    if (error) throw error;
+    const row = Array.isArray(data) ? data[0] : data;
+    toast(`✓ Eksekusi selesai: ${row.adjusted_count} adjust, ${row.skipped_count} dilewati`);
+    await loadOpnameDetail();
+    await reloadOpnameHistory();
+    if (opnameInitialized) await renderInventory();
+  } catch (err) {
+    toast('Gagal eksekusi: ' + (err.message || err), true);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Approve & Eksekusi'; }
+  }
+}
+
+async function rejectOpnameHandler() {
+  if (!perms.opnameApprove) { toast('Tidak ada akses', true); return; }
+  const reason = prompt('Alasan reject (opsional):', '');
+  if (reason === null) return;
+  const btn = document.getElementById('opnameRejectBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Reject...'; }
+  try {
+    const { error } = await supabase.rpc('reject_opname', {
+      p_opname_id: currentOpnameId,
+      p_reason: reason || null
+    });
+    if (error) throw error;
+    toast('✓ Opname ditolak, kembali ke draft');
+    await loadOpnameDetail();
+    await reloadOpnameHistory();
+  } catch (err) {
+    toast('Gagal reject: ' + (err.message || err), true);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Reject'; }
+  }
+}
+
+async function cancelOpnameHandler() {
+  if (!perms.opnameCreate) { toast('Tidak ada akses', true); return; }
+  const reason = prompt('Alasan cancel (opsional):', '');
+  if (reason === null) return;
+  if (!confirm('Batalkan opname ini? Tidak bisa dikembalikan.')) return;
+  const btn = document.getElementById('opnameCancelBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Membatalkan...'; }
+  try {
+    const { error } = await supabase.rpc('cancel_opname', {
+      p_opname_id: currentOpnameId,
+      p_reason: reason || null
+    });
+    if (error) throw error;
+    toast('✓ Opname dibatalkan');
+    await loadOpnameDetail();
+    await reloadOpnameHistory();
+  } catch (err) {
+    toast('Gagal cancel: ' + (err.message || err), true);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Cancel'; }
+  }
+}
+
+// ---------- Filter input tabel besar (client-side) ----------
+function wireOpnameLinesFilter() {
+  const searchEl = document.getElementById('opnameLineSearch');
+  const chkDelta = document.getElementById('opnameLineOnlyDelta');
+  const refreshBtn = document.getElementById('opnameLineRefreshBtn');
+
+  if (searchEl) {
+    let t = null;
+    searchEl.addEventListener('input', () => {
+      clearTimeout(t);
+      t = setTimeout(() => {
+        opnameFilter.search = searchEl.value.trim();
+        if (currentOpnameId) renderOpnameLines(document.getElementById('opnameStatusHidden')?.value || '');
+      }, 250);
+    });
+  }
+  if (chkDelta) {
+    chkDelta.addEventListener('change', () => {
+      opnameFilter.onlyDelta = chkDelta.checked;
+      if (currentOpnameId) renderOpnameLines(document.getElementById('opnameStatusHidden')?.value || '');
+    });
+  }
+  if (refreshBtn) refreshBtn.addEventListener('click', () => loadOpnameDetail());
+}
+
+// ---------- Riwayat opname ----------
+function wireOpnameHistory() {
+  const searchEl = document.getElementById('opnameHistSearch');
+  const statusEl = document.getElementById('opnameHistStatus');
+  const fromEl = document.getElementById('opnameHistFrom');
+  const toEl = document.getElementById('opnameHistTo');
+  const moreBtn = document.getElementById('opnameHistMoreBtn');
+
+  if (searchEl) {
+    let t = null;
+    searchEl.addEventListener('input', () => {
+      clearTimeout(t);
+      t = setTimeout(async () => {
+        opnameHistFilter.search = searchEl.value.trim();
+        await reloadOpnameHistory();
+      }, 300);
+    });
+  }
+  if (statusEl) statusEl.addEventListener('change', async () => {
+    opnameHistFilter.status = statusEl.value;
+    await reloadOpnameHistory();
+  });
+  if (fromEl) fromEl.addEventListener('change', async () => {
+    opnameHistFilter.from = fromEl.value;
+    await reloadOpnameHistory();
+  });
+  if (toEl) toEl.addEventListener('change', async () => {
+    opnameHistFilter.to = toEl.value;
+    await reloadOpnameHistory();
+  });
+  if (moreBtn) moreBtn.addEventListener('click', () => loadOpnameHistory(true));
+
+  wireOpnameLinesFilter();
+}
+
+async function reloadOpnameHistory() {
+  opnameHistOffset = 0;
+  const tbody = document.getElementById('tbody-opname-history');
+  if (tbody) tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:#9ca3af;">Memuat...</td></tr>';
+  const moreBtn = document.getElementById('opnameHistMoreBtn');
+  if (moreBtn) moreBtn.style.display = 'none';
+  const info = document.getElementById('opnameHistInfo');
+  if (info) info.textContent = '';
+  await loadOpnameHistory(false);
+}
+
+async function loadOpnameHistory(append = false) {
+  const tbody = document.getElementById('tbody-opname-history');
+  if (!tbody) return;
+  if (!append) tbody.innerHTML = '';
+  const seq = ++opnameHistReqSeq;
+  try {
+    const { data, error } = await supabase.rpc('list_stock_opnames', {
+      p_search: opnameHistFilter.search || null,
+      p_status: opnameHistFilter.status || null,
+      p_from:   opnameHistFilter.from   || null,
+      p_to:     opnameHistFilter.to     || null,
+      p_limit:  OPNAME_HIST_LIMIT,
+      p_offset: opnameHistOffset
+    });
+    if (error) throw error;
+    if (seq !== opnameHistReqSeq) return;
+
+    const rows = data || [];
+    const totalCount = rows[0]?.total_count != null ? Number(rows[0].total_count) : rows.length;
+
+    if (!append && !rows.length) {
+      tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:#9ca3af;">Belum ada opname</td></tr>';
+      return;
+    }
+
+    const html = rows.map(r => `
+      <tr>
+        <td data-label="No"><b>${esc(r.opname_no)}</b></td>
+        <td data-label="Tanggal">${esc(r.opname_date)}</td>
+        <td data-label="Status">${statusBadge(r.status)}</td>
+        <td data-label="Line" class="num">${fmt(r.line_count)}</td>
+        <td data-label="Adjust" class="num" style="color:#059669;font-weight:600;">${Number(r.adjusted_count)||0}</td>
+        <td data-label="Skip" class="num" style="color:#6b7280;">${Number(r.skipped_count)||0}</td>
+        <td data-label="Dibuat">${esc(fmtDateTime(r.created_at))}</td>
+        <td data-label="Eksekusi">${r.executed_at ? esc(fmtDateTime(r.executed_at)) : '—'}</td>
+        <td data-label="Aksi">
+          <button type="button" class="btn btn-secondary" style="padding:4px 10px;font-size:12px;"
+                  data-open-opname="${r.id}">Lihat</button>
+        </td>
+      </tr>`).join('');
+
+    if (append) tbody.insertAdjacentHTML('beforeend', html);
+    else tbody.innerHTML = html;
+
+    // bind tombol lihat
+    tbody.querySelectorAll('[data-open-opname]').forEach(btn => {
+      btn.addEventListener('click', () => openOpnameDetail(Number(btn.dataset.openOpname)));
+    });
+
+    opnameHistOffset += rows.length;
+    const info = document.getElementById('opnameHistInfo');
+    if (info) info.textContent = `Menampilkan ${Math.min(opnameHistOffset, totalCount)} dari ${totalCount}`;
+    const moreBtn = document.getElementById('opnameHistMoreBtn');
+    if (moreBtn) moreBtn.style.display = opnameHistOffset < totalCount ? 'inline-block' : 'none';
+  } catch (err) {
+    tbody.innerHTML += `<tr><td colspan="9" style="color:#b91c1c;">${esc(err.message)}</td></tr>`;
   }
 }
