@@ -1415,12 +1415,12 @@ function renderPriceListRows() {
           <input type="number" step="0.01" min="0" ${dis}
                  class="pl-price" value="${priceVal === '' ? '' : priceVal}"
                  placeholder="${hasPrice ? '' : '—'}"
-                 style="width:110px;padding:6px;border:1px solid #d0d5dd;border-radius:6px;text-align:right;">
+                 style="width:160px;padding:8px 10px;font-size:14px;border:1px solid #d0d5dd;border-radius:6px;text-align:right;">
         </td>
         <td data-label="Diskon %" class="num">
           <input type="number" step="0.01" min="0" max="100" ${dis}
                  class="pl-disc" value="${discVal}"
-                 style="width:80px;padding:6px;border:1px solid #d0d5dd;border-radius:6px;text-align:right;">
+                 style="width:100px;padding:8px 10px;font-size:14px;border:1px solid #d0d5dd;border-radius:6px;text-align:right;">
         </td>
         <td data-label="Harga Efektif" class="num pl-eff" style="font-weight:600;${hasPrice ? '' : 'color:#9ca3af;'}">
           ${hasPrice ? fmt(effVal) : '—'}
