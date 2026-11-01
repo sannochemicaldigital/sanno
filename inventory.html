@@ -21,6 +21,7 @@
       <button data-tab="stock" class="active">Stok & Item</button>
       <button data-tab="adjust">Koreksi Stok</button>
       <button data-tab="opname">Opname Massal</button>
+      <button data-tab="pricelist">Price List</button>
     </div>
 
     <!-- ==================== TAB: STOK & ITEM ==================== -->
@@ -388,6 +389,90 @@
       </div>
 
     </section>
+    <section id="tab-pricelist" class="tab-panel" style="display:none;">
+
+  <!-- Card 1: Price List -->
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;flex-wrap:wrap;">
+      <div>
+        <h3 style="margin:0;font-size:16px;">Price List</h3>
+        <p style="font-size:13px;color:#6b7280;margin:4px 0 0;">
+          Harga belum PPN. Satu harga berlaku untuk semua pelanggan.
+        </p>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <button type="button" class="btn btn-secondary" id="plPrintBtn">🖨️ Cetak Form</button>
+        <button type="button" class="btn btn-secondary" id="plRefreshBtn" style="padding:8px 14px;font-size:13px;">Muat ulang</button>
+      </div>
+    </div>
+
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:16px 0 12px;">
+      <input type="text" id="plSearch" class="input" placeholder="Cari SKU / nama..." style="flex:1;min-width:180px;">
+      <label style="display:flex;align-items:center;gap:4px;font-size:13px;">
+        <input type="checkbox" id="plOnlyWithPrice">
+        Hanya yang sudah ada harga
+      </label>
+      <input type="text" id="plReason" class="input" maxlength="200" placeholder="Alasan perubahan (opsional)" style="flex:1;min-width:180px;">
+      <button type="button" class="btn btn-primary" id="plSaveBtn" disabled style="padding:8px 16px;font-size:13px;">Simpan Perubahan</button>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>SKU</th>
+            <th>Nama</th>
+            <th>Satuan</th>
+            <th class="num">Harga</th>
+            <th class="num">Diskon %</th>
+            <th class="num">Harga Efektif</th>
+            <th>Diperbarui</th>
+            <th>Riwayat</th>
+            <th>Aksi</th>
+          </tr>
+        </thead>
+        <tbody id="tbody-price-list"></tbody>
+      </table>
+    </div>
+    <div style="margin-top:12px;text-align:center;">
+      <button type="button" class="btn btn-secondary" id="plMoreBtn" style="display:none;padding:8px 16px;font-size:13px;">Muat lebih banyak</button>
+      <div id="plInfo" style="font-size:12px;color:#6b7280;margin-top:8px;"></div>
+    </div>
+  </div>
+
+  <!-- Card 2: Riwayat Perubahan -->
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
+      <h3 style="margin:0;font-size:16px;">Riwayat Perubahan Harga</h3>
+      <button type="button" class="btn btn-secondary" id="plHistResetBtn" style="display:none;padding:6px 12px;font-size:12px;">Reset filter</button>
+    </div>
+    <div id="plHistFilterInfo" style="font-size:12px;color:#6b7280;margin:6px 0 12px;display:none;"></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px;">
+      <input type="text" id="plHistSearch" class="input" placeholder="Cari SKU / nama..." style="flex:1;min-width:180px;">
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Waktu</th>
+            <th>SKU</th>
+            <th>Nama</th>
+            <th class="num">Harga Lama → Baru</th>
+            <th class="num">Diskon Lama → Baru</th>
+            <th>Oleh</th>
+            <th>Alasan</th>
+          </tr>
+        </thead>
+        <tbody id="tbody-price-list-history"></tbody>
+      </table>
+    </div>
+    <div style="margin-top:12px;text-align:center;">
+      <button type="button" class="btn btn-secondary" id="plHistMoreBtn" style="display:none;padding:8px 16px;font-size:13px;">Muat lebih banyak</button>
+      <div id="plHistInfo" style="font-size:12px;color:#6b7280;margin-top:8px;"></div>
+    </div>
+  </div>
+
+</section>
   </div>
 
   <div class="toast" id="toast"></div>
