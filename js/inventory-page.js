@@ -5,6 +5,7 @@ import { renderNav, requirePageAccess } from './access.js';
 import { hasPermission } from './permissions.js';
 import { listItems, createItem } from './items.js';
 import { supabase } from './supabase-client.js';
+import { listUnits, createUnit, updateUnit, deleteUnit, reactivateUnit } from './units.js';
 
 function toast(msg, isError = false) {
   const el = document.getElementById('toast');
@@ -43,6 +44,7 @@ function reasonLabel(r) {
 
 let allItems = [];
 let inventoryRows = [];
+let allUnits = [];          // cache daftar unit (untuk dropdown)
 const perms = {
   create: false, stockIn: false, viewPrice: false, viewMovement: false,
   stockAdjust: false,
@@ -182,6 +184,8 @@ let priceListHistReqSeq = 0;
   });
 
   bindInventoryFilters();
+  await loadUnitsAndFillDropdown();
+  wireUnitsModal();
   await loadAll();
 })();
 // ---------- filter binding ----------
@@ -358,15 +362,19 @@ async function onCreateItem(e) {
   btn.disabled = true;
   btn.textContent = 'Menyimpan...';
   try {
+    const unitVal = (f.unit.value || '').trim();
+    if (!unitVal) throw new Error('Satuan wajib dipilih');
     await createItem({
       sku: f.sku.value.trim(),
       name: f.name.value.trim(),
-      unit: f.unit.value.trim() || 'pcs',
+      unit: unitVal,
       min_stock: Number(f.min_stock.value) || 0
     });
     toast('✓ Item baru dibuat (stok 0)');
     f.reset();
-    f.unit.value = 'pcs';
+    // Reset dropdown ke pilihan default (pcs kalau ada, else kosong)
+    const pcsOpt = [...f.unit.options].find(o => o.value === 'pcs');
+    f.unit.value = pcsOpt ? 'pcs' : '';
     f.min_stock.value = 0;
     await loadAll();
   } catch (err) {
@@ -1928,4 +1936,167 @@ function printPriceListForm() {
   w.document.open();
   w.document.write(html);
   w.document.close();
+}
+// ============================================================
+// UNITS (v6s.F2) — dropdown satuan + modal kelola
+// ============================================================
+async function loadUnitsAndFillDropdown() {
+  try {
+    allUnits = await listUnits();
+    fillUnitDropdowns();
+  } catch (err) {
+    console.error('loadUnitsAndFillDropdown:', err);
+    toast('Gagal memuat daftar satuan: ' + (err.message || err), true);
+  }
+}
+
+function fillUnitDropdowns() {
+  const sel = document.getElementById('newItemUnit');
+  if (sel) {
+    const current = sel.value;
+    sel.innerHTML = '<option value="">— pilih satuan —</option>' +
+      allUnits.map(u =>
+        `<option value="${esc(u.name)}">${esc(u.name)}</option>`
+      ).join('');
+    if (current) sel.value = current;
+  }
+}
+
+function wireUnitsModal() {
+  const modal = document.getElementById('unitsModal');
+  const openBtn = document.getElementById('manageUnitsBtn');
+  const closeBtn = document.getElementById('closeUnitsModalBtn');
+  const addBtn = document.getElementById('addUnitBtn');
+  if (!modal || !openBtn) return;
+
+  openBtn.addEventListener('click', async () => {
+    modal.style.display = 'flex';
+    await renderUnitsList();
+  });
+  closeBtn?.addEventListener('click', () => { modal.style.display = 'none'; });
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal) modal.style.display = 'none';
+  });
+
+  addBtn?.addEventListener('click', async () => {
+    const codeEl = document.getElementById('newUnitCode');
+    const nameEl = document.getElementById('newUnitName');
+    const sortEl = document.getElementById('newUnitSort');
+    const code = codeEl.value.trim();
+    const name = nameEl.value.trim();
+    if (!code || !name) { toast('Kode dan nama wajib diisi', true); return; }
+
+    addBtn.disabled = true;
+    addBtn.textContent = 'Menyimpan...';
+    try {
+      await createUnit({ code, name, sort_order: Number(sortEl.value) || 100 });
+      toast('✓ Unit ditambahkan');
+      codeEl.value = '';
+      nameEl.value = '';
+      sortEl.value = '100';
+      await loadUnitsAndFillDropdown();
+      await renderUnitsList();
+    } catch (err) {
+      toast('Gagal: ' + (err.message || err), true);
+    } finally {
+      addBtn.disabled = false;
+      addBtn.textContent = '+ Tambah';
+    }
+  });
+}
+
+async function renderUnitsList() {
+  const wrap = document.getElementById('unitsList');
+  if (!wrap) return;
+  wrap.innerHTML = '<div style="color:#9ca3af;text-align:center;padding:12px;">Memuat...</div>';
+  try {
+    const rows = await listUnits({ includeInactive: true });
+    if (!rows.length) {
+      wrap.innerHTML = '<div style="color:#9ca3af;text-align:center;padding:12px;">Belum ada unit.</div>';
+      return;
+    }
+
+    wrap.innerHTML = `
+      <table style="width:100%;border-collapse:collapse;">
+        <thead>
+          <tr style="border-bottom:1px solid #e5e7eb;">
+            <th style="padding:6px 4px;text-align:left;font-size:11px;color:#6b7280;">Kode</th>
+            <th style="padding:6px 4px;text-align:left;font-size:11px;color:#6b7280;">Nama</th>
+            <th style="padding:6px 4px;text-align:right;font-size:11px;color:#6b7280;">Urutan</th>
+            <th style="padding:6px 4px;text-align:center;font-size:11px;color:#6b7280;">Status</th>
+            <th style="padding:6px 4px;text-align:right;font-size:11px;color:#6b7280;">Aksi</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows.map(u => `
+            <tr data-unit-id="${u.id}" style="border-bottom:1px solid #f3f4f6;${u.is_active ? '' : 'opacity:.55;'}">
+              <td style="padding:6px 4px;font-family:'Courier New',monospace;font-size:12px;">${esc(u.code)}</td>
+              <td style="padding:6px 4px;">
+                <input type="text" class="unit-name-input" value="${esc(u.name)}" maxlength="80"
+                       style="width:100%;padding:4px 6px;border:1px solid #d0d5dd;border-radius:5px;font-size:13px;">
+              </td>
+              <td style="padding:6px 4px;text-align:right;">
+                <input type="number" class="unit-sort-input" value="${u.sort_order || 0}"
+                       style="width:70px;padding:4px 6px;border:1px solid #d0d5dd;border-radius:5px;font-size:13px;text-align:right;">
+              </td>
+              <td style="padding:6px 4px;text-align:center;font-size:12px;">
+                ${u.is_active
+                  ? '<span style="background:#d1fae5;color:#065f46;padding:2px 6px;border-radius:4px;font-weight:600;">Aktif</span>'
+                  : '<span style="background:#e5e7eb;color:#6b7280;padding:2px 6px;border-radius:4px;font-weight:600;">Nonaktif</span>'}
+              </td>
+              <td style="padding:6px 4px;text-align:right;white-space:nowrap;">
+                <button type="button" class="btn btn-primary unit-save-btn"
+                        style="padding:4px 10px;font-size:12px;">Simpan</button>
+                ${u.is_active
+                  ? `<button type="button" class="btn btn-danger unit-delete-btn"
+                            style="padding:4px 10px;font-size:12px;margin-left:4px;">Nonaktif</button>`
+                  : `<button type="button" class="btn btn-secondary unit-reactivate-btn"
+                            style="padding:4px 10px;font-size:12px;margin-left:4px;">Aktifkan</button>`}
+              </td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    `;
+
+    // Bind tombol per baris
+    wrap.querySelectorAll('[data-unit-id]').forEach(tr => {
+      const id = Number(tr.dataset.unitId);
+      tr.querySelector('.unit-save-btn')?.addEventListener('click', async () => {
+        const name = tr.querySelector('.unit-name-input').value.trim();
+        const sort = Number(tr.querySelector('.unit-sort-input').value) || 0;
+        try {
+          await updateUnit(id, { name, sort_order: sort });
+          toast('✓ Unit diupdate');
+          await loadUnitsAndFillDropdown();
+          await renderUnitsList();
+        } catch (err) {
+          toast('Gagal: ' + (err.message || err), true);
+        }
+      });
+      tr.querySelector('.unit-delete-btn')?.addEventListener('click', async () => {
+        if (!confirm('Nonaktifkan unit ini? Unit tidak muncul di dropdown, tapi data lama tetap valid.')) return;
+        try {
+          await deleteUnit(id);
+          toast('✓ Unit dinonaktifkan');
+          await loadUnitsAndFillDropdown();
+          await renderUnitsList();
+        } catch (err) {
+          toast('Gagal: ' + (err.message || err), true);
+        }
+      });
+      tr.querySelector('.unit-reactivate-btn')?.addEventListener('click', async () => {
+        try {
+          await reactivateUnit(id);
+          toast('✓ Unit diaktifkan');
+          await loadUnitsAndFillDropdown();
+          await renderUnitsList();
+        } catch (err) {
+          toast('Gagal: ' + (err.message || err), true);
+        }
+      });
+    });
+  } catch (err) {
+    wrap.innerHTML = `<div style="color:#b91c1c;text-align:center;padding:12px;">${esc(err.message)}</div>`;
+  }
 }
