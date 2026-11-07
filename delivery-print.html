@@ -44,6 +44,7 @@
       box-shadow: 0 4px 20px rgba(0,0,0,0.08);
     }
 
+    /* Header perusahaan */
     .company-header {
       display: flex;
       justify-content: space-between;
@@ -53,14 +54,43 @@
       margin-bottom: 20px;
     }
     .company-left { flex: 1; }
-    .company-logo { max-height: 60px; max-width: 150px; margin-bottom: 8px; }
-    .company-name { font-size: 18px; font-weight: 700; color: #1a1a1a; margin-bottom: 4px; }
-    .company-info { font-size: 11px; color: #4b5563; line-height: 1.5; }
-    .company-right { text-align: right; flex-shrink: 0; }
-    .doc-title { font-size: 20px; font-weight: 700; color: #2563eb; margin-bottom: 4px; }
-    .doc-number { font-size: 13px; color: #4b5563; margin-bottom: 2px; }
-    .doc-date { font-size: 12px; color: #6b7280; }
+    .company-logo {
+      max-height: 60px;
+      max-width: 150px;
+      margin-bottom: 8px;
+    }
+    .company-name {
+      font-size: 18px;
+      font-weight: 700;
+      color: #1a1a1a;
+      margin-bottom: 4px;
+    }
+    .company-info {
+      font-size: 11px;
+      color: #4b5563;
+      line-height: 1.5;
+    }
+    .company-right {
+      text-align: right;
+      flex-shrink: 0;
+    }
+    .doc-title {
+      font-size: 20px;
+      font-weight: 700;
+      color: #2563eb;
+      margin-bottom: 4px;
+    }
+    .doc-number {
+      font-size: 13px;
+      color: #4b5563;
+      margin-bottom: 2px;
+    }
+    .doc-date {
+      font-size: 12px;
+      color: #6b7280;
+    }
 
+    /* Info pelanggan & pengiriman */
     .info-grid {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -73,60 +103,88 @@
       padding: 10px 12px;
     }
     .info-block-title {
-      font-size: 10px; font-weight: 700; color: #6b7280;
-      text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px;
+      font-size: 10px;
+      font-weight: 700;
+      color: #6b7280;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 6px;
     }
-    .info-block-name { font-size: 13px; font-weight: 600; color: #1a1a1a; margin-bottom: 2px; }
-    .info-block-detail { font-size: 11px; color: #4b5563; line-height: 1.5; }
+    .info-block-name {
+      font-size: 13px;
+      font-weight: 600;
+      color: #1a1a1a;
+      margin-bottom: 2px;
+    }
+    .info-block-detail {
+      font-size: 11px;
+      color: #4b5563;
+      line-height: 1.5;
+    }
 
+    /* Tabel item */
     .items-table {
       width: 100%;
       border-collapse: collapse;
       margin-bottom: 20px;
       font-size: 12px;
     }
-    .items-table thead { background: #f3f4f6; }
+    .items-table thead {
+      background: #f3f4f6;
+    }
     .items-table th {
-      padding: 8px 10px; text-align: left; font-weight: 600;
-      font-size: 11px; color: #374151; border-bottom: 2px solid #d1d5db;
-      text-transform: uppercase; letter-spacing: 0.3px;
+      padding: 8px 10px;
+      text-align: left;
+      font-weight: 600;
+      font-size: 11px;
+      color: #374151;
+      border-bottom: 2px solid #d1d5db;
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
     }
     .items-table th.num { text-align: right; }
     .items-table td {
-      padding: 8px 10px; border-bottom: 1px solid #e5e7eb; vertical-align: top;
+      padding: 8px 10px;
+      border-bottom: 1px solid #e5e7eb;
+      vertical-align: top;
     }
     .items-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
     .items-table tbody tr:last-child td { border-bottom: 1px solid #d1d5db; }
-    .items-table tfoot td { padding: 8px 10px; font-weight: 600; }
-    .items-table tfoot td.label { text-align: right; color: #374151; }
-    .items-table tfoot td.value { text-align: right; font-variant-numeric: tabular-nums; }
-    .items-table tfoot tr.grand td { background: #eff6ff; font-size: 14px; color: #1e40af; }
-
-    /* v7.F2 — tombol edit nama */
-    .btn-edit-name {
-      margin-left: 6px;
-      background: #eef2ff;
-      color: #1e40af;
-      border: 1px solid #c7d2fe;
-      border-radius: 4px;
-      padding: 2px 6px;
-      font-size: 10px;
-      cursor: pointer;
+    .items-table tfoot td {
+      padding: 8px 10px;
       font-weight: 600;
     }
-    .btn-edit-name:hover { background: #e0e7ff; }
-    .btn-edit-name[disabled] { opacity: 0.5; cursor: wait; }
+    .items-table tfoot td.label { text-align: right; color: #374151; }
+    .items-table tfoot td.value { text-align: right; font-variant-numeric: tabular-nums; }
+    .items-table tfoot tr.grand td {
+      background: #eff6ff;
+      font-size: 14px;
+      color: #1e40af;
+    }
 
+    /* Tanda tangan */
     .signatures {
       display: grid;
       grid-template-columns: 1fr 1fr;
       gap: 40px;
       margin-top: 40px;
     }
-    .sig-box { text-align: center; }
-    .sig-label { font-size: 11px; color: #6b7280; margin-bottom: 60px; }
-    .sig-line { border-top: 1px solid #374151; padding-top: 6px; font-size: 11px; color: #374151; }
+    .sig-box {
+      text-align: center;
+    }
+    .sig-label {
+      font-size: 11px;
+      color: #6b7280;
+      margin-bottom: 60px;
+    }
+    .sig-line {
+      border-top: 1px solid #374151;
+      padding-top: 6px;
+      font-size: 11px;
+      color: #374151;
+    }
 
+    /* Catatan footer */
     .footer-notes {
       margin-top: 30px;
       padding-top: 12px;
@@ -135,8 +193,15 @@
       color: #6b7280;
       font-style: italic;
     }
-    .printed-at { margin-top: 8px; font-size: 9px; color: #9ca3af; text-align: right; }
 
+    .printed-at {
+      margin-top: 8px;
+      font-size: 9px;
+      color: #9ca3af;
+      text-align: right;
+    }
+
+    /* Loading & error */
     .loading, .error {
       text-align: center;
       padding: 60px 20px;
@@ -145,15 +210,21 @@
     }
     .error { color: #b91c1c; }
 
+    /* Print */
     @media print {
       body { background: #fff; padding: 0; }
       .toolbar { display: none; }
-      .btn-edit-name { display: none; }   /* v7.F2 — sembunyikan tombol saat cetak */
       .paper {
-        box-shadow: none; margin: 0; padding: 0;
-        max-width: 100%; min-height: auto;
+        box-shadow: none;
+        margin: 0;
+        padding: 0;
+        max-width: 100%;
+        min-height: auto;
       }
-      @page { size: A4; margin: 15mm; }
+      @page {
+        size: A4;
+        margin: 15mm;
+      }
     }
   </style>
 </head>
@@ -172,7 +243,6 @@
     import { requireAuth } from './js/auth.js';
     import { getCompanyProfile } from './js/company.js';
     import { supabase } from './js/supabase-client.js';
-    import { hasPermission } from './js/permissions.js';   // v7.F2
 
     // ============================================================
     // UTIL
@@ -207,7 +277,6 @@
       if (!user) return;
 
       const paper = document.getElementById('paper');
-      let canEditName = false;   // v7.F2
 
       try {
         // 1. Ambil DO id dari URL
@@ -230,7 +299,7 @@
           .single();
         if (doErr) throw doErr;
 
-        // 3. Fetch lines — v7.F2: tambah display_name, display_name_source
+        // 3. Fetch lines — v7.F4a: tambah display_name
         const { data: lines, error: lErr } = await supabase
           .from('sales_order_lines')
           .select('id, item_id, qty, unit_price, subtotal, memo, display_name, display_name_source, items!inner(sku, name, unit)')
@@ -241,9 +310,6 @@
         // 4. Fetch company profile
         const company = await getCompanyProfile();
 
-        // 4b. v7.F2 — cek permission edit nama
-        canEditName = await hasPermission('delivery.edit_display_name');
-
         // 5. Render
         const so = doData.sales_orders;
         const partner = so.partners;
@@ -253,24 +319,13 @@
 
         let itemsHtml = '';
         lines.forEach((l, i) => {
-          // v7.F2 — tampilkan display_name (fallback ke items.name), + tombol Edit
+          // v7.F4a — pakai display_name (fallback ke items.name)
           const displayLabel = l.display_name || l.items.name;
-          const canEditThis = canEditName && doData.status === 'issued';
           itemsHtml += `
             <tr>
               <td style="text-align:center;">${i + 1}</td>
               <td>${esc(l.items.sku)}</td>
-              <td>
-                <span class="item-name-text" data-line-id="${l.id}">${esc(displayLabel)}</span>
-                ${canEditThis ? `
-                  <button type="button" class="btn-edit-name"
-                          data-line-id="${l.id}"
-                          data-current="${esc(displayLabel)}"
-                          title="Edit nama produk">
-                    ✏️ Edit
-                  </button>
-                ` : ''}
-              </td>
+              <td>${esc(displayLabel)}</td>
               <td class="num">${fmtQty(l.qty)}</td>
               <td>${esc(l.items.unit)}</td>
               <td class="num">${fmtMoney(l.unit_price)}</td>
@@ -365,46 +420,6 @@
           ${company.notes ? `<div class="footer-notes">${esc(company.notes)}</div>` : ''}
           <div class="printed-at">Dicetak: ${new Date().toLocaleString('id-ID')}</div>
         `;
-
-        // v7.F2 — Wire tombol edit nama
-        document.querySelectorAll('.btn-edit-name').forEach(btn => {
-          btn.addEventListener('click', async () => {
-            const lineId = Number(btn.dataset.lineId);
-            const current = btn.dataset.current;
-            const next = prompt(
-              `Edit nama produk (line ${lineId}):\n\nKosongkan untuk batal.`,
-              current
-            );
-            if (next === null) return;
-            const trimmed = next.trim();
-            if (!trimmed) { alert('Nama tidak boleh kosong'); return; }
-            if (trimmed === current) return;
-            if (trimmed.length > 100) { alert('Maksimal 100 karakter'); return; }
-
-            btn.disabled = true;
-            btn.textContent = 'Menyimpan...';
-            try {
-              const { data, error } = await supabase.rpc('update_do_line_display_name', {
-                p_line_id: lineId,
-                p_display_name: trimmed
-              });
-              if (error) throw error;
-
-              // Update UI langsung
-              const span = document.querySelector(`.item-name-text[data-line-id="${lineId}"]`);
-              if (span) span.textContent = data.new_name;
-              btn.dataset.current = data.new_name;
-
-              btn.disabled = false;
-              btn.textContent = '✏️ Edit';
-              alert(`✓ Nama diubah ke: ${data.new_name}\n\nAlias otomatis tersimpan untuk SO berikutnya.`);
-            } catch (err) {
-              alert('Gagal: ' + (err.message || err));
-              btn.disabled = false;
-              btn.textContent = '✏️ Edit';
-            }
-          });
-        });
 
         // Set title halaman untuk nama file PDF
         document.title = `DO-${doData.do_no} — ${company.name || 'Sanno Accounting'}`;
