@@ -197,16 +197,10 @@
       body { background: #fff; padding: 0; }
       .toolbar { display: none; }
       .paper {
-        box-shadow: none;
-        margin: 0;
-        padding: 0;
-        max-width: 100%;
-        min-height: auto;
+        box-shadow: none; margin: 0; padding: 0;
+        max-width: 100%; min-height: auto;
       }
-      @page {
-        size: A4;
-        margin: 15mm;
-      }
+      @page { size: A4; margin: 15mm; }
     }
   </style>
 </head>
@@ -290,15 +284,16 @@
           .single();
         if (soErr) throw soErr;
 
-        if (so.status !== 'posted') {
-          throw new Error(`SO belum posted (status: ${so.status}). Invoice hanya bisa dibuat untuk SO posted.`);
+        // v7.F3 — fix: 'posted' → 'approved'
+        if (so.status !== 'approved') {
+          throw new Error(`SO belum approved (status: ${so.status}). Invoice hanya bisa dibuat untuk SO approved.`);
         }
         currentSO = so;
 
-        // Fetch lines
+        // Fetch lines — v7.F3: tambah display_name, display_name_source
         const { data: lines, error: lErr } = await supabase
           .from('sales_order_lines')
-          .select('*, items!inner(sku, name, unit)')
+          .select('*, display_name, display_name_source, items!inner(sku, name, unit)')
           .eq('so_id', soId)
           .order('id');
         if (lErr) throw lErr;
@@ -319,17 +314,14 @@
         // Fetch bank accounts
         allBanks = await listBankAccounts({ activeOnly: true });
 
-        // Tentukan bank default: so.bank_account_id, atau bank pertama
+        // Tentukan bank default
         if (so.bank_account_id) {
           selectedBankId = so.bank_account_id;
         } else if (allBanks.length) {
           selectedBankId = allBanks[0].id;
         }
 
-        // Isi dropdown
         renderBankSelect();
-
-        // Render invoice
         renderInvoice();
 
         // Simpan bank default ke SO kalau belum ada
@@ -349,7 +341,7 @@
             <div style="font-size:16px;font-weight:600;margin-bottom:8px;">Gagal memuat Invoice</div>
             <div>${esc(err.message || err)}</div>
             <div style="margin-top:16px;font-size:12px;color:#9ca3af;">
-              Pastikan URL memiliki <code>?id=</code> SO yang valid (status posted).
+              Pastikan URL memiliki <code>?id=</code> SO yang valid (status approved).
             </div>
           </div>`;
       }
@@ -375,7 +367,6 @@
         selectedBankId = Number(sel.value);
         renderInvoice();
 
-        // Simpan ke SO
         if (currentSO) {
           const { error } = await supabase
             .from('sales_orders')
@@ -414,11 +405,13 @@
 
       let itemsHtml = '';
       lines.forEach((l, i) => {
+        // v7.F3 — pakai display_name (fallback ke items.name)
+        const displayLabel = l.display_name || l.items.name;
         itemsHtml += `
           <tr>
             <td style="text-align:center;">${i + 1}</td>
             <td>${esc(l.items.sku)}</td>
-            <td>${esc(l.items.name)}</td>
+            <td>${esc(displayLabel)}</td>
             <td class="num">${fmtQty(l.qty)}</td>
             <td>${esc(l.items.unit)}</td>
             <td class="num">${fmtMoney(l.unit_price)}</td>
