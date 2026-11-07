@@ -16,7 +16,6 @@ export async function listSOs({ status = null, limit = 100 } = {}) {
   const { data: orders, error } = await q;
   if (error) throw error;
 
-  // Ambil profil sales terpisah
   const salesIds = [...new Set(orders.map(o => o.sales_id).filter(Boolean))];
   let profilesMap = {};
   if (salesIds.length) {
@@ -57,9 +56,10 @@ export async function getSO(soId) {
     header.profiles = prof || null;
   }
 
+  // v7.F1 — tambah display_name, display_name_source
   const { data: lines, error: lErr } = await supabase
     .from('sales_order_lines')
-    .select('*, items!inner(sku, name, unit)')
+    .select('*, display_name, display_name_source, items!inner(sku, name, unit)')
     .eq('so_id', soId).order('id');
   if (lErr) throw lErr;
 
@@ -68,7 +68,6 @@ export async function getSO(soId) {
 
 // ============================================================
 // CREATE SO
-// Return: { id, so_no } — user-facing pakai so_no, sistem pakai id
 // ============================================================
 export async function createSO({
   so_date, partner_id, description, lines, payment_terms_days = 30
@@ -83,7 +82,6 @@ export async function createSO({
   if (error) throw error;
 
   const soId = data;
-  // Ambil so_no untuk ditampilkan ke user (user tidak perlu tahu id internal)
   const { data: so } = await supabase
     .from('sales_orders')
     .select('so_no')
@@ -102,7 +100,6 @@ export async function createSO({
 export async function editSO(soId, {
   so_date, partner_id, description, lines, payment_terms_days = 30
 }) {
-  // Update payment_terms_days + due_date dulu
   const dueDate = new Date(
     new Date(so_date).getTime() + payment_terms_days * 24 * 60 * 60 * 1000
   ).toISOString().slice(0, 10);
@@ -116,7 +113,6 @@ export async function editSO(soId, {
     .eq('id', soId);
   if (hErr) throw hErr;
 
-  // Update header + lines via RPC
   const { error } = await supabase.rpc('edit_sales_order', {
     p_so_id: soId,
     p_so_date: so_date,
@@ -166,8 +162,6 @@ export async function voidSO(soId, reason) {
 
 // ============================================================
 // PRICE LIST HELPER
-// Ambil harga price list untuk 1 item (dipakai form SO)
-// Return: { item_id, sku, item_name, unit, price, discount_pct, effective_price, has_price } | null
 // ============================================================
 export async function getPriceForItem(itemId) {
   const { data, error } = await supabase.rpc('get_price_for_item', {
@@ -176,4 +170,16 @@ export async function getPriceForItem(itemId) {
   if (error) throw error;
   const row = Array.isArray(data) ? data[0] : data;
   return row || null;
+}
+
+// ============================================================
+// v7.F1 — LIST ITEM + NAMA UNTUK DROPDOWN SO
+// Return: [{ item_id, sku, item_name, unit, display_label, display_name, display_source }, ...]
+// ============================================================
+export async function listItemsForSODropdown(p_search = null) {
+  const { data, error } = await supabase.rpc('list_items_for_so_dropdown', {
+    p_search: p_search
+  });
+  if (error) throw error;
+  return data || [];
 }

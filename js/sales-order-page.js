@@ -5,7 +5,8 @@ import { hasPermission } from './permissions.js';
 import { listPartners } from './partners.js';
 import { listItems } from './items.js';
 import {
-  createSO, editSO, submitSO, cancelSO, getSO, listSOs, getPriceForItem
+  createSO, editSO, submitSO, cancelSO, getSO, listSOs, getPriceForItem,
+  listItemsForSODropdown   // v7.F1
 } from './sales-order.js';
 import { supabase } from './supabase-client.js';
 
@@ -16,6 +17,7 @@ const state = {
   partners: [],
   items: [],
   itemsById: {},
+  itemOptions: [],          // v7.F1 — opsi nama (flat) dari list_items_for_so_dropdown
   lineCount: 0,
   editingId: null,
   ppnRate: 11,
@@ -74,7 +76,6 @@ function fmtDate(d) {
     document.getElementById('addLineBtn').addEventListener('click', () => addLine());
     document.getElementById('cancelBtn').addEventListener('click', resetForm);
     document.getElementById('form-so').addEventListener('submit', onSubmit);
-    // Baris awal
     addLine();
   }
 
@@ -91,6 +92,9 @@ async function loadMaster() {
   ]);
   state.items = its;
   state.itemsById = Object.fromEntries(its.map(i => [i.id, i]));
+
+  // v7.F1 — load opsi nama (flat) untuk dropdown SO
+  state.itemOptions = await listItemsForSODropdown(null);
 
   let visiblePartners = parts;
   if (state.role === 'sales') {
@@ -115,7 +119,6 @@ async function loadMaster() {
 function addLine() {
   state.lineCount++;
   const tbody = document.getElementById('soLines');
-  // Hapus placeholder kalau ada
   const ph = tbody.querySelector('.so-line-placeholder');
   if (ph) ph.remove();
 
@@ -126,8 +129,12 @@ function addLine() {
     <td>
       <select class="line-item" required>
         <option value="">— pilih item —</option>
-        ${state.items.map(i =>
-          `<option value="${i.id}">${esc(i.sku)} — ${esc(i.name)}</option>`
+        ${state.itemOptions.map(o =>
+          `<option value="${o.item_id}"
+                   data-display-source="${esc(o.display_source)}"
+                   data-display-name="${esc(o.display_name)}">
+             ${esc(o.display_label)}
+           </option>`
         ).join('')}
       </select>
     </td>
@@ -161,7 +168,6 @@ function addLine() {
   `;
   tbody.appendChild(tr);
 
-  // Bind events
   tr.querySelector('.line-item').addEventListener('change', onItemChange);
   tr.querySelector('.line-qty').addEventListener('input', recalcTotals);
   tr.querySelector('.line-price').addEventListener('input', () => {
@@ -184,7 +190,16 @@ function addLine() {
 // Saat item dipilih → ambil harga price list + auto-isi
 async function onItemChange(e) {
   const tr = e.target.closest('tr');
-  const itemId = Number(e.target.value) || 0;
+  const sel = e.target;
+  const itemId = Number(sel.value) || 0;
+  const opt = sel.options[sel.selectedIndex];
+  const displaySource = opt?.dataset.displaySource || 'beli';
+  const displayName = opt?.dataset.displayName || '';
+
+  // v7.F1 — simpan display info di dataset
+  tr.dataset.displaySource = displaySource;
+  tr.dataset.displayName = displayName;
+
   if (!itemId) {
     tr.querySelector('.pl-readonly').value = '';
     tr.querySelector('.line-price').value = '';
@@ -200,11 +215,9 @@ async function onItemChange(e) {
     const priceEl = tr.querySelector('.line-price');
 
     if (!pl || pl.has_price === false) {
-      // Item belum punya price list (D7 — tidak boleh dijual)
       plPriceEl.value = '—';
       plPriceEl.title = 'Item belum punya price list';
       tr.dataset.hasPrice = 'false';
-      // Jangan auto-isi harga; biarkan sales sadar
       if (!priceEl.value) priceEl.value = '';
       recalcLine(tr);
       recalcTotals();
@@ -219,7 +232,6 @@ async function onItemChange(e) {
     plPriceEl.value = fmt(pl.effective_price);
     plPriceEl.title = `Harga: ${fmt(pl.price)} · Diskon: ${pl.discount_pct}%`;
 
-    // Auto-isi harga diajukan dari effective_price (sales bisa ubah)
     if (!priceEl.value || Number(priceEl.value) === 0) {
       priceEl.value = pl.effective_price;
     }
@@ -248,12 +260,10 @@ function recalcLine(tr) {
   const badgeEl = tr.querySelector('.line-status .so-badge');
   const reasonEl = tr.querySelector('.line-override-reason');
 
-  // Default: sembunyikan badge
   badgeEl.style.display = 'none';
   badgeEl.className = 'so-badge';
 
   if (!hasPrice) {
-    // Belum ada PL atau belum pilih item
     if (tr.querySelector('.line-item').value) {
       badgeEl.textContent = '⚠ Belum ada PL';
       badgeEl.className = 'so-badge no-pl';
@@ -264,26 +274,22 @@ function recalcLine(tr) {
     return;
   }
 
-  // Ada PL — hitung selisih
   const diff = eff - plEff;
   const diffPct = plEff > 0 ? (diff / plEff) * 100 : 0;
 
   if (Math.abs(diff) < 0.01) {
-    // Sesuai
     badgeEl.textContent = '✓ Sesuai';
     badgeEl.className = 'so-badge ok';
     badgeEl.style.display = 'inline-block';
     reasonEl.disabled = true;
     reasonEl.value = '';
   } else if (diff < 0) {
-    // Di bawah PL — butuh approval
     badgeEl.textContent = `−${Math.abs(diffPct).toFixed(1)}%`;
     badgeEl.className = 'so-badge pending';
     badgeEl.style.display = 'inline-block';
     badgeEl.title = `Di bawah price list: ${fmt(diff)} (${diffPct.toFixed(2)}%). Butuh approval.`;
     reasonEl.disabled = false;
   } else {
-    // Di atas PL — butuh approval
     badgeEl.textContent = `+${diffPct.toFixed(1)}%`;
     badgeEl.className = 'so-badge pending';
     badgeEl.style.display = 'inline-block';
@@ -311,7 +317,9 @@ function collectLines() {
       unit_price,
       so_discount_pct,
       price_override_reason: reason,
-      memo: null
+      memo: null,
+      display_name: r.dataset.displayName || null,           // v7.F1
+      display_name_source: r.dataset.displaySource || 'beli'  // v7.F1
     });
   });
   return lines;
@@ -369,7 +377,6 @@ async function onSubmit(e) {
     const lines = collectLines();
     if (lines.length === 0) throw new Error('Minimal 1 item');
 
-    // Blokir kalau ada item tanpa price list (D7 — backend juga akan RAISE)
     const rows = document.querySelectorAll('#soLines .so-line-row');
     for (const r of rows) {
       const itemId = Number(r.querySelector('.line-item').value);
@@ -508,7 +515,26 @@ async function onEdit(soId) {
     for (const l of so.lines) {
       addLine();
       const row = document.querySelector(`#soLines .so-line-row[data-line-id="${state.lineCount}"]`);
-      // Set dataset dari snapshot existing
+
+      // v7.F1 — match option by item_id + display_source (+ display_name kalau custom)
+      const targetSource = l.display_name_source || 'beli';
+      const targetName = l.display_name || '';
+      const opts = [...row.querySelector('.line-item').options];
+      let opt = opts.find(o =>
+        Number(o.value) === l.item_id &&
+        o.dataset.displaySource === targetSource &&
+        (targetSource === 'custom' ? o.dataset.displayName === targetName : true)
+      );
+      if (!opt) {
+        // fallback: option pertama dengan item_id sama
+        opt = opts.find(o => Number(o.value) === l.item_id);
+      }
+      if (opt) {
+        row.querySelector('.line-item').value = opt.value;
+        row.dataset.displaySource = opt.dataset.displaySource || 'beli';
+        row.dataset.displayName = opt.dataset.displayName || '';
+      }
+
       if (l.price_list_price != null) {
         row.dataset.hasPrice = 'true';
         row.dataset.plPrice = l.price_list_price;
@@ -521,7 +547,6 @@ async function onEdit(soId) {
         row.dataset.hasPrice = 'false';
         row.querySelector('.pl-readonly').value = '—';
       }
-      row.querySelector('.line-item').value = l.item_id;
       row.querySelector('.line-qty').value = l.qty;
       row.querySelector('.line-price').value = l.unit_price;
       row.querySelector('.line-disc').value = l.so_discount_pct || 0;
