@@ -1,11 +1,11 @@
 // js/delivery-page.js
-// PATCH: countdown expires_at + tombol Re-issue (pakai RPC get_do_with_expiry + reissue_do)
+// PATCH v7.F4b: tambah tombol "✏️ Edit Nama" (admin+, DO issued)
 import './input-clear.js';
 import { requireAuth, logout } from './auth.js';
 import { renderNav, requirePageAccess } from './access.js';
 import { hasPermission } from './permissions.js';
 import { markDelivered, cancelDO } from './delivery.js';
-import { supabase } from './supabase-client.js';   // sesuaikan path bila perlu
+import { supabase } from './supabase-client.js';
 
 function toast(msg, isError = false) {
   const el = document.getElementById('toast');
@@ -64,10 +64,11 @@ const state = {
   canCancel: false,
   canPrint: false,
   canReissue: false,
-  filterStatus: '',        // '' = semua, atau 'issued','delivered','expired','cancelled'
-  onlyActive: false,       // hanya DO issued yang belum expired
+  canEditName: false,        // v7.F4b
+  filterStatus: '',
+  onlyActive: false,
   search: '',
-  list: [],                // cache list DO untuk tick countdown
+  list: [],
   tickTimer: null
 };
 
@@ -81,11 +82,11 @@ const state = {
   document.getElementById('logoutBtn').addEventListener('click', logout);
   await renderNav(document.getElementById('mainNav'), 'delivery');
 
-  state.canDeliver = await hasPermission('delivery.mark_delivered');
-  state.canCancel  = await hasPermission('delivery.cancel');
-  state.canPrint   = await hasPermission('delivery.view');
-  // permission reissue: pakai delivery.mark_delivered kalau belum ada permission khusus
-  state.canReissue = state.canDeliver;
+  state.canDeliver  = await hasPermission('delivery.mark_delivered');
+  state.canCancel   = await hasPermission('delivery.cancel');
+  state.canPrint    = await hasPermission('delivery.view');
+  state.canReissue  = state.canDeliver;
+  state.canEditName = await hasPermission('delivery.edit_display_name');   // v7.F4b
 
   await bindFilters();
   await renderList();
@@ -160,7 +161,6 @@ async function renderList() {
 }
 
 function renderCard(d) {
-  // d = baris dari get_do_with_expiry
   const buttons = [];
 
   // Cetak DO
@@ -187,7 +187,13 @@ function renderCard(d) {
     }
   }
 
-  // Re-issue — hanya kalau can_reissue=true (issued atau expired)
+  // v7.F4b — Edit Nama (admin+, DO issued)
+  if (state.canEditName && d.status === 'issued') {
+    buttons.push(`<button class="btn btn-primary" style="padding:6px 12px;font-size:12px;background:#7c3aed;color:#fff;"
+                          data-edit-name="${d.id}">✏️ Edit Nama</button>`);
+  }
+
+  // Re-issue — hanya kalau can_reissue=true
   if (state.canReissue && d.can_reissue) {
     buttons.push(`<button class="btn btn-primary" style="padding:6px 12px;font-size:12px;background:#7c3aed;color:#fff;"
                           data-reissue="${d.id}">♻ Re-issue</button>`);
@@ -242,6 +248,10 @@ function bindCardActions(wrap) {
   wrap.querySelectorAll('[data-reissue]').forEach(btn => {
     btn.addEventListener('click', () => onReissue(Number(btn.dataset.reissue)));
   });
+  // v7.F4b — Edit Nama
+  wrap.querySelectorAll('[data-edit-name]').forEach(btn => {
+    btn.addEventListener('click', () => onEditName(Number(btn.dataset.editName)));
+  });
 }
 
 // ---- live countdown tick ----
@@ -249,7 +259,6 @@ function startTick() {
   stopTick();
   state.tickTimer = setInterval(() => {
     if (!state.list.length) return;
-    // decrement lokal per detik; kalau <=0, refresh list untuk sinkron dengan server
     let needsRefresh = false;
     state.list = state.list.map(d => {
       if (d.status === 'issued' && d.seconds_until_expiry != null) {
@@ -270,7 +279,6 @@ function startTick() {
     });
 
     if (needsRefresh) {
-      // ada DO yang habis countdown → refresh dari server (biar status 'expired' muncul)
       renderList();
     }
   }, 1000);
@@ -327,4 +335,10 @@ async function onReissue(doId) {
   } catch (err) {
     toast('Gagal: ' + (err.message || err), true);
   }
+}
+
+// v7.F4b — Edit Nama
+function onEditName(doId) {
+  if (!state.canEditName) { toast('Tidak ada akses edit nama', true); return; }
+  window.open(`./delivery-edit.html?id=${doId}`, '_blank');
 }
