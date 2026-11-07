@@ -2,44 +2,52 @@
 <html lang="id">
 <head>
   <meta charset="UTF-8">
-  <title>Edit Delivery Order — Sanno Accounting</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Edit Nama DO — Sanno Accounting</title>
   <link rel="stylesheet" href="./css/style.css">
 </head>
 <body>
   <div class="container">
     <div class="topbar">
-      <h1>Edit Delivery Order</h1>
-      <button class="btn btn-secondary" id="backBtn">← Kembali</button>
+      <h1>Edit Nama Produk di DO</h1>
+      <button class="btn btn-secondary" id="closeBtn">Tutup</button>
     </div>
+
     <div class="card">
-      <div id="doInfo" style="margin-bottom:12px;"></div>
+      <div id="doInfo" style="margin-bottom:12px;padding:10px;background:#f9fafb;border-radius:6px;font-size:13px;">
+        Memuat...
+      </div>
+
+      <p style="font-size:12px;color:#6b7280;margin-top:0;">
+        Ubah nama produk yang tercetak di DO. Qty &amp; harga <b>tidak berubah</b>.
+        Setiap nama baru otomatis tersimpan sebagai alias untuk SO berikutnya.
+      </p>
+
       <div class="table-wrap">
         <table>
           <thead>
             <tr>
-              <th>SKU</th>
-              <th>Nama</th>
-              <th class="num">Qty</th>
-              <th>Satuan</th>
-              <th class="num">Harga</th>
-              <th class="num">Subtotal</th>
+              <th style="width:100px;">SKU</th>
+              <th style="width:200px;">Nama Asli</th>
+              <th>Nama Baru (editable)</th>
+              <th class="num" style="width:80px;">Qty</th>
+              <th class="num" style="width:120px;">Harga</th>
             </tr>
           </thead>
-          <tbody id="linesBody"></tbody>
-          <tfoot>
-            <tr>
-              <td colspan="5" class="num"><b>Total</b></td>
-              <td class="num"><b id="grandTotal">Rp 0</b></td>
-            </tr>
-          </tfoot>
+          <tbody id="linesBody">
+            <tr><td colspan="5" style="text-align:center;color:#9ca3af;">Memuat...</td></tr>
+          </tbody>
         </table>
       </div>
-      <div class="form-actions" style="margin-top:16px;">
-        <button class="btn btn-primary" id="saveBtn">Simpan Perubahan</button>
+
+      <div class="form-actions" style="margin-top:16px;display:flex;gap:8px;">
+        <button class="btn btn-primary" id="saveBtn" disabled>Simpan Perubahan</button>
         <button class="btn btn-secondary" id="cancelBtn">Batal</button>
+        <span id="dirtyInfo" style="font-size:12px;color:#6b7280;align-self:center;"></span>
       </div>
     </div>
   </div>
+
   <div class="toast" id="toast"></div>
   <script type="module" src="./js/delivery-edit-page.js"></script>
 </body>
