@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <title>Edit Delivery Order — Sanno Accounting</title>
+  <link rel="stylesheet" href="./css/style.css">
+</head>
+<body>
+  <div class="container">
+    <div class="topbar">
+      <h1>Edit Delivery Order</h1>
+      <button class="btn btn-secondary" id="backBtn">← Kembali</button>
+    </div>
+    <div class="card">
+      <div id="doInfo" style="margin-bottom:12px;"></div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>SKU</th>
+              <th>Nama</th>
+              <th class="num">Qty</th>
+              <th>Satuan</th>
+              <th class="num">Harga</th>
+              <th class="num">Subtotal</th>
+            </tr>
+          </thead>
+          <tbody id="linesBody"></tbody>
+          <tfoot>
+            <tr>
+              <td colspan="5" class="num"><b>Total</b></td>
+              <td class="num"><b id="grandTotal">Rp 0</b></td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+      <div class="form-actions" style="margin-top:16px;">
+        <button class="btn btn-primary" id="saveBtn">Simpan Perubahan</button>
+        <button class="btn btn-secondary" id="cancelBtn">Batal</button>
+      </div>
+    </div>
+  </div>
+  <div class="toast" id="toast"></div>
+  <script type="module" src="./js/delivery-edit-page.js"></script>
+</body>
+</html>
