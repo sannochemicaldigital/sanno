@@ -1,3 +1,4 @@
+// js/dashboard-page.js
 import './input-clear.js';
 import { requireAuth, logout } from './auth.js';
 import { renderNav, requirePageAccess } from './access.js';
@@ -205,32 +206,34 @@ async function renderKasirDashboard(container) {
 }
 
 // ============================================================
-// PIUTANG CARD (dari view piutang_summary)
+// PIUTANG CARD — satu angka dari v_account_balance + sub-info piutang_summary
 // ============================================================
 async function renderPiutangCard() {
-  const { data, error } = await supabase
+  const { data: acc, error: e1 } = await supabase
+    .from('v_account_balance')
+    .select('code, name, balance')
+    .eq('code', '1-1200')
+    .single();
+  if (e1) { console.warn('[v_account_balance] error:', e1.message); return ''; }
+
+  const { data: sum } = await supabase
     .from('piutang_summary')
     .select('*')
     .single();
-  if (error) {
-    console.warn('[piutang_summary] error:', error.message);
-    return '';
-  }
-  if (!data) return '';
 
-  const overdue = Number(data.total_overdue_idr || 0);
+  const saldo = Number(acc?.balance || 0);
+  const overdue = Number(sum?.total_overdue_idr || 0);
+  const countOpen = Number(sum?.count_open || 0);
+  const countPaid = Number(sum?.count_paid || 0);
   const overdueColor = overdue > 0 ? '#b91c1c' : '#059669';
 
   return `
     <div class="card" style="border-left:4px solid #0891b2;">
-      <div style="font-size:12px;color:#666;margin-bottom:6px;">Total Piutang (Sisa)</div>
-      <div style="font-size:22px;font-weight:700;color:#0891b2;">${fmtShort(data.total_sisa_idr)}</div>
+      <div style="font-size:12px;color:#666;margin-bottom:6px;">Piutang Dagang</div>
+      <div style="font-size:22px;font-weight:700;color:#0891b2;">${fmtShort(saldo)}</div>
       <div style="font-size:11px;color:#6b7280;margin-top:6px;line-height:1.5;">
-        ${data.count_open} invoice terbuka · ${data.count_paid} lunas<br>
+        ${countOpen} invoice terbuka · ${countPaid} lunas<br>
         Overdue: <strong style="color:${overdueColor};">${fmtShort(overdue)}</strong>
-      </div>
-      <div style="font-size:10px;color:#9ca3af;margin-top:6px;">
-        Total invoice: ${fmtShort(data.total_invoice_idr)}
       </div>
     </div>`;
 }
@@ -257,18 +260,15 @@ async function renderFinanceDashboard(container) {
     cards.push(card('Saldo Bank BCA', map.bank?.balance));
   }
   if (await hasPermission('finance.piutang.view')) {
-    cards.push(card('Piutang Dagang', map.piutang_dagang?.balance));
+    // Piutang Dagang — konsolidasi (1-1200 + piutang_summary)
+    const piutangHtml = await renderPiutangCard();
+    if (piutangHtml) cards.push(piutangHtml);
+    // Piutang Pihak Ketiga (tetap dari jurnal)
     cards.push(card('Piutang Pihak Ketiga', map.piutang_pihak3?.balance));
   }
   if (await hasPermission('finance.hutang.view')) {
     cards.push(card('Hutang Bank', map.hutang_bank?.balance));
     cards.push(card('Hutang Dagang', map.hutang_dagang?.balance));
-  }
-
-  // Card Total Piutang (dari historical_invoices via view piutang_summary)
-  if (await hasPermission('historical.view')) {
-    const piutangHtml = await renderPiutangCard();
-    if (piutangHtml) cards.push(piutangHtml);
   }
 
   container.innerHTML = cards.length
