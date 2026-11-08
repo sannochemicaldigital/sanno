@@ -86,6 +86,7 @@ export async function renderNav(navEl, activePage = null) {
     { page: 'sales-order', href: './sales-order.html', label: 'Sales Order',  perm: 'sales.order.view' },
     { page: 'approval',    href: './approval.html',    label: 'Approval',     perm: 'sales.order.approve' },
     { page: 'delivery',    href: './delivery.html',    label: 'Delivery',     perm: 'delivery.view' },
+    { page: 'piutang',     href: './piutang.html',     label: 'Piutang',      perm: 'historical.view' },
     { page: 'inventory',   href: './inventory.html',   label: 'Inventory',    perm: 'inventory.view' },
     { page: 'kasir',       href: './kasir.html',       label: 'Kasir',        perm: 'kasir.view' },
     { page: 'master',      href: './master.html',      label: 'Master',       perm: 'master.accounts.view' },
