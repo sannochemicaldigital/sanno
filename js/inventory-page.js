@@ -44,7 +44,7 @@ function reasonLabel(r) {
 
 let allItems = [];
 let inventoryRows = [];
-let allUnits = [];          // cache daftar unit (untuk dropdown)
+let allUnits = [];
 const perms = {
   create: false, stockIn: false, viewPrice: false, viewMovement: false,
   stockAdjust: false,
@@ -67,7 +67,7 @@ function renderJournalBadge(r) {
   return '<span style="background:#fee2e2;color:#991b1b;padding:2px 8px;border-radius:4px;font-weight:600;font-size:12px;">Belum dijurnal</span>';
 }
 
-// ---------- state tab koreksi stok (Phase 1) ----------
+// ---------- state tab koreksi stok ----------
 let stockAdjustInitialized = false;
 let allItemsForAdjust = [];
 const adjustFilter = { search: '', from: '', to: '', onlyUnjournaled: false };
@@ -77,10 +77,10 @@ let adjustReqSeq = 0;
 let adjustRowsCache = [];
 let adjustTotalCount = 0;
 
-// ---------- state tab opname massal (Phase 2) ----------
+// ---------- state tab opname massal ----------
 let opnameInitialized = false;
 let currentOpnameId = null;
-let opnameLinesCache = [];        // cache full lines utk filter client-side
+let opnameLinesCache = [];
 let currentOpnameStatus = '';
 const opnameFilter = { search: '', onlyDelta: false, lineOffset: 0 };
 const OPNAME_LINE_LIMIT = 200;
@@ -90,7 +90,7 @@ const OPNAME_HIST_LIMIT = 50;
 let opnameHistOffset = 0;
 let opnameHistReqSeq = 0;
 
-// ---------- state tab price list (Phase 3) ----------
+// ---------- state tab price list ----------
 let priceListInitialized = false;
 let priceListRowsCache = [];
 const priceListFilter = { search: '', onlyWithPrice: false };
@@ -98,7 +98,7 @@ const PRICE_LIST_LIMIT = 200;
 let priceListOffset = 0;
 let priceListTotalCount = 0;
 let priceListReqSeq = 0;
-let priceListDirty = new Set();     // item_id yang berubah
+let priceListDirty = new Set();
 const priceListHistFilter = { search: '', itemId: null };
 const PRICE_LIST_HIST_LIMIT = 100;
 let priceListHistOffset = 0;
@@ -133,7 +133,6 @@ let priceListHistReqSeq = 0;
     if (histCard) histCard.style.display = 'none';
   }
 
-  // Sembunyikan tab Price List kalau tidak punya permission view
   if (!perms.priceListView) {
     const plTabBtn = document.querySelector('.tabs button[data-tab="pricelist"]');
     if (plTabBtn) plTabBtn.style.display = 'none';
@@ -145,7 +144,6 @@ let priceListHistReqSeq = 0;
   if (perms.create)  document.getElementById('form-new-item').addEventListener('submit', onCreateItem);
   if (perms.stockIn) document.getElementById('form-stock-in').addEventListener('submit', onStockIn);
 
-  // Tab switcher (lazy-init per tab)
   document.querySelectorAll('.tabs button').forEach(btn => {
     btn.addEventListener('click', async () => {
       document.querySelectorAll('.tabs button').forEach(b => b.classList.remove('active'));
@@ -188,6 +186,7 @@ let priceListHistReqSeq = 0;
   wireUnitsModal();
   await loadAll();
 })();
+
 // ---------- filter binding ----------
 function bindInventoryFilters() {
   const inpSearch = document.getElementById('invSearch');
@@ -224,7 +223,7 @@ async function loadAll() {
   await Promise.all(tasks);
 }
 
-// ---------- RPC: inventory dengan reservasi ----------
+// ---------- RPC inventory ----------
 async function rpcInventory() {
   const { data, error } = await supabase.rpc('get_inventory_with_reservation', {
     p_search: invFilter.search || null,
@@ -239,15 +238,18 @@ async function rpcInventory() {
 async function renderInventory() {
   const tbody = document.getElementById('tbody-inventory');
   if (!tbody) return;
-  tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:#9ca3af;">Memuat...</td></tr>';
+  tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#9ca3af;">Memuat...</td></tr>';
   try {
     inventoryRows = await rpcInventory();
     renderInventoryTable();
   } catch (err) {
-    tbody.innerHTML = `<tr><td colspan="8" style="color:#b91c1c;">${esc(err.message)}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="7" style="color:#b91c1c;">${esc(err.message)}</td></tr>`;
   }
 }
 
+// ============================================================
+// RENDER TABEL STOK — tampilan DRUM + info kg/ltr
+// ============================================================
 function renderInventoryTable() {
   const tbody = document.getElementById('tbody-inventory');
   if (!tbody) return;
@@ -256,8 +258,37 @@ function renderInventoryTable() {
   if (invFilter.onlyLowStock) rows = rows.filter(r => r.is_low_stock);
 
   if (!rows.length) {
-    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:#9ca3af;">Tidak ada item cocok</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#9ca3af;">Tidak ada item cocok</td></tr>';
     return;
+  }
+
+  // Helper: format drum + info kg/ltr
+  function fmtDrum(r) {
+    const stock = Number(r.stock_qty);
+    const isiKg  = Number(r.packaging_isi_kg)  || 0;
+    const isiLtr = Number(r.packaging_isi_ltr) || 0;
+    const unit = (r.unit || '').toLowerCase();
+    const isi = unit === 'ltr' ? isiLtr : isiKg;
+    const unitLabel = unit === 'ltr' ? 'ltr' : 'kg';
+
+    if (!isi || isi <= 0) {
+      return {
+        drum: '—',
+        kg: `${fmt(stock)} ${unitLabel}`,
+        drumNum: null
+      };
+    }
+
+    const drum = stock / isi;
+    const drumStr = Number.isInteger(drum)
+      ? drum.toLocaleString('id-ID')
+      : drum.toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+    return {
+      drum: drumStr,
+      kg: `${fmt(stock)} ${unitLabel}`,
+      drumNum: drum
+    };
   }
 
   tbody.innerHTML = rows.map(i => {
@@ -271,22 +302,42 @@ function renderInventoryTable() {
     else if (i.is_low_stock) statusHtml = '<span style="color:#b45309;font-weight:600;">RENDAH</span>';
     else statusHtml = '<span style="color:#059669;">OK</span>';
 
-    const reservedHtml = reserved > 0
-      ? `<span style="background:#fef3c7;color:#92400e;padding:2px 8px;border-radius:4px;font-weight:600;">${fmt(reserved)}</span>`
-      : `<span style="color:#9ca3af;">0</span>`;
+    const stockFmt = fmtDrum(i);
+    const reservedFmt = fmtDrum({ ...i, stock_qty: reserved });
+    const availFmt = fmtDrum({ ...i, stock_qty: available });
 
-    const availableHtml = i.is_low_stock
-      ? `<span style="color:#b45309;font-weight:600;">${fmt(available)}</span>`
-      : fmt(available);
+    const packagingLabel = i.packaging_nama || 'Drum';
+    const packagingLower = packagingLabel.toLowerCase();
+    const isiLabel = i.unit === 'ltr'
+      ? (i.packaging_isi_ltr ? `${i.packaging_isi_ltr} ltr` : '')
+      : (i.packaging_isi_kg ? `${i.packaging_isi_kg} kg` : '');
+
+    const stockColor = stock < 0 ? '#b91c1c' : (stock === 0 ? '#6b7280' : '#1a1a1a');
 
     return `
       <tr>
         <td data-label="SKU">${esc(i.sku)}</td>
-        <td data-label="Nama">${esc(i.name)}</td>
-        <td data-label="Satuan">${esc(i.unit)}</td>
-        <td data-label="Stok" class="num">${fmt(stock)}</td>
-        <td data-label="Reserved" class="num">${reservedHtml}</td>
-        <td data-label="Available" class="num">${availableHtml}</td>
+        <td data-label="Nama">
+          <div>${esc(i.name)}</div>
+          ${isiLabel ? `<div style="font-size:11px;color:#9ca3af;">${esc(packagingLabel)} · ${esc(isiLabel)}</div>` : ''}
+        </td>
+        <td data-label="Stok (Drum)" class="num">
+          <div style="font-weight:700;font-size:15px;color:${stockColor};">
+            ${stockFmt.drum}
+            <span style="font-size:11px;font-weight:400;color:#6b7280;">${esc(packagingLower)}</span>
+          </div>
+          <div style="font-size:11px;color:#9ca3af;">(${stockFmt.kg})</div>
+        </td>
+        <td data-label="Reserved" class="num">
+          ${reserved > 0
+            ? `<div style="font-weight:600;">${reservedFmt.drum} <span style="font-size:10px;color:#6b7280;">${esc(packagingLower)}</span></div>
+               <div style="font-size:10px;color:#9ca3af;">(${reservedFmt.kg})</div>`
+            : `<span style="color:#9ca3af;">0</span>`}
+        </td>
+        <td data-label="Available" class="num">
+          <div style="font-weight:600;${i.is_low_stock ? 'color:#b45309;' : ''}">${availFmt.drum} <span style="font-size:10px;color:#6b7280;">${esc(packagingLower)}</span></div>
+          <div style="font-size:10px;color:#9ca3af;">(${availFmt.kg})</div>
+        </td>
         <td data-label="Min" class="num">${fmt(min)}</td>
         <td data-label="Status">${statusHtml}</td>
       </tr>`;
@@ -301,15 +352,23 @@ async function loadItemsForDropdown() {
     const sel = document.getElementById('stockInItem');
     if (!sel) return;
     sel.innerHTML = '<option value="">— pilih item —</option>' +
-      allItems.map(i =>
-        `<option value="${i.id}">${esc(i.sku)} — ${esc(i.name)} (stok: ${Number(i.stock_qty).toLocaleString('id-ID')})</option>`
-      ).join('');
+      allItems.map(i => {
+        const isiKg  = Number(i.packaging_isi_kg)  || 0;
+        const isiLtr = Number(i.packaging_isi_ltr) || 0;
+        const unit = (i.unit || '').toLowerCase();
+        const isi = unit === 'ltr' ? isiLtr : isiKg;
+        const unitLabel = unit === 'ltr' ? 'ltr' : 'kg';
+        const drumInfo = isi > 0
+          ? ` · ${(Number(i.stock_qty)/isi).toLocaleString('id-ID', {maximumFractionDigits:2})} ${(i.packaging_nama||'drum').toLowerCase()}`
+          : '';
+        return `<option value="${i.id}">${esc(i.sku)} — ${esc(i.name)} (stok: ${Number(i.stock_qty).toLocaleString('id-ID')} ${unitLabel}${drumInfo})</option>`;
+      }).join('');
   } catch (err) {
     console.error('loadItemsForDropdown:', err);
   }
 }
 
-// ---------- movements (riwayat mutasi stok) ----------
+// ---------- movements ----------
 async function renderMovements() {
   const tbody = document.getElementById('tbody-movements');
   if (!tbody) return;
@@ -372,7 +431,6 @@ async function onCreateItem(e) {
     });
     toast('✓ Item baru dibuat (stok 0)');
     f.reset();
-    // Reset dropdown ke pilihan default (pcs kalau ada, else kosong)
     const pcsOpt = [...f.unit.options].find(o => o.value === 'pcs');
     f.unit.value = pcsOpt ? 'pcs' : '';
     f.min_stock.value = 0;
@@ -415,7 +473,7 @@ async function onStockIn(e) {
 }
 
 // ============================================================
-// TAB KOREKSI STOK (Phase 1)
+// TAB KOREKSI STOK
 // ============================================================
 async function initStockAdjustTab() {
   const formCard = document.getElementById('stock-adjust-form-card');
@@ -537,7 +595,7 @@ function wireStockAdjustHistory() {
   }
   if (fromEl) fromEl.addEventListener('change', async () => { adjustFilter.from = fromEl.value; await reloadStockAdjust(); });
   if (toEl)   toEl.addEventListener('change',   async () => { adjustFilter.to   = toEl.value;   await reloadStockAdjust(); });
-    if (chkUnjournaled) chkUnjournaled.addEventListener('change', () => {
+  if (chkUnjournaled) chkUnjournaled.addEventListener('change', () => {
     adjustFilter.onlyUnjournaled = chkUnjournaled.checked;
     renderStockAdjustRows(adjustTotalCount);
   });
@@ -576,7 +634,7 @@ async function loadStockAdjust(append = false) {
     const rows = data || [];
     const totalCount = rows[0]?.total_count != null ? Number(rows[0].total_count) : rows.length;
 
-        if (append) adjustRowsCache = adjustRowsCache.concat(rows);
+    if (append) adjustRowsCache = adjustRowsCache.concat(rows);
     else adjustRowsCache = rows;
 
     adjustTotalCount = totalCount;
@@ -622,16 +680,17 @@ function renderStockAdjustRows(totalCount) {
   }
 
   const info = document.getElementById('saInfo');
-if (info) {
-  const shown = rows.length;
-  const total = adjustTotalCount || totalCount;
-  info.textContent = adjustFilter.onlyUnjournaled
-    ? `Menampilkan ${shown} (belum dijurnal) dari ${adjustRowsCache.length} termuat`
-    : `Menampilkan ${Math.min(adjustRowsCache.length, total)} dari ${total}`;
+  if (info) {
+    const shown = rows.length;
+    const total = adjustTotalCount || totalCount;
+    info.textContent = adjustFilter.onlyUnjournaled
+      ? `Menampilkan ${shown} (belum dijurnal) dari ${adjustRowsCache.length} termuat`
+      : `Menampilkan ${Math.min(adjustRowsCache.length, total)} dari ${total}`;
+  }
 }
-}
+
 // ============================================================
-// TAB OPNAME MASSAL (Phase 2)
+// TAB OPNAME MASSAL
 // ============================================================
 async function initOpnameTab() {
   const btnNew = document.getElementById('opnameNewBtn');
@@ -656,7 +715,6 @@ async function initOpnameTab() {
   await reloadOpnameHistory();
 }
 
-// ---------- Buat opname baru ----------
 function wireOpnameCreateForm() {
   const btnNew = document.getElementById('opnameNewBtn');
   const card = document.getElementById('opnameNewFormCard');
@@ -704,7 +762,6 @@ function wireOpnameCreateForm() {
   });
 }
 
-// ---------- Detail opname ----------
 async function openOpnameDetail(opnameId) {
   currentOpnameId = Number(opnameId);
   const detail = document.getElementById('opnameDetailCard');
@@ -725,13 +782,12 @@ async function loadOpnameDetail() {
     if (!header) throw new Error('Opname tidak ditemukan');
 
     opnameLinesCache = Array.isArray(header.lines) ? header.lines : [];
-    window.__currentOpnameHeader = header;   // ← TAMBAH: simpan utk cetak
+    window.__currentOpnameHeader = header;
 
     currentOpnameStatus = header.status || '';
     renderOpnameHeader(header);
     renderOpnameLines(header.status);
     renderOpnameActions(header);
-    
   } catch (err) {
     if (tbody) tbody.innerHTML = `<tr><td colspan="8" style="color:#b91c1c;">${esc(err.message)}</td></tr>`;
     if (headerEl) headerEl.innerHTML = `<span style="color:#b91c1c;">${esc(err.message)}</span>`;
@@ -763,23 +819,13 @@ function renderOpnameHeader(h) {
   `;
 }
 
-function renderOpnameMeta(h) {
-  const el = document.getElementById('opnameMetaInfo');
-  if (!el) return;
-  el.innerHTML = `
-    <span style="margin-right:12px;">Total item: <b>${opnameLinesCache.length}</b></span>
-    <span style="margin-right:12px;">Di-adjust: <b style="color:#059669;">${Number(h.adjusted_count)||0}</b></span>
-    <span style="margin-right:12px;">Dilewati: <b style="color:#6b7280;">${Number(h.skipped_count)||0}</b></span>
-  `;
-}
-
 function renderOpnameActions(h) {
   const el = document.getElementById('opnameActionBar');
   if (!el) return;
   const s = h.status;
   const btns = [];
 
-    if (s === 'draft') {
+  if (s === 'draft') {
     btns.push(`<button type="button" class="btn btn-secondary" id="opnamePrintBtn">🖨️ Cetak Form</button>`);
     if (perms.opnameCreate) {
       btns.push(`<button type="button" class="btn btn-primary" id="opnameSaveDraftBtn">Simpan Draft</button>`);
@@ -807,6 +853,7 @@ function renderOpnameActions(h) {
   document.getElementById('opnameCancelBtn')?.addEventListener('click', () => cancelOpnameHandler());
   document.getElementById('opnamePrintBtn')?.addEventListener('click', () => printOpnameForm());
 }
+
 function renderOpnameLines(status) {
   const tbody = document.getElementById('tbody-opname-lines');
   if (!tbody) return;
@@ -920,14 +967,13 @@ async function saveOpnameDraft() {
     if (btn) { btn.disabled = false; btn.textContent = 'Simpan Draft'; }
   }
 }
-// ---------- Cetak form fisik opname (portrait, padat) ----------
+
 function printOpnameForm() {
   if (!currentOpnameId) return;
   const h = window.__currentOpnameHeader || {};
   const tanggal = h.opname_date || '';
   const catatan = h.notes || '';
 
-  // Pendekkan nama produk: maks 40 karakter, sisanya "..."
   const shortName = (s, max = 40) => {
     const str = String(s || '');
     return str.length > max ? str.slice(0, max - 1) + '…' : str;
@@ -959,17 +1005,7 @@ function printOpnameForm() {
   @page { size: A4 portrait; margin: 10mm 8mm; }
   html, body { margin: 0; padding: 0; background: #f3f4f6; }
   * { box-sizing: border-box; }
-  .sheet {
-    width: 210mm;
-    min-height: 297mm;
-    margin: 12px auto;
-    padding: 10mm 8mm;
-    background: #fff;
-    box-shadow: 0 1px 4px rgba(0,0,0,.15);
-    font-family: Arial, Helvetica, sans-serif;
-    font-size: 9px;
-    color: #000;
-  }
+  .sheet { width: 210mm; min-height: 297mm; margin: 12px auto; padding: 10mm 8mm; background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,.15); font-family: Arial, Helvetica, sans-serif; font-size: 9px; color: #000; }
   .head { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 6px; }
   .head h1 { font-size: 13px; margin: 0 0 3px; letter-spacing: .3px; }
   .head .meta { font-size: 9px; line-height: 1.4; }
@@ -977,29 +1013,20 @@ function printOpnameForm() {
   table { width: 100%; border-collapse: collapse; table-layout: fixed; }
   th, td { border: 1px solid #000; padding: 2px 3px; vertical-align: top; font-size: 8.5px; }
   th { background: #eee; font-weight: 700; font-size: 8.5px; }
-  td.c { text-align: center; }
-  td.r { text-align: right; }
+  td.c { text-align: center; } td.r { text-align: right; }
   td.sku { font-family: "Courier New", monospace; font-size: 8px; word-break: break-all; }
-  td.memo { font-size: 8px; }
-  td.phys { background: #fff; }
-  thead { display: table-header-group; }
-  tr { page-break-inside: avoid; }
+  td.memo { font-size: 8px; } td.phys { background: #fff; }
+  thead { display: table-header-group; } tr { page-break-inside: avoid; }
   .legend { margin-top: 6px; font-size: 8.5px; }
   .sign { display: flex; justify-content: space-between; margin-top: 24px; page-break-inside: avoid; }
   .sign div { text-align: center; width: 40%; font-size: 9px; }
   .sign .line { margin-top: 40px; border-top: 1px solid #000; padding-top: 3px; }
   .actions { position: fixed; top: 8px; right: 8px; z-index: 10; }
   .actions button { padding: 6px 12px; font-size: 13px; cursor: pointer; }
-  @media print {
-    html, body { background: #fff; }
-    .sheet { width: auto; min-height: 0; margin: 0; padding: 0; box-shadow: none; }
-    .actions { display: none; }
-  }
+  @media print { html, body { background: #fff; } .sheet { width: auto; min-height: 0; margin: 0; padding: 0; box-shadow: none; } .actions { display: none; } }
 </style></head>
 <body>
-  <div class="actions">
-    <button onclick="window.print()">🖨️ Cetak</button>
-  </div>
+  <div class="actions"><button onclick="window.print()">🖨️ Cetak</button></div>
   <div class="sheet">
   <div class="head">
     <div>
@@ -1017,51 +1044,25 @@ function printOpnameForm() {
   </div>
   <table>
     <colgroup>
-      <col style="width:24px;">
-      <col style="width:70px;">
-      <col>
-      <col style="width:36px;">
-      <col style="width:52px;">
-      <col style="width:60px;">
-      <col style="width:52px;">
-      <col style="width:38px;">
-      <col style="width:80px;">
+      <col style="width:24px;"><col style="width:70px;"><col><col style="width:36px;">
+      <col style="width:52px;"><col style="width:60px;"><col style="width:52px;">
+      <col style="width:38px;"><col style="width:80px;">
     </colgroup>
     <thead>
       <tr>
-        <th>No</th>
-        <th>SKU</th>
-        <th>Nama</th>
-        <th>Sat.</th>
-        <th>Stok<br>Sistem</th>
-        <th>Qty<br>Fisik</th>
-        <th>Selisih</th>
-        <th>Alasan</th>
-        <th>Memo</th>
+        <th>No</th><th>SKU</th><th>Nama</th><th>Sat.</th>
+        <th>Stok<br>Sistem</th><th>Qty<br>Fisik</th><th>Selisih</th>
+        <th>Alasan</th><th>Memo</th>
       </tr>
     </thead>
     <tbody>${rowsHtml}</tbody>
   </table>
-  <div class="legend">
-    Kode alasan: <b>R</b> = Rusak, <b>H</b> = Hilang, <b>S</b> = Salah input, <b>L</b> = Lainnya.
-  </div>
-    <div class="sign">
-    <div>
-      <div>Petugas Opname</div>
-      <div class="line">(____________________)</div>
-    </div>
-    <div>
-      <div>Penyelia / Supervisor</div>
-      <div class="line">(____________________)</div>
-    </div>
+  <div class="legend">Kode alasan: <b>R</b> = Rusak, <b>H</b> = Hilang, <b>S</b> = Salah input, <b>L</b> = Lainnya.</div>
+  <div class="sign">
+    <div><div>Petugas Opname</div><div class="line">(____________________)</div></div>
+    <div><div>Penyelia / Supervisor</div><div class="line">(____________________)</div></div>
   </div>
   </div><!-- /.sheet -->
-  <script>
-    window.addEventListener('load', () => {
-      // auto-print hanya kalau mau (uncomment):
-      // setTimeout(() => window.print(), 300);
-    });
-  </script>
 </body></html>`;
 
   const w = window.open('', '_blank');
@@ -1070,13 +1071,13 @@ function printOpnameForm() {
   w.document.write(html);
   w.document.close();
 }
+
 async function submitOpnameHandler() {
   if (!perms.opnameCreate) { toast('Tidak ada akses', true); return; }
   if (!confirm('Submit opname ini? Setelah submit, qty fisik tidak bisa diedit.')) return;
   const btn = document.getElementById('opnameSubmitBtn');
   if (btn) { btn.disabled = true; btn.textContent = 'Submit...'; }
   try {
-    // simpan dulu, lalu submit
     const { error: eSave } = await supabase.rpc('save_opname_lines', {
       p_opname_id: currentOpnameId,
       p_lines: collectOpnameLinePayload()
@@ -1164,7 +1165,6 @@ async function cancelOpnameHandler() {
   }
 }
 
-// ---------- Filter input tabel besar (client-side) ----------
 function wireOpnameLinesFilter() {
   const searchEl = document.getElementById('opnameLineSearch');
   const chkDelta = document.getElementById('opnameOnlyDiff');
@@ -1187,7 +1187,6 @@ function wireOpnameLinesFilter() {
   }
 }
 
-// ---------- Riwayat opname ----------
 function wireOpnameHistory() {
   const searchEl = document.getElementById('opnameHistSearch');
   const statusEl = document.getElementById('opnameHistStatus');
@@ -1277,7 +1276,6 @@ async function loadOpnameHistory(append = false) {
     if (append) tbody.insertAdjacentHTML('beforeend', html);
     else tbody.innerHTML = html;
 
-    // bind tombol lihat
     tbody.querySelectorAll('[data-open-opname]').forEach(btn => {
       btn.addEventListener('click', () => openOpnameDetail(Number(btn.dataset.openOpname)));
     });
@@ -1293,12 +1291,9 @@ async function loadOpnameHistory(append = false) {
 }
 
 // ============================================================
-// TAB PRICE LIST (Phase 3)
+// TAB PRICE LIST
 // ============================================================
-
-// ---------- Init tab ----------
 async function initPriceListTab() {
-  // Sembunyikan toolbar edit kalau tidak punya manage
   if (!perms.priceListManage) {
     const reasonEl = document.getElementById('plReason');
     if (reasonEl) reasonEl.style.display = 'none';
@@ -1311,7 +1306,6 @@ async function initPriceListTab() {
   await Promise.all([reloadPriceList(), reloadPriceListHistory()]);
 }
 
-// ---------- Toolbar Card 1 ----------
 function wirePriceListToolbar() {
   const searchEl = document.getElementById('plSearch');
   const chkOnly = document.getElementById('plOnlyWithPrice');
@@ -1344,7 +1338,6 @@ function wirePriceListToolbar() {
   if (saveBtn)    saveBtn.addEventListener('click', () => savePriceListHandler('bulk'));
 }
 
-// ---------- Reload (reset offset) ----------
 async function reloadPriceList() {
   priceListOffset = 0;
   priceListDirty = new Set();
@@ -1359,7 +1352,6 @@ async function reloadPriceList() {
   await loadPriceList(false);
 }
 
-// ---------- Load (append atau replace) ----------
 async function loadPriceList(append = false) {
   const tbody = document.getElementById('tbody-price-list');
   if (!tbody) return;
@@ -1391,8 +1383,6 @@ async function loadPriceList(append = false) {
   }
 }
 
-// ---------- Render tabel ----------
-// ---------- Render tabel ----------
 function renderPriceListRows() {
   const tbody = document.getElementById('tbody-price-list');
   if (!tbody) return;
@@ -1458,7 +1448,6 @@ function renderPriceListRows() {
 
   wirePriceListInputs();
 
-  // Info & tombol "Muat lebih banyak"
   const info = document.getElementById('plInfo');
   if (info) info.textContent = `Menampilkan ${Math.min(priceListOffset, priceListTotalCount)} dari ${priceListTotalCount}`;
   const moreBtn = document.getElementById('plMoreBtn');
@@ -1467,7 +1456,6 @@ function renderPriceListRows() {
   updatePriceListSaveBtn();
 }
 
-// ---------- Update tombol Simpan (bulk) ----------
 function updatePriceListSaveBtn() {
   const saveBtn = document.getElementById('plSaveBtn');
   if (!saveBtn) return;
@@ -1477,7 +1465,6 @@ function updatePriceListSaveBtn() {
     : 'Simpan Perubahan';
 }
 
-// ---------- Wire input harga/diskon + tombol per baris ----------
 function wirePriceListInputs() {
   const tbody = document.getElementById('tbody-price-list');
   if (!tbody) return;
@@ -1494,7 +1481,6 @@ function wirePriceListInputs() {
     const row = priceListRowsCache.find(x => Number(x.item_id) === itemId);
     if (!row) return;
 
-    // Snapshot nilai awal (dari cache) untuk deteksi dirty
     const origPrice = row.has_price ? Number(row.price) : null;
     const origDisc  = row.has_price ? Number(row.discount_pct) : 0;
 
@@ -1504,7 +1490,6 @@ function wirePriceListInputs() {
       const price = priceRaw === '' ? null : Number(priceRaw);
       const disc  = discRaw === '' ? 0 : Number(discRaw);
 
-      // Harga efektif (read-only)
       if (effEl) {
         if (price == null) {
           effEl.textContent = '—';
@@ -1516,7 +1501,6 @@ function wirePriceListInputs() {
         }
       }
 
-      // Deteksi dirty (bandingkan dengan snapshot awal)
       const changed = (price !== origPrice) || (disc !== origDisc);
       if (changed) {
         priceListDirty.add(itemId);
@@ -1526,19 +1510,15 @@ function wirePriceListInputs() {
         tr.style.background = '';
       }
 
-      // Update tombol simpan per baris
       if (saveOneBtn) saveOneBtn.disabled = !changed;
-
       updatePriceListSaveBtn();
     };
 
     priceEl?.addEventListener('input', recompute);
     discEl?.addEventListener('input', recompute);
 
-    // Tombol Simpan per baris (U1 hybrid)
     saveOneBtn?.addEventListener('click', () => savePriceListHandler('single', itemId));
 
-    // Tombol Riwayat per baris (U5)
     histBtn?.addEventListener('click', () => {
       priceListHistFilter.itemId = itemId;
       const skuTxt = row.sku || '';
@@ -1553,12 +1533,10 @@ function wirePriceListInputs() {
       reloadPriceListHistory();
     });
 
-    // Tombol Hapus (U4 — hanya untuk manage)
     delBtn?.addEventListener('click', () => deletePriceListItemHandler(itemId, row.sku));
   });
 }
 
-// ---------- Kumpulkan payload perubahan ----------
 function collectPriceListChanges(itemIdOnly = null) {
   const result = [];
   for (const itemId of priceListDirty) {
@@ -1575,7 +1553,6 @@ function collectPriceListChanges(itemIdOnly = null) {
     const price = priceRaw === '' ? 0 : Number(priceRaw);
     const disc  = discRaw === '' ? 0 : Number(discRaw);
 
-    // Validasi dasar
     if (isNaN(price) || price < 0) {
       toast(`Harga tidak valid untuk item ${itemId}`, true);
       return null;
@@ -1590,12 +1567,11 @@ function collectPriceListChanges(itemIdOnly = null) {
   return result;
 }
 
-// ---------- Simpan (bulk / single) ----------
 async function savePriceListHandler(mode = 'bulk', itemIdOnly = null) {
   if (!perms.priceListManage) { toast('Tidak ada akses ubah harga', true); return; }
 
   const lines = collectPriceListChanges(itemIdOnly);
-  if (lines === null) return; // validasi gagal
+  if (lines === null) return;
   if (!lines.length) { toast('Tidak ada perubahan', true); return; }
 
   if (mode === 'bulk' && lines.length > 20) {
@@ -1625,11 +1601,9 @@ async function savePriceListHandler(mode = 'bulk', itemIdOnly = null) {
 
     toast(`✓ Tersimpan: ${savedCount} baris (${changedCount} berubah)`);
 
-    // Clear reason input
     const reasonEl = document.getElementById('plReason');
     if (reasonEl) reasonEl.value = '';
 
-    // Hapus dirty untuk item yang baru disimpan
     if (mode === 'single' && itemIdOnly != null) {
       priceListDirty.delete(itemIdOnly);
       updatePriceListSaveBtn();
@@ -1638,7 +1612,6 @@ async function savePriceListHandler(mode = 'bulk', itemIdOnly = null) {
       updatePriceListSaveBtn();
     }
 
-    // Reload tabel + riwayat
     await Promise.all([reloadPriceList(), reloadPriceListHistory()]);
   } catch (err) {
     toast('Gagal simpan: ' + (err.message || err), true);
@@ -1651,7 +1624,6 @@ async function savePriceListHandler(mode = 'bulk', itemIdOnly = null) {
   }
 }
 
-// ---------- Hapus price list item ----------
 async function deletePriceListItemHandler(itemId, sku) {
   if (!perms.priceListManage) { toast('Tidak ada akses hapus', true); return; }
   const ok = confirm(
@@ -1677,7 +1649,6 @@ async function deletePriceListItemHandler(itemId, sku) {
   }
 }
 
-// ---------- Wire toolbar Card 2 (riwayat) ----------
 function wirePriceListHistory() {
   const searchEl = document.getElementById('plHistSearch');
   const resetBtn = document.getElementById('plHistResetBtn');
@@ -1710,7 +1681,6 @@ function wirePriceListHistory() {
   if (moreBtn) moreBtn.addEventListener('click', () => loadPriceListHistory(true));
 }
 
-// ---------- Reload riwayat (reset offset) ----------
 async function reloadPriceListHistory() {
   priceListHistOffset = 0;
   const tbody = document.getElementById('tbody-price-list-history');
@@ -1722,7 +1692,6 @@ async function reloadPriceListHistory() {
   await loadPriceListHistory(false);
 }
 
-// ---------- Load riwayat ----------
 async function loadPriceListHistory(append = false) {
   const tbody = document.getElementById('tbody-price-list-history');
   if (!tbody) return;
@@ -1744,13 +1713,11 @@ async function loadPriceListHistory(append = false) {
     if (!append && !rows.length) {
       tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#9ca3af;">Belum ada riwayat perubahan</td></tr>';
       if (priceListHistFilter.itemId != null) {
-        // filter per item tapi kosong — beri hint
         tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#9ca3af;">Belum ada riwayat untuk item ini</td></tr>';
       }
       return;
     }
 
-    // Filter client-side by search (RPC tidak punya p_search di handoff)
     let filtered = rows;
     if (priceListHistFilter.search) {
       const q = priceListHistFilter.search.toLowerCase();
@@ -1790,7 +1757,6 @@ async function loadPriceListHistory(append = false) {
   }
 }
 
-// ---------- Cetak form price list (portrait, padat) ----------
 function printPriceListForm() {
   if (!priceListRowsCache.length) {
     toast('Tidak ada data untuk dicetak', true);
@@ -1833,17 +1799,7 @@ function printPriceListForm() {
   @page { size: A4 portrait; margin: 10mm 8mm; }
   html, body { margin: 0; padding: 0; background: #f3f4f6; }
   * { box-sizing: border-box; }
-  .sheet {
-    width: 210mm;
-    min-height: 297mm;
-    margin: 12px auto;
-    padding: 10mm 8mm;
-    background: #fff;
-    box-shadow: 0 1px 4px rgba(0,0,0,.15);
-    font-family: Arial, Helvetica, sans-serif;
-    font-size: 9px;
-    color: #000;
-  }
+  .sheet { width: 210mm; min-height: 297mm; margin: 12px auto; padding: 10mm 8mm; background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,.15); font-family: Arial, Helvetica, sans-serif; font-size: 9px; color: #000; }
   .head { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 6px; }
   .head h1 { font-size: 13px; margin: 0 0 3px; letter-spacing: .3px; }
   .head .meta { font-size: 9px; line-height: 1.4; }
@@ -1851,29 +1807,20 @@ function printPriceListForm() {
   table { width: 100%; border-collapse: collapse; table-layout: fixed; }
   th, td { border: 1px solid #000; padding: 2px 3px; vertical-align: top; font-size: 8.5px; }
   th { background: #eee; font-weight: 700; font-size: 8.5px; }
-  td.c { text-align: center; }
-  td.r { text-align: right; }
+  td.c { text-align: center; } td.r { text-align: right; }
   td.sku { font-family: "Courier New", monospace; font-size: 8px; word-break: break-all; }
-  td.memo { font-size: 8px; }
-  td.new { background: #fff; }
-  thead { display: table-header-group; }
-  tr { page-break-inside: avoid; }
+  td.memo { font-size: 8px; } td.new { background: #fff; }
+  thead { display: table-header-group; } tr { page-break-inside: avoid; }
   .legend { margin-top: 6px; font-size: 8.5px; }
   .sign { display: flex; justify-content: space-between; margin-top: 24px; page-break-inside: avoid; }
   .sign div { text-align: center; width: 40%; font-size: 9px; }
   .sign .line { margin-top: 40px; border-top: 1px solid #000; padding-top: 3px; }
   .actions { position: fixed; top: 8px; right: 8px; z-index: 10; }
   .actions button { padding: 6px 12px; font-size: 13px; cursor: pointer; }
-  @media print {
-    html, body { background: #fff; }
-    .sheet { width: auto; min-height: 0; margin: 0; padding: 0; box-shadow: none; }
-    .actions { display: none; }
-  }
+  @media print { html, body { background: #fff; } .sheet { width: auto; min-height: 0; margin: 0; padding: 0; box-shadow: none; } .actions { display: none; } }
 </style></head>
 <body>
-  <div class="actions">
-    <button onclick="window.print()">🖨️ Cetak</button>
-  </div>
+  <div class="actions"><button onclick="window.print()">🖨️ Cetak</button></div>
   <div class="sheet">
   <div class="head">
     <div>
@@ -1890,43 +1837,23 @@ function printPriceListForm() {
   </div>
   <table>
     <colgroup>
-      <col style="width:24px;">
-      <col style="width:70px;">
-      <col>
-      <col style="width:36px;">
-      <col style="width:64px;">
-      <col style="width:44px;">
-      <col style="width:64px;">
-      <col style="width:64px;">
-      <col style="width:80px;">
+      <col style="width:24px;"><col style="width:70px;"><col><col style="width:36px;">
+      <col style="width:64px;"><col style="width:44px;"><col style="width:64px;">
+      <col style="width:64px;"><col style="width:80px;">
     </colgroup>
     <thead>
       <tr>
-        <th>No</th>
-        <th>SKU</th>
-        <th>Nama</th>
-        <th>Sat.</th>
-        <th>Harga<br>Sekarang</th>
-        <th>Diskon<br>%</th>
-        <th>Harga<br>Efektif</th>
-        <th>Harga Baru</th>
-        <th>Memo</th>
+        <th>No</th><th>SKU</th><th>Nama</th><th>Sat.</th>
+        <th>Harga<br>Sekarang</th><th>Diskon<br>%</th><th>Harga<br>Efektif</th>
+        <th>Harga Baru</th><th>Memo</th>
       </tr>
     </thead>
     <tbody>${rowsHtml}</tbody>
   </table>
-  <div class="legend">
-    Harga belum termasuk PPN. Kolom <b>Harga Baru</b> &amp; <b>Memo</b> diisi manual saat rapat penyesuaian harga.
-  </div>
+  <div class="legend">Harga belum termasuk PPN. Kolom <b>Harga Baru</b> &amp; <b>Memo</b> diisi manual saat rapat penyesuaian harga.</div>
   <div class="sign">
-    <div>
-      <div>Disiapkan oleh</div>
-      <div class="line">(____________________)</div>
-    </div>
-    <div>
-      <div>Disetujui oleh</div>
-      <div class="line">(____________________)</div>
-    </div>
+    <div><div>Disiapkan oleh</div><div class="line">(____________________)</div></div>
+    <div><div>Disetujui oleh</div><div class="line">(____________________)</div></div>
   </div>
   </div><!-- /.sheet -->
 </body></html>`;
@@ -1937,8 +1864,9 @@ function printPriceListForm() {
   w.document.write(html);
   w.document.close();
 }
+
 // ============================================================
-// UNITS (v6s.F2) — dropdown satuan + modal kelola
+// UNITS
 // ============================================================
 async function loadUnitsAndFillDropdown() {
   try {
@@ -2059,7 +1987,6 @@ async function renderUnitsList() {
       </table>
     `;
 
-    // Bind tombol per baris
     wrap.querySelectorAll('[data-unit-id]').forEach(tr => {
       const id = Number(tr.dataset.unitId);
       tr.querySelector('.unit-save-btn')?.addEventListener('click', async () => {
