@@ -125,8 +125,7 @@
               <tr>
                 <th>SKU</th>
                 <th>Nama</th>
-                <th>Satuan</th>
-                <th class="num">Stok</th>
+                <th class="num">Stok (Drum)</th>
                 <th class="num">Reserved</th>
                 <th class="num">Available</th>
                 <th class="num">Min</th>
@@ -161,10 +160,9 @@
 
     </section>
 
-    <!-- ==================== TAB: KOREKSI STOK (Phase 1) ==================== -->
+    <!-- ==================== TAB: KOREKSI STOK ==================== -->
     <section id="tab-adjust" class="tab-panel" style="display:none;">
 
-      <!-- Form koreksi (di-gate permission) -->
       <div class="card" id="stock-adjust-form-card">
         <h3 style="margin-top:0;font-size:16px;">Koreksi Stok per Item</h3>
         <p style="font-size:13px;color:#6b7280;margin-top:0;">
@@ -221,10 +219,9 @@
         </form>
       </div>
 
-      <!-- Riwayat koreksi (read-only untuk semua role inventory) -->
       <div class="card">
         <h3 style="margin-top:0;font-size:16px;">Riwayat Koreksi Stok</h3>
-                <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;align-items:center;">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;align-items:center;">
           <input type="text" id="saSearch" class="input"
                  placeholder="Cari SKU / nama..."
                  style="flex:1;min-width:180px;">
@@ -266,10 +263,9 @@
 
     </section>
 
-    <!-- ==================== TAB: OPNAME MASSAL (Phase 2) ==================== -->
+    <!-- ==================== TAB: OPNAME MASSAL ==================== -->
     <section id="tab-opname" class="tab-panel" style="display:none;">
 
-      <!-- Toolbar atas: buat opname baru + info opname aktif -->
       <div class="card">
         <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
           <div>
@@ -287,7 +283,6 @@
           </div>
         </div>
 
-        <!-- Form buat opname baru (muncul saat tombol diklik) -->
         <div id="opnameNewFormCard" style="display:none;margin-top:16px;padding:12px;background:#f9fafb;border-radius:8px;">
           <form id="form-opname-new">
             <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(160px,1fr));">
@@ -309,14 +304,9 @@
         </div>
       </div>
 
-      <!-- Detail opname aktif -->
       <div class="card" id="opnameDetailCard" style="display:none;">
         <div id="opnameDetailHeader" style="margin-bottom:12px;"></div>
-
-        <!-- Toolbar aksi detail (render sesuai status & permission) -->
         <div id="opnameActionBar" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;"></div>
-
-        <!-- Filter tabel lines -->
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px;">
           <input type="text" id="opnameLineSearch" class="input"
                  placeholder="Cari SKU / nama..."
@@ -326,8 +316,6 @@
             Hanya tampilkan item dengan selisih
           </label>
         </div>
-
-        <!-- Tabel lines -->
         <div class="table-wrap">
           <table>
             <thead>
@@ -352,7 +340,6 @@
         </div>
       </div>
 
-      <!-- Riwayat opname -->
       <div class="card">
         <h3 style="margin-top:0;font-size:16px;">Riwayat Opname</h3>
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px;">
@@ -398,10 +385,9 @@
 
     </section>
 
-    <!-- ==================== TAB: PRICE LIST (Phase 3) ==================== -->
+    <!-- ==================== TAB: PRICE LIST ==================== -->
     <section id="tab-pricelist" class="tab-panel" style="display:none;">
 
-      <!-- Card 1: Price List -->
       <div class="card">
         <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;flex-wrap:wrap;">
           <div>
@@ -443,7 +429,6 @@
           </table>
         </div>
 
-        <!-- Aksi simpan (di bawah tabel) -->
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:16px;padding-top:12px;border-top:1px solid #e5e7eb;">
           <input type="text" id="plReason" class="input" maxlength="200" placeholder="Alasan perubahan (opsional)" style="flex:1;min-width:200px;">
           <button type="button" class="btn btn-primary" id="plSaveBtn" disabled style="padding:8px 16px;font-size:13px;">Simpan Perubahan</button>
@@ -454,7 +439,6 @@
         </div>
       </div>
 
-      <!-- Card 2: Riwayat Perubahan -->
       <div class="card">
         <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
           <h3 style="margin:0;font-size:16px;">Riwayat Perubahan Harga</h3>
@@ -498,7 +482,6 @@
                 style="background:none;border:none;font-size:22px;cursor:pointer;color:#6b7280;padding:0 6px;">×</button>
       </div>
 
-      <!-- Form tambah unit -->
       <div style="background:#f9fafb;padding:12px;border-radius:8px;margin-bottom:12px;">
         <div style="display:grid;grid-template-columns:1fr 2fr 80px auto;gap:8px;align-items:end;">
           <div>
@@ -523,7 +506,6 @@
         </div>
       </div>
 
-      <!-- List unit -->
       <div id="unitsList" style="font-size:13px;">
         <div style="color:#9ca3af;text-align:center;padding:12px;">Memuat...</div>
       </div>
