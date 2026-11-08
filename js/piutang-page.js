@@ -60,6 +60,19 @@ function downloadCSV(filename, headers, rows) {
   document.body.appendChild(a); a.click();
   document.body.removeChild(a); URL.revokeObjectURL(url);
 }
+// parse angka "1.234.567" / "1234567" / "1.234.567,89"
+function parseNumberId(s) {
+  if (s === null || s === undefined) return NaN;
+  let t = String(s).trim();
+  if (!t) return NaN;
+  // kalau ada koma desimal → hapus titik ribuan, ganti koma jadi titik
+  if (t.includes(',')) {
+    t = t.replace(/\./g, '').replace(',', '.');
+  } else {
+    t = t.replace(/\./g, '');
+  }
+  return Number(t);
+}
 
 // ============================================================
 // STATE
@@ -72,7 +85,15 @@ const state = {
   total: 0,
   canExport: false,
   canViewInvoice: false,
-  canViewAging: false
+  canViewAging: false,
+  canViewPayment: false,
+  canCreatePayment: false,
+  canDeletePayment: false,
+  // state tab pembayaran
+  payFilters: { search: '', from: '', to: '' },
+  payInvoicesCache: [],   // list invoice untuk dropdown
+  selectedInvoice: null,  // invoice terpilih (objek)
+  paymentsLoaded: false
 };
 
 // ============================================================
@@ -91,6 +112,12 @@ function bindTabs() {
         await loadInvoices();
       } else if (state.activeTab === 'aging' && state.canViewAging) {
         await loadAging();
+      } else if (state.activeTab === 'payment' && state.canViewPayment) {
+        if (!state.paymentsLoaded) {
+          await loadPaymentInvoices();
+          state.paymentsLoaded = true;
+        }
+        await loadPayments();
       }
     });
   });
@@ -270,15 +297,21 @@ function renderPagination() {
 }
 
 // ============================================================
-// DETAIL MODAL
+// DETAIL MODAL (updated: tambah section Pembayaran)
 // ============================================================
 async function openDetail(invoiceId) {
   const modal = document.getElementById('detailModal');
   const headerEl = document.getElementById('detailHeader');
   const linesEl = document.getElementById('detailLines');
+  const paySection = document.getElementById('detailPaymentsSection');
+  const payBody = document.getElementById('detailPaymentsBody');
+  const paySummary = document.getElementById('detailPaymentsSummary');
   modal.style.display = 'flex';
   headerEl.innerHTML = '<div style="color:#9ca3af;">Memuat...</div>';
   linesEl.innerHTML = '';
+  paySection.style.display = 'none';
+  payBody.innerHTML = '';
+  paySummary.innerHTML = '';
 
   const { data: inv, error: e1 } = await supabase
     .from('historical_invoices')
@@ -322,30 +355,287 @@ async function openDetail(invoiceId) {
   }
   if (!lines || !lines.length) {
     linesEl.innerHTML = '<tr><td colspan="9" style="text-align:center;color:#9ca3af;padding:8px;">Tidak ada line.</td></tr>';
-    return;
+  } else {
+    linesEl.innerHTML = lines.map(l => {
+      const isi = l.packaging_isi_kg
+        ? fmt(l.packaging_isi_kg) + ' kg'
+        : (l.packaging_isi_ltr ? fmt(l.packaging_isi_ltr) + ' ltr' : '—');
+      return `
+        <tr>
+          <td>${l.line_no}</td>
+          <td style="font-family:monospace;font-size:12px;">${esc(l.item?.sku || '—')}</td>
+          <td>${esc(l.display_name || l.item?.name || '—')}</td>
+          <td class="num">${fmtInt(l.qty)}</td>
+          <td class="num">${isi}</td>
+          <td class="num">${fmt(l.unit_price)}</td>
+          <td class="num">${fmt(l.line_total)}</td>
+          <td class="num">${fmt(l.ppn_amount_idr)}</td>
+          <td style="font-size:12px;color:#6b7280;">${esc(l.remark || '')}</td>
+        </tr>
+      `;
+    }).join('');
   }
-  linesEl.innerHTML = lines.map(l => {
-    const isi = l.packaging_isi_kg
-      ? fmt(l.packaging_isi_kg) + ' kg'
-      : (l.packaging_isi_ltr ? fmt(l.packaging_isi_ltr) + ' ltr' : '—');
-    return `
+
+  // ---- Section Pembayaran ----
+  const { data: pays, error: e3 } = await supabase
+    .from('historical_invoice_payments')
+    .select(`id, payment_date, amount_idr, method, reference_no, note, created_at, created_by`)
+    .eq('invoice_id', invoiceId)
+    .order('payment_date', { ascending: true })
+    .order('id', { ascending: true });
+
+  if (!e3 && pays && pays.length) {
+    paySection.style.display = 'block';
+    const totalManual = pays.reduce((s, p) => s + Number(p.amount_idr || 0), 0);
+    const partial = Number(inv.partial_payment_idr || 0);
+    const totalPaid = partial + totalManual;
+    const sisa = Number(inv.total_idr || 0) - totalPaid;
+
+    payBody.innerHTML = pays.map(p => `
       <tr>
-        <td>${l.line_no}</td>
-        <td style="font-family:monospace;font-size:12px;">${esc(l.item?.sku || '—')}</td>
-        <td>${esc(l.display_name || l.item?.name || '—')}</td>
-        <td class="num">${fmtInt(l.qty)}</td>
-        <td class="num">${isi}</td>
-        <td class="num">${fmt(l.unit_price)}</td>
-        <td class="num">${fmt(l.line_total)}</td>
-        <td class="num">${fmt(l.ppn_amount_idr)}</td>
-        <td style="font-size:12px;color:#6b7280;">${esc(l.remark || '')}</td>
+        <td>${fmtDate(p.payment_date)}</td>
+        <td class="num">${fmt(p.amount_idr)}</td>
+        <td>${esc(p.method)}</td>
+        <td style="font-size:12px;">${esc(p.reference_no || '')}</td>
+        <td style="font-size:12px;">${esc(p.note || '')}</td>
+        <td style="font-size:11px;color:#6b7280;">${p.created_at ? new Date(p.created_at).toLocaleString('id-ID') : '—'}</td>
       </tr>
+    `).join('');
+
+    paySummary.innerHTML = `
+      <div style="display:flex;gap:16px;flex-wrap:wrap;background:#f9fafb;padding:10px 12px;border-radius:8px;">
+        <div><span style="color:#6b7280;">Total dibayar:</span> <strong>${fmt(totalPaid)}</strong></div>
+        <div><span style="color:#6b7280;">Excel (Titip):</span> ${fmt(partial)}</div>
+        <div><span style="color:#6b7280;">Manual:</span> ${fmt(totalManual)}</div>
+        <div><span style="color:#6b7280;">Sisa:</span> <strong style="color:${sisa > 0 ? '#dc2626' : '#059669'};">${fmt(sisa)}</strong></div>
+      </div>
     `;
-  }).join('');
+  } else if (pays && pays.length === 0) {
+    // tetap tampilkan kalau partial_payment_idr > 0
+    const partial = Number(inv.partial_payment_idr || 0);
+    if (partial > 0) {
+      paySection.style.display = 'block';
+      payBody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#9ca3af;padding:8px;">Belum ada pembayaran manual (hanya titip Excel).</td></tr>';
+      paySummary.innerHTML = `<div style="background:#f9fafb;padding:10px 12px;border-radius:8px;">
+        <span style="color:#6b7280;">Excel (Titip):</span> <strong>${fmt(partial)}</strong> ·
+        <span style="color:#6b7280;">Sisa:</span> <strong style="color:#dc2626;">${fmt(Number(inv.total_idr||0) - partial)}</strong>
+      </div>`;
+    }
+  }
 }
 
 function closeDetail() {
   document.getElementById('detailModal').style.display = 'none';
+}
+
+// ============================================================
+// TAB PEMBAYARAN
+// ============================================================
+async function loadPaymentInvoices() {
+  // hanya invoice posted/partial (belum lunas)
+  const { data, error } = await supabase
+    .from('historical_invoices')
+    .select(`id, invoice_no, partner:partners!inner(name), total_idr, currency`)
+    .in('status', ['posted','partial'])
+    .order('invoice_no', { ascending: true });
+
+  if (error) { console.error(error); return; }
+  state.payInvoicesCache = data || [];
+
+  const sel = document.getElementById('pInvoice');
+  sel.innerHTML = '<option value="">— pilih invoice —</option>' +
+    state.payInvoicesCache.map(i =>
+      `<option value="${i.id}">${esc(i.invoice_no)} — ${esc(i.partner?.name || '')} (${esc(i.currency)})</option>`
+    ).join('');
+}
+
+async function onInvoiceSelect(invoiceId) {
+  if (!invoiceId) {
+    state.selectedInvoice = null;
+    document.getElementById('paymentSummaryCard').style.display = 'none';
+    return;
+  }
+  const { data: inv, error } = await supabase
+    .from('historical_invoices')
+    .select(`id, invoice_no, total_idr, partial_payment_idr, manual_payment_idr, status, partner:partners!inner(name)`)
+    .eq('id', invoiceId)
+    .single();
+  if (error) { toast('Gagal memuat invoice: ' + error.message, true); return; }
+  state.selectedInvoice = inv;
+
+  const total = Number(inv.total_idr || 0);
+  const partial = Number(inv.partial_payment_idr || 0);
+  const manual = Number(inv.manual_payment_idr || 0);
+  const sisa = total - partial - manual;
+
+  document.getElementById('psInvNo').textContent = inv.invoice_no;
+  document.getElementById('psPartner').textContent = inv.partner?.name || '';
+  document.getElementById('psTotal').textContent = 'Rp ' + fmt(total);
+  document.getElementById('psPartial').textContent = 'Rp ' + fmt(partial);
+  document.getElementById('psManual').textContent = 'Rp ' + fmt(manual);
+  document.getElementById('psSisa').textContent = 'Rp ' + fmt(sisa);
+  document.getElementById('psStatus').innerHTML = statusBadge(inv.status);
+  document.getElementById('paymentSummaryCard').style.display = 'block';
+
+  // prefill amount dengan sisa (kalau > 0)
+  document.getElementById('pAmount').value = sisa > 0 ? String(Math.round(sisa)) : '';
+}
+
+async function loadPayments() {
+  const tbody = document.getElementById('tbody-payments');
+  tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:#9ca3af;padding:16px;">Memuat...</td></tr>';
+
+  let q = supabase
+    .from('historical_invoice_payments')
+    .select(`
+      id, payment_date, amount_idr, method, reference_no, note, created_at,
+      invoice:historical_invoices!inner(
+        id, invoice_no,
+        partner:partners!inner(name)
+      )
+    `)
+    .order('payment_date', { ascending: false })
+    .order('id', { ascending: false })
+    .limit(500);
+
+  const pf = state.payFilters;
+  if (pf.from) q = q.gte('payment_date', pf.from);
+  if (pf.to) q = q.lte('payment_date', pf.to);
+  if (pf.search) q = q.ilike('invoice.invoice_no', `%${pf.search}%`);
+
+  const { data, error } = await q;
+  if (error) {
+    tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;color:#dc2626;padding:16px;">Error: ${esc(error.message)}</td></tr>`;
+    return;
+  }
+  renderPaymentsTable(data || []);
+}
+
+function renderPaymentsTable(rows) {
+  const tbody = document.getElementById('tbody-payments');
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:#9ca3af;padding:16px;">Belum ada pembayaran.</td></tr>';
+    document.getElementById('payTotalInfo').textContent = '';
+    return;
+  }
+  const total = rows.reduce((s, r) => s + Number(r.amount_idr || 0), 0);
+
+  tbody.innerHTML = rows.map(r => `
+    <tr>
+      <td style="font-family:monospace;font-size:12px;">${esc(r.invoice?.invoice_no || '—')}</td>
+      <td>${esc(r.invoice?.partner?.name || '—')}</td>
+      <td>${fmtDate(r.payment_date)}</td>
+      <td class="num" style="font-weight:600;">${fmt(r.amount_idr)}</td>
+      <td>${esc(r.method)}</td>
+      <td style="font-size:12px;">${esc(r.reference_no || '')}</td>
+      <td style="font-size:12px;">${esc(r.note || '')}</td>
+      <td style="font-size:11px;color:#6b7280;">${r.created_at ? new Date(r.created_at).toLocaleString('id-ID') : '—'}</td>
+      <td>
+        ${state.canDeletePayment
+          ? `<button type="button" class="btn btn-danger" data-del-pay="${r.id}" style="padding:4px 10px;font-size:12px;">Hapus</button>`
+          : '—'}
+      </td>
+    </tr>
+  `).join('');
+
+  document.getElementById('payTotalInfo').textContent =
+    `Menampilkan ${rows.length} pembayaran · Total: Rp ${fmt(total)}`;
+
+  tbody.querySelectorAll('button[data-del-pay]').forEach(btn => {
+    btn.addEventListener('click', () => deletePayment(Number(btn.dataset.delPay)));
+  });
+}
+
+async function submitPayment() {
+  const invoiceId = document.getElementById('pInvoice').value;
+  const date      = document.getElementById('pDate').value;
+  const amountRaw = document.getElementById('pAmount').value;
+  const method    = document.getElementById('pMethod').value;
+  const ref       = document.getElementById('pRef').value.trim() || null;
+  const note      = document.getElementById('pNote').value.trim() || null;
+
+  if (!invoiceId) { toast('Pilih invoice dulu', true); return; }
+  if (!date)      { toast('Tanggal wajib diisi', true); return; }
+  const amount = parseNumberId(amountRaw);
+  if (!amount || amount <= 0) { toast('Jumlah tidak valid', true); return; }
+
+  const btn = document.getElementById('pSaveBtn');
+  btn.disabled = true;
+  btn.textContent = 'Menyimpan...';
+
+  const { data, error } = await supabase.rpc('add_historical_payment', {
+    p_invoice_id: Number(invoiceId),
+    p_payment_date: date,
+    p_amount_idr: amount,
+    p_method: method,
+    p_reference_no: ref,
+    p_note: note
+  });
+
+  btn.disabled = false;
+  btn.textContent = 'Simpan';
+
+  if (error) { toast('Gagal: ' + error.message, true); return; }
+
+  toast('✓ Pembayaran tersimpan');
+  // reset form
+  document.getElementById('pAmount').value = '';
+  document.getElementById('pRef').value = '';
+  document.getElementById('pNote').value = '';
+  // refresh ringkasan + riwayat
+  if (state.selectedInvoice) {
+    await onInvoiceSelect(state.selectedInvoice.id);
+  }
+  await loadPayments();
+  // refresh dropdown (kalau invoice jadi lunas, hilang dari list)
+  await loadPaymentInvoices();
+}
+
+async function deletePayment(paymentId) {
+  if (!confirm('Hapus pembayaran ini? Status invoice akan dihitung ulang.')) return;
+  const { error } = await supabase.rpc('delete_historical_payment', { p_payment_id: paymentId });
+  if (error) { toast('Gagal: ' + error.message, true); return; }
+  toast('✓ Pembayaran dihapus');
+  await loadPayments();
+  await loadPaymentInvoices();
+  if (state.selectedInvoice) {
+    await onInvoiceSelect(state.selectedInvoice.id);
+  }
+}
+
+function bindPaymentTab() {
+  const sel = document.getElementById('pInvoice');
+  sel.addEventListener('change', () => onInvoiceSelect(sel.value));
+
+  document.getElementById('pSaveBtn').addEventListener('click', submitPayment);
+
+  // filter riwayat
+  let timer;
+  document.getElementById('paySearch').addEventListener('input', () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      state.payFilters.search = document.getElementById('paySearch').value;
+      loadPayments();
+    }, 350);
+  });
+  document.getElementById('payFrom').addEventListener('change', () => {
+    state.payFilters.from = document.getElementById('payFrom').value;
+    loadPayments();
+  });
+  document.getElementById('payTo').addEventListener('change', () => {
+    state.payFilters.to = document.getElementById('payTo').value;
+    loadPayments();
+  });
+  document.getElementById('payResetBtn').addEventListener('click', () => {
+    state.payFilters = { search:'', from:'', to:'' };
+    document.getElementById('paySearch').value = '';
+    document.getElementById('payFrom').value = '';
+    document.getElementById('payTo').value = '';
+    loadPayments();
+  });
+
+  // default tanggal = hari ini
+  document.getElementById('pDate').value = new Date().toISOString().slice(0,10);
 }
 
 // ============================================================
@@ -385,7 +675,7 @@ async function loadAging() {
 }
 
 // ============================================================
-// EXPORT CSV
+// EXPORT CSV (tidak berubah)
 // ============================================================
 async function exportInvoices() {
   toast('Menyiapkan export invoice...');
@@ -474,7 +764,7 @@ async function exportLines() {
 }
 
 // ============================================================
-// BIND FILTER
+// BIND FILTER (invoice)
 // ============================================================
 function bindFilters() {
   const bind = (id, key) => {
@@ -527,18 +817,25 @@ function bindFilters() {
   await preloadPermissions();
   await renderNav(document.getElementById('mainNav'), 'piutang');
 
-  // Cek permission tab
-  state.canViewInvoice = await hasPermission('historical.view');
-  state.canViewAging   = await hasPermission('reports.aging_piutang');
-  state.canExport      = await hasPermission('historical.export');
+  // Cek permission
+  state.canViewInvoice   = await hasPermission('historical.view');
+  state.canViewAging     = await hasPermission('reports.aging_piutang');
+  state.canExport        = await hasPermission('historical.export');
+  state.canViewPayment   = await hasPermission('historical.view'); // semua viewer bisa lihat tab payment
+  state.canCreatePayment = await hasPermission('historical.payment.create');
+  state.canDeletePayment = await hasPermission('historical.payment.delete');
 
   // Sembunyikan tab yang tidak berhak
-  const tabPerms = { invoice: state.canViewInvoice, aging: state.canViewAging };
+  const tabPerms = {
+    invoice: state.canViewInvoice,
+    payment: state.canViewPayment,
+    aging:   state.canViewAging
+  };
   let firstAllowed = null;
   document.querySelectorAll('.tabs button').forEach(btn => {
     const tab = btn.dataset.tab;
-    if (tab === 'payment' || tab === 'commission') {
-      // placeholder — selalu tampil (tidak butuh permission)
+    if (tab === 'commission') {
+      // placeholder — selalu tampil
       if (!firstAllowed) firstAllowed = tab;
       return;
     }
@@ -560,6 +857,13 @@ function bindFilters() {
 
   bindTabs();
   bindFilters();
+  bindPaymentTab();
+
+  // Gate form create
+  const formCard = document.getElementById('paymentFormCard');
+  if (state.canCreatePayment) formCard.style.display = 'block';
+  else formCard.style.display = 'none';
+
   document.getElementById('exportInvBtn').style.display = state.canExport ? 'inline-block' : 'none';
   document.getElementById('exportLineBtn').style.display = state.canExport ? 'inline-block' : 'none';
   document.getElementById('exportInvBtn').addEventListener('click', exportInvoices);
@@ -573,4 +877,9 @@ function bindFilters() {
 
   if (state.activeTab === 'invoice') await loadInvoices();
   else if (state.activeTab === 'aging') await loadAging();
+  else if (state.activeTab === 'payment' && state.canViewPayment) {
+    await loadPaymentInvoices();
+    state.paymentsLoaded = true;
+    await loadPayments();
+  }
 })();
