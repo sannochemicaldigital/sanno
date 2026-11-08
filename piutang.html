@@ -29,7 +29,6 @@
 
     <!-- ==================== TAB: INVOICE ==================== -->
     <section id="tab-invoice" class="tab-panel">
-      <!-- Ringkasan -->
       <div class="card">
         <div style="display:flex;gap:24px;flex-wrap:wrap;align-items:center;">
           <div>
@@ -55,7 +54,6 @@
         </div>
       </div>
 
-      <!-- Daftar invoice -->
       <div class="card">
         <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
           <h3 style="margin:0;font-size:16px;">Daftar Invoice Historis</h3>
@@ -118,11 +116,111 @@
       </div>
     </section>
 
-    <!-- ==================== TAB: PEMBAYARAN (placeholder) ==================== -->
+    <!-- ==================== TAB: PEMBAYARAN ==================== -->
     <section id="tab-payment" class="tab-panel" style="display:none;">
+      <!-- Card 1: Form tambah pembayaran (gate historical.payment.create) -->
+      <div class="card" id="paymentFormCard" style="display:none;">
+        <h3 style="margin-top:0;font-size:16px;">Tambah Pembayaran</h3>
+        <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;">
+          <div class="form-row" style="flex:2;min-width:260px;margin:0;">
+            <label for="pInvoice">Invoice</label>
+            <select id="pInvoice" class="input">
+              <option value="">— pilih invoice —</option>
+            </select>
+          </div>
+          <div class="form-row" style="flex:1;min-width:140px;margin:0;">
+            <label for="pDate">Tanggal</label>
+            <input type="date" id="pDate" class="input">
+          </div>
+          <div class="form-row" style="flex:1;min-width:140px;margin:0;">
+            <label for="pAmount">Jumlah (IDR)</label>
+            <input type="text" id="pAmount" class="input" placeholder="0" inputmode="numeric">
+          </div>
+          <div class="form-row" style="flex:1;min-width:120px;margin:0;">
+            <label for="pMethod">Metode</label>
+            <select id="pMethod" class="input">
+              <option value="transfer">Transfer</option>
+              <option value="cash">Cash</option>
+              <option value="giro">Giro</option>
+              <option value="lainnya">Lainnya</option>
+            </select>
+          </div>
+          <div class="form-row" style="flex:1;min-width:140px;margin:0;">
+            <label for="pRef">No. Referensi</label>
+            <input type="text" id="pRef" class="input" placeholder="(opsional)">
+          </div>
+          <div class="form-row" style="flex:2;min-width:180px;margin:0;">
+            <label for="pNote">Catatan</label>
+            <input type="text" id="pNote" class="input" placeholder="(opsional)">
+          </div>
+          <div style="display:flex;gap:8px;">
+            <button type="button" class="btn btn-primary" id="pSaveBtn">Simpan</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Card 2: Ringkasan invoice terpilih -->
+      <div class="card" id="paymentSummaryCard" style="display:none;">
+        <h3 style="margin-top:0;font-size:16px;">Ringkasan Invoice</h3>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;">
+          <div>
+            <div style="font-size:11px;color:#6b7280;text-transform:uppercase;">Invoice</div>
+            <div style="font-weight:600;font-family:monospace;" id="psInvNo">—</div>
+            <div style="font-size:12px;color:#6b7280;" id="psPartner">—</div>
+          </div>
+          <div>
+            <div style="font-size:11px;color:#6b7280;text-transform:uppercase;">Total Invoice</div>
+            <div style="font-weight:600;" id="psTotal">—</div>
+          </div>
+          <div>
+            <div style="font-size:11px;color:#6b7280;text-transform:uppercase;">Excel (Titip)</div>
+            <div id="psPartial">—</div>
+          </div>
+          <div>
+            <div style="font-size:11px;color:#6b7280;text-transform:uppercase;">Manual</div>
+            <div id="psManual">—</div>
+          </div>
+          <div>
+            <div style="font-size:11px;color:#6b7280;text-transform:uppercase;">Sisa</div>
+            <div style="font-weight:600;color:#dc2626;" id="psSisa">—</div>
+          </div>
+          <div>
+            <div style="font-size:11px;color:#6b7280;text-transform:uppercase;">Status</div>
+            <div id="psStatus">—</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Card 3: Riwayat pembayaran -->
       <div class="card">
-        <h3 style="margin-top:0;font-size:16px;">Pembayaran Piutang</h3>
-        <p style="font-size:13px;color:#6b7280;">Modul pembayaran piutang akan tersedia di fase berikutnya.</p>
+        <h3 style="margin-top:0;font-size:16px;">Riwayat Pembayaran</h3>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px;">
+          <input type="text" id="paySearch" class="input" placeholder="Cari invoice / partner..." style="flex:1;min-width:200px;">
+          <input type="date" id="payFrom" class="input" title="Dari tanggal">
+          <input type="date" id="payTo" class="input" title="Sampai tanggal">
+          <button type="button" class="btn btn-secondary" id="payResetBtn" style="padding:8px 14px;font-size:13px;">Reset</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Invoice</th>
+                <th>Partner</th>
+                <th>Tanggal</th>
+                <th class="num">Jumlah (IDR)</th>
+                <th>Metode</th>
+                <th>Ref</th>
+                <th>Catatan</th>
+                <th>Oleh</th>
+                <th>Aksi</th>
+              </tr>
+            </thead>
+            <tbody id="tbody-payments">
+              <tr><td colspan="9" style="text-align:center;color:#9ca3af;padding:16px;">Pilih tab Pembayaran untuk memuat.</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div style="margin-top:12px;font-size:12px;color:#6b7280;" id="payTotalInfo"></div>
       </div>
     </section>
 
@@ -185,6 +283,27 @@
           </thead>
           <tbody id="detailLines"></tbody>
         </table>
+      </div>
+
+      <!-- Section Pembayaran di modal detail -->
+      <div id="detailPaymentsSection" style="margin-top:16px;display:none;">
+        <h4 style="margin:0 0 8px;font-size:14px;">Pembayaran</h4>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Tanggal</th>
+                <th class="num">Jumlah (IDR)</th>
+                <th>Metode</th>
+                <th>Ref</th>
+                <th>Catatan</th>
+                <th>Oleh</th>
+              </tr>
+            </thead>
+            <tbody id="detailPaymentsBody"></tbody>
+          </table>
+        </div>
+        <div id="detailPaymentsSummary" style="margin-top:8px;font-size:13px;"></div>
       </div>
     </div>
   </div>
