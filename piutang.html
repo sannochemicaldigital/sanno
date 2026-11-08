@@ -118,7 +118,7 @@
 
     <!-- ==================== TAB: PEMBAYARAN ==================== -->
     <section id="tab-payment" class="tab-panel" style="display:none;">
-      <!-- Card 1: Form tambah pembayaran (gate historical.payment.create) -->
+      <!-- Card 1: Form tambah pembayaran -->
       <div class="card" id="paymentFormCard" style="display:none;">
         <h3 style="margin-top:0;font-size:16px;">Tambah Pembayaran</h3>
         <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;">
@@ -143,6 +143,12 @@
               <option value="cash">Cash</option>
               <option value="giro">Giro</option>
               <option value="lainnya">Lainnya</option>
+            </select>
+          </div>
+          <div class="form-row" id="pAccountWrap" style="flex:2;min-width:200px;margin:0;">
+            <label for="pAccount">Rekening (sumber auto-jurnal)</label>
+            <select id="pAccount" class="input">
+              <option value="">— pilih rekening —</option>
             </select>
           </div>
           <div class="form-row" style="flex:1;min-width:140px;margin:0;">
@@ -209,14 +215,15 @@
                 <th>Tanggal</th>
                 <th class="num">Jumlah (IDR)</th>
                 <th>Metode</th>
+                <th>Rekening</th>
                 <th>Ref</th>
-                <th>Catatan</th>
                 <th>Oleh</th>
+                <th>Jurnal</th>
                 <th>Aksi</th>
               </tr>
             </thead>
             <tbody id="tbody-payments">
-              <tr><td colspan="9" style="text-align:center;color:#9ca3af;padding:16px;">Pilih tab Pembayaran untuk memuat.</td></tr>
+              <tr><td colspan="10" style="text-align:center;color:#9ca3af;padding:16px;">Pilih tab Pembayaran untuk memuat.</td></tr>
             </tbody>
           </table>
         </div>
@@ -285,7 +292,6 @@
         </table>
       </div>
 
-      <!-- Section Pembayaran di modal detail -->
       <div id="detailPaymentsSection" style="margin-top:16px;display:none;">
         <h4 style="margin:0 0 8px;font-size:14px;">Pembayaran</h4>
         <div class="table-wrap">
@@ -295,6 +301,7 @@
                 <th>Tanggal</th>
                 <th class="num">Jumlah (IDR)</th>
                 <th>Metode</th>
+                <th>Rekening</th>
                 <th>Ref</th>
                 <th>Catatan</th>
                 <th>Oleh</th>
