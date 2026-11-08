@@ -9,6 +9,7 @@ import { supabase } from './supabase-client.js';
 // UTIL
 // ============================================================
 const fmt = n => 'Rp ' + Number(n || 0).toLocaleString('id-ID');
+const fmtShort = n => 'Rp ' + Number(n || 0).toLocaleString('id-ID', { maximumFractionDigits: 0 });
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({
   '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
 }[c]));
@@ -29,7 +30,6 @@ function toast(msg, isError = false) {
     const user = await requireAuth();
     if (!user) return;
 
-    // Paralel: cek akses + preload permission
     const [role] = await Promise.all([
       requirePageAccess('dashboard'),
       preloadPermissions()
@@ -39,7 +39,6 @@ function toast(msg, isError = false) {
     document.getElementById('logoutBtn').addEventListener('click', logout);
     document.getElementById('roleBadge').textContent = `(${role})`;
 
-    // Render nav (permission sudah di cache)
     await renderNav(document.getElementById('mainNav'), 'dashboard');
 
     const cards = document.getElementById('cards');
@@ -94,7 +93,6 @@ async function renderGudangDashboard(container) {
       <div style="font-size:22px;font-weight:600;color:#b91c1c;">${outOfStock.length}</div>
     </div>`;
 
-  // DO pending — hanya kalau punya permission delivery.view
   if (await hasPermission('delivery.view')) {
     const { data: doPending } = await supabase
       .from('delivery_orders')
@@ -207,6 +205,37 @@ async function renderKasirDashboard(container) {
 }
 
 // ============================================================
+// PIUTANG CARD (dari view piutang_summary)
+// ============================================================
+async function renderPiutangCard() {
+  const { data, error } = await supabase
+    .from('piutang_summary')
+    .select('*')
+    .single();
+  if (error) {
+    console.warn('[piutang_summary] error:', error.message);
+    return '';
+  }
+  if (!data) return '';
+
+  const overdue = Number(data.total_overdue_idr || 0);
+  const overdueColor = overdue > 0 ? '#b91c1c' : '#059669';
+
+  return `
+    <div class="card" style="border-left:4px solid #0891b2;">
+      <div style="font-size:12px;color:#666;margin-bottom:6px;">Total Piutang (Sisa)</div>
+      <div style="font-size:22px;font-weight:700;color:#0891b2;">${fmtShort(data.total_sisa_idr)}</div>
+      <div style="font-size:11px;color:#6b7280;margin-top:6px;line-height:1.5;">
+        ${data.count_open} invoice terbuka · ${data.count_paid} lunas<br>
+        Overdue: <strong style="color:${overdueColor};">${fmtShort(overdue)}</strong>
+      </div>
+      <div style="font-size:10px;color:#9ca3af;margin-top:6px;">
+        Total invoice: ${fmtShort(data.total_invoice_idr)}
+      </div>
+    </div>`;
+}
+
+// ============================================================
 // FINANCE / SUPERVISOR / ADMIN / VIEWER
 // ============================================================
 async function renderFinanceDashboard(container) {
@@ -234,6 +263,12 @@ async function renderFinanceDashboard(container) {
   if (await hasPermission('finance.hutang.view')) {
     cards.push(card('Hutang Bank', map.hutang_bank?.balance));
     cards.push(card('Hutang Dagang', map.hutang_dagang?.balance));
+  }
+
+  // Card Total Piutang (dari historical_invoices via view piutang_summary)
+  if (await hasPermission('historical.view')) {
+    const piutangHtml = await renderPiutangCard();
+    if (piutangHtml) cards.push(piutangHtml);
   }
 
   container.innerHTML = cards.length

@@ -60,17 +60,12 @@ function downloadCSV(filename, headers, rows) {
   document.body.appendChild(a); a.click();
   document.body.removeChild(a); URL.revokeObjectURL(url);
 }
-// parse angka "1.234.567" / "1234567" / "1.234.567,89"
 function parseNumberId(s) {
   if (s === null || s === undefined) return NaN;
   let t = String(s).trim();
   if (!t) return NaN;
-  // kalau ada koma desimal → hapus titik ribuan, ganti koma jadi titik
-  if (t.includes(',')) {
-    t = t.replace(/\./g, '').replace(',', '.');
-  } else {
-    t = t.replace(/\./g, '');
-  }
+  if (t.includes(',')) t = t.replace(/\./g, '').replace(',', '.');
+  else t = t.replace(/\./g, '');
   return Number(t);
 }
 
@@ -89,11 +84,11 @@ const state = {
   canViewPayment: false,
   canCreatePayment: false,
   canDeletePayment: false,
-  // state tab pembayaran
   payFilters: { search: '', from: '', to: '' },
-  payInvoicesCache: [],   // list invoice untuk dropdown
-  selectedInvoice: null,  // invoice terpilih (objek)
-  paymentsLoaded: false
+  payInvoicesCache: [],
+  selectedInvoice: null,
+  paymentsLoaded: false,
+  bankAccounts: []
 };
 
 // ============================================================
@@ -297,7 +292,7 @@ function renderPagination() {
 }
 
 // ============================================================
-// DETAIL MODAL (updated: tambah section Pembayaran)
+// DETAIL MODAL
 // ============================================================
 async function openDetail(invoiceId) {
   const modal = document.getElementById('detailModal');
@@ -376,10 +371,10 @@ async function openDetail(invoiceId) {
     }).join('');
   }
 
-  // ---- Section Pembayaran ----
+  // Section Pembayaran
   const { data: pays, error: e3 } = await supabase
     .from('historical_invoice_payments')
-    .select(`id, payment_date, amount_idr, method, reference_no, note, created_at, created_by`)
+    .select(`id, payment_date, amount_idr, method, reference_no, note, created_at, created_by, account:accounts(code, name)`)
     .eq('invoice_id', invoiceId)
     .order('payment_date', { ascending: true })
     .order('id', { ascending: true });
@@ -396,6 +391,7 @@ async function openDetail(invoiceId) {
         <td>${fmtDate(p.payment_date)}</td>
         <td class="num">${fmt(p.amount_idr)}</td>
         <td>${esc(p.method)}</td>
+        <td style="font-size:12px;">${esc(p.account?.code || '')} ${esc(p.account?.name || '')}</td>
         <td style="font-size:12px;">${esc(p.reference_no || '')}</td>
         <td style="font-size:12px;">${esc(p.note || '')}</td>
         <td style="font-size:11px;color:#6b7280;">${p.created_at ? new Date(p.created_at).toLocaleString('id-ID') : '—'}</td>
@@ -411,11 +407,10 @@ async function openDetail(invoiceId) {
       </div>
     `;
   } else if (pays && pays.length === 0) {
-    // tetap tampilkan kalau partial_payment_idr > 0
     const partial = Number(inv.partial_payment_idr || 0);
     if (partial > 0) {
       paySection.style.display = 'block';
-      payBody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#9ca3af;padding:8px;">Belum ada pembayaran manual (hanya titip Excel).</td></tr>';
+      payBody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#9ca3af;padding:8px;">Belum ada pembayaran manual (hanya titip Excel).</td></tr>';
       paySummary.innerHTML = `<div style="background:#f9fafb;padding:10px 12px;border-radius:8px;">
         <span style="color:#6b7280;">Excel (Titip):</span> <strong>${fmt(partial)}</strong> ·
         <span style="color:#6b7280;">Sisa:</span> <strong style="color:#dc2626;">${fmt(Number(inv.total_idr||0) - partial)}</strong>
@@ -429,10 +424,29 @@ function closeDetail() {
 }
 
 // ============================================================
+// BANK ACCOUNTS
+// ============================================================
+async function loadBankAccounts() {
+  const { data, error } = await supabase
+    .from('accounts')
+    .select('id, code, name')
+    .eq('is_active', true)
+    .like('code', '1-1%')
+    .order('code');
+  if (error) { console.error(error); return; }
+  state.bankAccounts = (data || []).filter(a => !a.code.startsWith('1-12'));
+
+  const sel = document.getElementById('pAccount');
+  sel.innerHTML = '<option value="">— pilih rekening —</option>' +
+    state.bankAccounts.map(a =>
+      `<option value="${a.id}">${esc(a.code)} — ${esc(a.name)}</option>`
+    ).join('');
+}
+
+// ============================================================
 // TAB PEMBAYARAN
 // ============================================================
 async function loadPaymentInvoices() {
-  // hanya invoice posted/partial (belum lunas)
   const { data, error } = await supabase
     .from('historical_invoices')
     .select(`id, invoice_no, partner:partners!inner(name), total_idr, currency`)
@@ -477,18 +491,18 @@ async function onInvoiceSelect(invoiceId) {
   document.getElementById('psStatus').innerHTML = statusBadge(inv.status);
   document.getElementById('paymentSummaryCard').style.display = 'block';
 
-  // prefill amount dengan sisa (kalau > 0)
   document.getElementById('pAmount').value = sisa > 0 ? String(Math.round(sisa)) : '';
 }
 
 async function loadPayments() {
   const tbody = document.getElementById('tbody-payments');
-  tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:#9ca3af;padding:16px;">Memuat...</td></tr>';
+  tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;color:#9ca3af;padding:16px;">Memuat...</td></tr>';
 
   let q = supabase
     .from('historical_invoice_payments')
     .select(`
-      id, payment_date, amount_idr, method, reference_no, note, created_at,
+      id, payment_date, amount_idr, method, reference_no, note, created_at, journal_id,
+      account:accounts(id, code, name),
       invoice:historical_invoices!inner(
         id, invoice_no,
         partner:partners!inner(name)
@@ -505,7 +519,7 @@ async function loadPayments() {
 
   const { data, error } = await q;
   if (error) {
-    tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;color:#dc2626;padding:16px;">Error: ${esc(error.message)}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="10" style="text-align:center;color:#dc2626;padding:16px;">Error: ${esc(error.message)}</td></tr>`;
     return;
   }
   renderPaymentsTable(data || []);
@@ -514,7 +528,7 @@ async function loadPayments() {
 function renderPaymentsTable(rows) {
   const tbody = document.getElementById('tbody-payments');
   if (!rows.length) {
-    tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:#9ca3af;padding:16px;">Belum ada pembayaran.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;color:#9ca3af;padding:16px;">Belum ada pembayaran.</td></tr>';
     document.getElementById('payTotalInfo').textContent = '';
     return;
   }
@@ -527,9 +541,10 @@ function renderPaymentsTable(rows) {
       <td>${fmtDate(r.payment_date)}</td>
       <td class="num" style="font-weight:600;">${fmt(r.amount_idr)}</td>
       <td>${esc(r.method)}</td>
+      <td style="font-size:12px;">${esc(r.account?.code || '')} ${esc(r.account?.name || '')}</td>
       <td style="font-size:12px;">${esc(r.reference_no || '')}</td>
-      <td style="font-size:12px;">${esc(r.note || '')}</td>
       <td style="font-size:11px;color:#6b7280;">${r.created_at ? new Date(r.created_at).toLocaleString('id-ID') : '—'}</td>
+      <td style="font-size:11px;">${r.journal_id ? `<span style="background:#dbeafe;color:#1e40af;padding:2px 6px;border-radius:4px;">JV</span>` : '—'}</td>
       <td>
         ${state.canDeletePayment
           ? `<button type="button" class="btn btn-danger" data-del-pay="${r.id}" style="padding:4px 10px;font-size:12px;">Hapus</button>`
@@ -547,17 +562,21 @@ function renderPaymentsTable(rows) {
 }
 
 async function submitPayment() {
-  const invoiceId = document.getElementById('pInvoice').value;
-  const date      = document.getElementById('pDate').value;
-  const amountRaw = document.getElementById('pAmount').value;
-  const method    = document.getElementById('pMethod').value;
-  const ref       = document.getElementById('pRef').value.trim() || null;
-  const note      = document.getElementById('pNote').value.trim() || null;
+  const invoiceId  = document.getElementById('pInvoice').value;
+  const date       = document.getElementById('pDate').value;
+  const amountRaw  = document.getElementById('pAmount').value;
+  const method     = document.getElementById('pMethod').value;
+  const accountId  = document.getElementById('pAccount').value;
+  const ref        = document.getElementById('pRef').value.trim() || null;
+  const note       = document.getElementById('pNote').value.trim() || null;
 
   if (!invoiceId) { toast('Pilih invoice dulu', true); return; }
   if (!date)      { toast('Tanggal wajib diisi', true); return; }
   const amount = parseNumberId(amountRaw);
   if (!amount || amount <= 0) { toast('Jumlah tidak valid', true); return; }
+  if (['transfer','cash','giro'].includes(method) && !accountId) {
+    toast('Pilih rekening dulu (untuk auto-jurnal)', true); return;
+  }
 
   const btn = document.getElementById('pSaveBtn');
   btn.disabled = true;
@@ -569,7 +588,8 @@ async function submitPayment() {
     p_amount_idr: amount,
     p_method: method,
     p_reference_no: ref,
-    p_note: note
+    p_note: note,
+    p_account_id: accountId ? Number(accountId) : null
   });
 
   btn.disabled = false;
@@ -577,25 +597,26 @@ async function submitPayment() {
 
   if (error) { toast('Gagal: ' + error.message, true); return; }
 
-  toast('✓ Pembayaran tersimpan');
-  // reset form
+  const jn = data?.journal_no ? ` · Jurnal ${data.journal_no}` : '';
+  toast('✓ Pembayaran tersimpan' + jn);
+
   document.getElementById('pAmount').value = '';
   document.getElementById('pRef').value = '';
   document.getElementById('pNote').value = '';
-  // refresh ringkasan + riwayat
+  document.getElementById('pAccount').value = '';
+
   if (state.selectedInvoice) {
     await onInvoiceSelect(state.selectedInvoice.id);
   }
   await loadPayments();
-  // refresh dropdown (kalau invoice jadi lunas, hilang dari list)
   await loadPaymentInvoices();
 }
 
 async function deletePayment(paymentId) {
-  if (!confirm('Hapus pembayaran ini? Status invoice akan dihitung ulang.')) return;
+  if (!confirm('Hapus pembayaran ini? Jurnal terkait juga akan dihapus & status invoice dihitung ulang.')) return;
   const { error } = await supabase.rpc('delete_historical_payment', { p_payment_id: paymentId });
   if (error) { toast('Gagal: ' + error.message, true); return; }
-  toast('✓ Pembayaran dihapus');
+  toast('✓ Pembayaran & jurnal dihapus');
   await loadPayments();
   await loadPaymentInvoices();
   if (state.selectedInvoice) {
@@ -607,9 +628,17 @@ function bindPaymentTab() {
   const sel = document.getElementById('pInvoice');
   sel.addEventListener('change', () => onInvoiceSelect(sel.value));
 
+  const methodSel = document.getElementById('pMethod');
+  const accWrap   = document.getElementById('pAccountWrap');
+  function toggleAcc() {
+    const m = methodSel.value;
+    accWrap.style.display = ['transfer','cash','giro'].includes(m) ? '' : 'none';
+  }
+  methodSel.addEventListener('change', toggleAcc);
+  toggleAcc();
+
   document.getElementById('pSaveBtn').addEventListener('click', submitPayment);
 
-  // filter riwayat
   let timer;
   document.getElementById('paySearch').addEventListener('input', () => {
     clearTimeout(timer);
@@ -634,7 +663,6 @@ function bindPaymentTab() {
     loadPayments();
   });
 
-  // default tanggal = hari ini
   document.getElementById('pDate').value = new Date().toISOString().slice(0,10);
 }
 
@@ -675,7 +703,7 @@ async function loadAging() {
 }
 
 // ============================================================
-// EXPORT CSV (tidak berubah)
+// EXPORT CSV
 // ============================================================
 async function exportInvoices() {
   toast('Menyiapkan export invoice...');
@@ -817,15 +845,13 @@ function bindFilters() {
   await preloadPermissions();
   await renderNav(document.getElementById('mainNav'), 'piutang');
 
-  // Cek permission
   state.canViewInvoice   = await hasPermission('historical.view');
   state.canViewAging     = await hasPermission('reports.aging_piutang');
   state.canExport        = await hasPermission('historical.export');
-  state.canViewPayment   = await hasPermission('historical.view'); // semua viewer bisa lihat tab payment
+  state.canViewPayment   = await hasPermission('historical.view');
   state.canCreatePayment = await hasPermission('historical.payment.create');
   state.canDeletePayment = await hasPermission('historical.payment.delete');
 
-  // Sembunyikan tab yang tidak berhak
   const tabPerms = {
     invoice: state.canViewInvoice,
     payment: state.canViewPayment,
@@ -835,7 +861,6 @@ function bindFilters() {
   document.querySelectorAll('.tabs button').forEach(btn => {
     const tab = btn.dataset.tab;
     if (tab === 'commission') {
-      // placeholder — selalu tampil
       if (!firstAllowed) firstAllowed = tab;
       return;
     }
@@ -848,7 +873,6 @@ function bindFilters() {
     return;
   }
 
-  // Aktifkan tab pertama yang berhak
   document.querySelectorAll('.tabs button').forEach(b => b.classList.remove('active'));
   document.querySelectorAll('.tab-panel').forEach(p => p.style.display = 'none');
   document.querySelector(`.tabs button[data-tab="${firstAllowed}"]`).classList.add('active');
@@ -859,10 +883,8 @@ function bindFilters() {
   bindFilters();
   bindPaymentTab();
 
-  // Gate form create
   const formCard = document.getElementById('paymentFormCard');
-  if (state.canCreatePayment) formCard.style.display = 'block';
-  else formCard.style.display = 'none';
+  formCard.style.display = state.canCreatePayment ? 'block' : 'none';
 
   document.getElementById('exportInvBtn').style.display = state.canExport ? 'inline-block' : 'none';
   document.getElementById('exportLineBtn').style.display = state.canExport ? 'inline-block' : 'none';
@@ -874,6 +896,7 @@ function bindFilters() {
   });
 
   await loadFilterOptions();
+  await loadBankAccounts();
 
   if (state.activeTab === 'invoice') await loadInvoices();
   else if (state.activeTab === 'aging') await loadAging();
