@@ -36,7 +36,9 @@ export async function piutangPerPelanggan() {
 
   const agg = {};
   for (const l of lines) {
-    if (!l.partners || l.partners.type !== 'customer') continue;
+    if (!l.partners) continue;
+    // ✅ FIX: handle 'customer' dan 'both'
+    if (l.partners.type !== 'customer' && l.partners.type !== 'both') continue;
     const key = l.partner_id;
     agg[key] = agg[key] || { name: l.partners.name, saldo: 0 };
     agg[key].saldo += Number(l.debit_base) - Number(l.credit_base);
@@ -147,7 +149,10 @@ export async function agingPiutang({ asOf = null } = {}) {
     .lte('journals.journal_date', cutoff);
   if (error) throw error;
 
-  const custLines = lines.filter(l => l.partners?.type === 'customer');
+  // ✅ FIX: handle 'customer' dan 'both'
+  const custLines = lines.filter(l =>
+    l.partners?.type === 'customer' || l.partners?.type === 'both'
+  );
 
   const buckets = {};
   const today = new Date(cutoff);
@@ -174,7 +179,7 @@ export async function agingPiutang({ asOf = null } = {}) {
 }
 
 // ============================================================
-// AGING HUTANG (BARU)
+// AGING HUTANG
 // ============================================================
 export async function agingHutang({ asOf = null } = {}) {
   const cutoff = asOf || new Date().toISOString().slice(0, 10);
@@ -192,7 +197,10 @@ export async function agingHutang({ asOf = null } = {}) {
     .lte('journals.journal_date', cutoff);
   if (error) throw error;
 
-  const vendorLines = lines.filter(l => l.partners?.type === 'vendor');
+  // ✅ FIX: handle 'vendor' dan 'both'
+  const vendorLines = lines.filter(l =>
+    l.partners?.type === 'vendor' || l.partners?.type === 'both'
+  );
 
   const buckets = {};
   const today = new Date(cutoff);
@@ -274,12 +282,11 @@ export async function neraca({ asOf = null } = {}) {
     balanced: Math.abs(totalAsset - (totalLiability + totalEquity)) < 0.01
   };
 }
+
 // ============================================================
 // LAPORAN: PENJUALAN PER SALES
-// Agregasi SO per sales, per status, per periode
 // ============================================================
 export async function salesReport({ from = null, to = null } = {}) {
-  // 1. Ambil semua SO dalam periode (dengan filter tanggal)
   let q = supabase
     .from('sales_orders')
     .select('id, so_no, so_date, sales_id, status, total_amount, ppn_amount, grand_total');
@@ -290,7 +297,6 @@ export async function salesReport({ from = null, to = null } = {}) {
 
   if (!orders || orders.length === 0) return { rows: [], totals: null };
 
-  // 2. Ambil profil sales (batch)
   const salesIds = [...new Set(orders.map(o => o.sales_id).filter(Boolean))];
   let profileMap = {};
   if (salesIds.length) {
@@ -303,7 +309,6 @@ export async function salesReport({ from = null, to = null } = {}) {
     }
   }
 
-  // 3. Agregasi per sales
   const buckets = {};
   for (const o of orders) {
     const key = o.sales_id || 'unknown';
@@ -336,7 +341,6 @@ export async function salesReport({ from = null, to = null } = {}) {
 
   const rows = Object.values(buckets).sort((a, b) => b.total_posted - a.total_posted);
 
-  // 4. Total keseluruhan
   const totals = rows.reduce((acc, r) => ({
     total_so:      acc.total_so + r.total_so,
     draft:         acc.draft + r.draft,
