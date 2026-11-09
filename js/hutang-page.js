@@ -60,14 +60,6 @@ function downloadCSV(filename, headers, rows) {
   document.body.appendChild(a); a.click();
   document.body.removeChild(a); URL.revokeObjectURL(url);
 }
-function parseNumberId(s) {
-  if (s === null || s === undefined) return NaN;
-  let t = String(s).trim();
-  if (!t) return NaN;
-  if (t.includes(',')) t = t.replace(/\./g, '').replace(',', '.');
-  else t = t.replace(/\./g, '');
-  return Number(t);
-}
 
 // ============================================================
 // STATE
@@ -89,11 +81,13 @@ const state = {
   selectedInvoice: null,
   paymentsLoaded: false,
   bankAccounts: [],
-  clearingLoaded: false
+  clearingLoaded: false,
+  allocRowCount: 0,
+  clearingInvoices: []
 };
 
 // ============================================================
-// HELPER: Cari partner_id yang match search (untuk filter vendor)
+// HELPER: Cari partner_id by search
 // ============================================================
 async function findPartnerIdsBySearch(search) {
   if (!search) return [];
@@ -104,9 +98,6 @@ async function findPartnerIdsBySearch(search) {
   return (data || []).map(p => p.id);
 }
 
-// ============================================================
-// HELPER: Terapkan filter ke query (tanpa partners.name)
-// ============================================================
 async function applyFilters(q) {
   const f = state.filters;
   if (f.search) {
@@ -148,6 +139,7 @@ function bindTabs() {
         }
         await loadPayments();
       } else if (state.activeTab === 'clearing' && state.canManage) {
+        wireClearingForm();
         if (!state.clearingLoaded) {
           await loadClearingHistory();
           state.clearingLoaded = true;
@@ -490,6 +482,194 @@ async function loadAging() {
 // ============================================================
 // TAB CLEARING
 // ============================================================
+function wireClearingForm() {
+  const form = document.getElementById('form-clearing');
+  if (!form || form.dataset.wired === '1') return;
+  form.dataset.wired = '1';
+
+  const dateEl = document.getElementById('clearDate');
+  if (dateEl) dateEl.value = new Date().toISOString().slice(0, 10);
+
+  document.getElementById('addAllocBtn')?.addEventListener('click', () => addAllocRow());
+
+  document.getElementById('clearResetBtn')?.addEventListener('click', () => {
+    const tbody = document.getElementById('tbody-alloc');
+    tbody.innerHTML = `
+      <tr class="alloc-placeholder">
+        <td colspan="5" style="text-align:center;color:#9ca3af;padding:8px;">
+          Belum ada alokasi. Klik "+ Tambah Alokasi".
+        </td>
+      </tr>`;
+    state.allocRowCount = 0;
+    updateAllocTotal();
+    document.getElementById('clearNote').value = '';
+  });
+
+  document.getElementById('clearRefreshBtn')?.addEventListener('click', () => loadClearingHistory());
+
+  form.addEventListener('submit', submitClearing);
+
+  // Load invoice options
+  loadClearingInvoices();
+}
+
+async function loadClearingInvoices() {
+  const { data, error } = await supabase
+    .from('purchase_invoices')
+    .select('id, invoice_no, currency, total_idr, partner:partners!inner(name)')
+    .in('status', ['posted', 'partial'])
+    .order('invoice_no');
+  if (error) { console.error('loadClearingInvoices:', error); return; }
+  state.clearingInvoices = data || [];
+}
+
+function addAllocRow() {
+  state.allocRowCount++;
+  const tbody = document.getElementById('tbody-alloc');
+  const ph = tbody.querySelector('.alloc-placeholder');
+  if (ph) ph.remove();
+
+  const tr = document.createElement('tr');
+  tr.dataset.allocId = state.allocRowCount;
+  const invoices = state.clearingInvoices || [];
+
+  tr.innerHTML = `
+    <td>
+      <select class="alloc-invoice" required style="width:100%;padding:6px;border:1px solid #d0d5dd;border-radius:6px;">
+        <option value="">— pilih invoice —</option>
+        ${invoices.map(i =>
+          `<option value="${i.id}">${esc(i.invoice_no)} — ${esc(i.partner?.name || '')} (${esc(i.currency)})</option>`
+        ).join('')}
+      </select>
+    </td>
+    <td>
+      <select class="alloc-line" style="width:100%;padding:6px;border:1px solid #d0d5dd;border-radius:6px;">
+        <option value="">— (invoice saja) —</option>
+      </select>
+    </td>
+    <td class="num">
+      <input type="number" class="alloc-amount" step="0.01" min="0.01" required
+             style="width:100%;padding:6px;border:1px solid #d0d5dd;border-radius:6px;text-align:right;">
+    </td>
+    <td>
+      <input type="text" class="alloc-note" maxlength="200"
+             style="width:100%;padding:6px;border:1px solid #d0d5dd;border-radius:6px;">
+    </td>
+    <td>
+      <button type="button" class="line-remove" title="Hapus"
+              style="background:#fee2e2;color:#991b1b;border:none;border-radius:5px;width:26px;height:26px;font-size:14px;cursor:pointer;font-weight:700;">×</button>
+    </td>
+  `;
+  tbody.appendChild(tr);
+
+  // Invoice change → load lines
+  tr.querySelector('.alloc-invoice').addEventListener('change', async (e) => {
+    const invoiceId = Number(e.target.value);
+    const lineSel = tr.querySelector('.alloc-line');
+    lineSel.innerHTML = '<option value="">— (invoice saja) —</option>';
+    if (!invoiceId) return;
+
+    const { data: lines, error } = await supabase
+      .from('purchase_invoice_lines')
+      .select('id, line_no, display_name, qty, qty_unit, unit_price')
+      .eq('invoice_id', invoiceId)
+      .order('line_no');
+    if (error) { console.error('loadLines:', error); return; }
+    (lines || []).forEach(l => {
+      const opt = document.createElement('option');
+      opt.value = l.id;
+      opt.textContent = `${l.line_no} — ${l.display_name} (${l.qty} ${l.qty_unit})`;
+      lineSel.appendChild(opt);
+    });
+  });
+
+  tr.querySelector('.alloc-amount').addEventListener('input', updateAllocTotal);
+
+  tr.querySelector('.line-remove').addEventListener('click', () => {
+    tr.remove();
+    updateAllocTotal();
+    if (!document.querySelectorAll('#tbody-alloc tr[data-alloc-id]').length) {
+      tbody.innerHTML = `
+        <tr class="alloc-placeholder">
+          <td colspan="5" style="text-align:center;color:#9ca3af;padding:8px;">
+            Belum ada alokasi. Klik "+ Tambah Alokasi".
+          </td>
+        </tr>`;
+      state.allocRowCount = 0;
+    }
+  });
+
+  updateAllocTotal();
+}
+
+function updateAllocTotal() {
+  let total = 0;
+  document.querySelectorAll('#tbody-alloc .alloc-amount').forEach(inp => {
+    total += Number(inp.value) || 0;
+  });
+  const el = document.getElementById('allocTotal');
+  if (el) el.textContent = 'Rp ' + total.toLocaleString('id-ID');
+}
+
+function collectAllocations() {
+  const rows = document.querySelectorAll('#tbody-alloc tr[data-alloc-id]');
+  const allocs = [];
+  for (const tr of rows) {
+    const invoiceId = Number(tr.querySelector('.alloc-invoice').value);
+    const lineId = tr.querySelector('.alloc-line').value ? Number(tr.querySelector('.alloc-line').value) : null;
+    const amount = Number(tr.querySelector('.alloc-amount').value);
+    const note = tr.querySelector('.alloc-note').value.trim() || null;
+
+    if (!invoiceId) { toast('Semua alokasi harus pilih invoice', true); return null; }
+    if (!amount || amount <= 0) { toast('Jumlah alokasi harus > 0', true); return null; }
+    allocs.push({ invoice_id: invoiceId, line_id: lineId, amount_idr: amount, note });
+  }
+  if (!allocs.length) { toast('Minimal 1 alokasi', true); return null; }
+  return allocs;
+}
+
+async function submitClearing(e) {
+  e.preventDefault();
+  if (!state.canManage) { toast('Tidak ada akses konsolidasi', true); return; }
+
+  const dateEl = document.getElementById('clearDate');
+  const btn = document.getElementById('clearSaveBtn');
+  const clearingDate = dateEl.value;
+  if (!clearingDate) { toast('Tanggal wajib diisi', true); return; }
+
+  const allocs = collectAllocations();
+  if (allocs === null) return;
+
+  const total = allocs.reduce((s, a) => s + a.amount_idr, 0);
+  if (!confirm(`Konsolidasi ${allocs.length} alokasi, total Rp ${total.toLocaleString('id-ID')}?\n\nNilai akan ditambahkan ke avg_cost item terkait (jika dialokasikan ke line).`)) return;
+
+  btn.disabled = true;
+  btn.textContent = 'Memproses...';
+
+  try {
+    const { data, error } = await supabase.rpc('consolidate_clearing', {
+      p_clearing_date: clearingDate,
+      p_allocations: allocs
+    });
+    if (error) throw error;
+
+    const result = data || {};
+    const inserted = result.inserted || 0;
+    const jn = result.journal_no ? ` · Jurnal ${result.journal_no}` : '';
+    const errs = result.errors?.length || 0;
+
+    toast(`✓ Konsolidasi selesai: ${inserted} alokasi${jn}${errs ? ` (${errs} error)` : ''}`);
+
+    document.getElementById('clearResetBtn').click();
+    await loadClearingHistory();
+  } catch (err) {
+    toast('Gagal konsolidasi: ' + (err.message || err), true);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Konsolidasi';
+  }
+}
+
 async function loadClearingHistory() {
   const tbody = document.getElementById('tbody-clearing');
   tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#9ca3af;">Memuat...</td></tr>';
@@ -501,6 +681,7 @@ async function loadClearingHistory() {
       line:purchase_invoice_lines(id, line_no, display_name)
     `)
     .order('clearing_date', { ascending: false })
+    .order('id', { ascending: false })
     .limit(100);
 
   if (error) {
@@ -614,7 +795,7 @@ async function exportLines() {
 }
 
 // ============================================================
-// BIND FILTER (invoice)
+// BIND FILTER
 // ============================================================
 function bindFilters() {
   const bind = (id, key) => {
@@ -755,6 +936,7 @@ function bindPaymentTab() {
     state.paymentsLoaded = true;
     await loadPayments();
   } else if (state.activeTab === 'clearing') {
+    wireClearingForm();
     await loadClearingHistory();
     state.clearingLoaded = true;
   }
