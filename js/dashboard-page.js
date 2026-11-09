@@ -239,6 +239,40 @@ async function renderPiutangCard() {
 }
 
 // ============================================================
+// HUTANG CARD — konsolidasi (2-1100 + hutang_summary)
+// ============================================================
+async function renderHutangCard() {
+  const { data: acc, error: e1 } = await supabase
+    .from('v_account_balance')
+    .select('code, name, balance')
+    .eq('code', '2-1100')
+    .single();
+  if (e1) { console.warn('[v_account_balance] hutang error:', e1.message); return ''; }
+
+  // Coba ambil dari view hutang_summary (kalau sudah dibuat)
+  const { data: sum } = await supabase
+    .from('hutang_summary')
+    .select('*')
+    .maybeSingle();
+
+  const saldo = Number(acc?.balance || 0);
+  const overdue = Number(sum?.total_overdue_idr || 0);
+  const countOpen = Number(sum?.count_open || 0);
+  const countPaid = Number(sum?.count_paid || 0);
+  const overdueColor = overdue > 0 ? '#b91c1c' : '#059669';
+
+  return `
+    <div class="card" style="border-left:4px solid #dc2626;">
+      <div style="font-size:12px;color:#666;margin-bottom:6px;">Hutang Dagang</div>
+      <div style="font-size:22px;font-weight:700;color:#dc2626;">${fmtShort(saldo)}</div>
+      <div style="font-size:11px;color:#6b7280;margin-top:6px;line-height:1.5;">
+        ${countOpen} invoice terbuka · ${countPaid} lunas<br>
+        Overdue: <strong style="color:${overdueColor};">${fmtShort(overdue)}</strong>
+      </div>
+    </div>`;
+}
+
+// ============================================================
 // FINANCE / SUPERVISOR / ADMIN / VIEWER
 // ============================================================
 async function renderFinanceDashboard(container) {
@@ -260,15 +294,16 @@ async function renderFinanceDashboard(container) {
     cards.push(card('Saldo Bank BCA', map.bank?.balance));
   }
   if (await hasPermission('finance.piutang.view')) {
-    // Piutang Dagang — konsolidasi (1-1200 + piutang_summary)
     const piutangHtml = await renderPiutangCard();
     if (piutangHtml) cards.push(piutangHtml);
-    // Piutang Pihak Ketiga (tetap dari jurnal)
     cards.push(card('Piutang Pihak Ketiga', map.piutang_pihak3?.balance));
   }
   if (await hasPermission('finance.hutang.view')) {
     cards.push(card('Hutang Bank', map.hutang_bank?.balance));
-    cards.push(card('Hutang Dagang', map.hutang_dagang?.balance));
+    // Hutang Dagang — konsolidasi (2-1100 + hutang_summary)
+    const hutangHtml = await renderHutangCard();
+    if (hutangHtml) cards.push(hutangHtml);
+    cards.push(card('Hutang Pihak Ketiga', map.hutang_pihak3?.balance));
   }
 
   container.innerHTML = cards.length
