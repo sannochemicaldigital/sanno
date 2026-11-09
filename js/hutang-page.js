@@ -93,6 +93,39 @@ const state = {
 };
 
 // ============================================================
+// HELPER: Cari partner_id yang match search (untuk filter vendor)
+// ============================================================
+async function findPartnerIdsBySearch(search) {
+  if (!search) return [];
+  const { data } = await supabase
+    .from('partners')
+    .select('id')
+    .ilike('name', `%${search}%`);
+  return (data || []).map(p => p.id);
+}
+
+// ============================================================
+// HELPER: Terapkan filter ke query (tanpa partners.name)
+// ============================================================
+async function applyFilters(q) {
+  const f = state.filters;
+  if (f.search) {
+    const partnerIds = await findPartnerIdsBySearch(f.search);
+    if (partnerIds.length > 0) {
+      q = q.or(`invoice_no.ilike.%${f.search}%,partner_id.in.(${partnerIds.join(',')})`);
+    } else {
+      q = q.ilike('invoice_no', `%${f.search}%`);
+    }
+  }
+  if (f.partner_id) q = q.eq('partner_id', f.partner_id);
+  if (f.status) q = q.eq('status', f.status);
+  if (f.currency) q = q.eq('currency', f.currency);
+  if (f.from) q = q.gte('dev_date', f.from);
+  if (f.to) q = q.lte('dev_date', f.to);
+  return q;
+}
+
+// ============================================================
 // TAB SWITCHER
 // ============================================================
 function bindTabs() {
@@ -144,19 +177,6 @@ async function loadFilterOptions() {
 // ============================================================
 // QUERY — LIST INVOICE
 // ============================================================
-function applyFilters(q) {
-  const f = state.filters;
-  if (f.search) {
-    q = q.or(`invoice_no.ilike.%${f.search}%,partners.name.ilike.%${f.search}%`);
-  }
-  if (f.partner_id) q = q.eq('partner_id', f.partner_id);
-  if (f.status) q = q.eq('status', f.status);
-  if (f.currency) q = q.eq('currency', f.currency);
-  if (f.from) q = q.gte('dev_date', f.from);
-  if (f.to) q = q.lte('dev_date', f.to);
-  return q;
-}
-
 async function loadInvoices() {
   const tbody = document.getElementById('tbody-invoices');
   tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:#9ca3af;padding:16px;">Memuat...</td></tr>';
@@ -175,7 +195,7 @@ async function loadInvoices() {
     .order('invoice_no', { ascending: false })
     .range(from, to);
 
-  q = applyFilters(q);
+  q = await applyFilters(q);
 
   const { data, error, count } = await q;
   if (error) {
@@ -220,13 +240,8 @@ async function loadSummary() {
   let q = supabase
     .from('purchase_invoices')
     .select('subtotal, ppn_amount_idr, total_idr, total_usd, currency', { count: 'exact' });
-  const f = state.filters;
-  if (f.search) q = q.ilike('invoice_no', `%${f.search}%`);
-  if (f.partner_id) q = q.eq('partner_id', f.partner_id);
-  if (f.status) q = q.eq('status', f.status);
-  if (f.currency) q = q.eq('currency', f.currency);
-  if (f.from) q = q.gte('dev_date', f.from);
-  if (f.to) q = q.lte('dev_date', f.to);
+
+  q = await applyFilters(q);
 
   const { data, error } = await q;
   if (error) { console.warn(error); return; }
@@ -432,31 +447,8 @@ async function onInvoiceSelect(invoiceId) {
 
 async function loadPayments() {
   const tbody = document.getElementById('tbody-payments');
-  tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;color:#9ca3af;padding:16px;">Memuat...</td></tr>';
-
-  let q = supabase
-    .from('purchase_payments')
-    .select(`
-      id, payment_date, amount_idr, amount_usd, method, reference_no, note, created_at, journal_id,
-      account:accounts(id, code, name),
-      invoice:purchase_invoices!inner(
-        id, invoice_no,
-        partner:partners!inner(name)
-      )
-    `)
-    .order('payment_date', { ascending: false })
-    .order('id', { ascending: false })
-    .limit(500);
-
-  // Catatan: tabel purchase_payments belum ada — perlu dibuat di Phase 2.
-  // Untuk Phase 1, kita skip loadPayments (tampilkan "belum ada pembayaran").
-
   tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;color:#9ca3af;padding:16px;">Fitur pembayaran hutang akan tersedia di Phase 2.</td></tr>';
   document.getElementById('payTotalInfo').textContent = '';
-}
-
-function renderPaymentsTable(rows) {
-  // Placeholder — Phase 2
 }
 
 // ============================================================
@@ -547,7 +539,7 @@ async function exportInvoices() {
     `)
     .order('dev_date', { ascending: true })
     .order('invoice_no', { ascending: true });
-  q = applyFilters(q);
+  q = await applyFilters(q);
   const { data, error } = await q;
   if (error) { toast('Gagal: ' + error.message, true); return; }
 
@@ -573,7 +565,7 @@ async function exportLines() {
   let q = supabase.from('purchase_invoices')
     .select('id, invoice_no, dev_date, currency, partner:partners!inner(name)')
     .order('dev_date', { ascending: true });
-  q = applyFilters(q);
+  q = await applyFilters(q);
   const { data: invs, error: e1 } = await q;
   if (e1) { toast('Gagal: ' + e1.message, true); return; }
   if (!invs || !invs.length) { toast('Tidak ada data'); return; }
