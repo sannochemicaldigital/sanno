@@ -388,7 +388,6 @@ async function loadBankAccounts() {
 // TAB PEMBAYARAN — LOAD INVOICE CACHE
 // ============================================================
 async function loadPaymentInvoices() {
-  // Ambil invoice posted/partial beserta total terbayar (untuk hitung sisa)
   const { data: invs, error } = await supabase
     .from('purchase_invoices')
     .select(`id, invoice_no, currency, total_idr, total_usd, status, partner:partners!inner(name)`)
@@ -397,7 +396,6 @@ async function loadPaymentInvoices() {
 
   if (error) { console.error('loadPaymentInvoices:', error); return; }
 
-  // Ambil akumulasi pembayaran per invoice (hanya yg tidak deleted)
   const { data: pays, error: e2 } = await supabase
     .from('purchase_payment_allocations')
     .select('invoice_id, amount, purchase_payments!inner(deleted_at)')
@@ -431,7 +429,6 @@ function bindPaymentTab() {
   function toggleFx() {
     fxWrap.style.display = curSel.value === 'USD' ? '' : 'none';
     document.getElementById('payTotalCur').textContent = curSel.value;
-    // Reset alokasi karena invoice harus match currency
     resetPayAlloc();
     updatePaymentTotal();
   }
@@ -466,7 +463,6 @@ function bindPaymentTab() {
     loadPayments();
   });
 
-  // Tampilkan form hanya kalau punya permission
   const formCard = document.getElementById('paymentFormCard');
   formCard.style.display = state.canCreatePayment ? 'block' : 'none';
 }
@@ -572,11 +568,10 @@ function collectPaymentAllocs() {
     const amount = Number(tr.querySelector('.pay-alloc-amount').value);
     if (!invId) { toast('Semua baris alokasi harus pilih invoice', true); return null; }
     if (!amount || amount <= 0) { toast('Jumlah bayar harus > 0', true); return null; }
-    allocs.push({ invoice_no: null, invoice_id: invId, amount });
+    allocs.push({ invoice_id: invId, amount });
   }
   if (!allocs.length) { toast('Minimal 1 alokasi invoice', true); return null; }
 
-  // Map invoice_id → invoice_no untuk payload RPC
   const map = {};
   (state.payInvoicesCache || []).forEach(i => { map[i.id] = i.invoice_no; });
   return allocs.map(a => ({ invoice_no: map[a.invoice_id], amount: a.amount }));
@@ -624,7 +619,6 @@ async function submitPayment() {
       (r.selisih_kurs_idr ? ` · selisih kurs ${fmt(r.selisih_kurs_idr)}` : ''));
 
     document.getElementById('pResetBtn').click();
-    // reload cache & riwayat
     await loadPaymentInvoices();
     await loadPayments();
   } catch (err) {
@@ -665,7 +659,6 @@ async function loadPayments() {
     return;
   }
 
-  // filter search (invoice_no / payment_no / vendor via alloc invoice)
   let rows = data || [];
   if (f.search) {
     const s = f.search.toLowerCase();
@@ -807,7 +800,6 @@ function wireClearingForm() {
 
   form.addEventListener('submit', submitClearing);
 
-  // Load invoice options
   loadClearingInvoices();
 }
 
@@ -860,7 +852,6 @@ function addAllocRow() {
   `;
   tbody.appendChild(tr);
 
-  // Invoice change → load lines
   tr.querySelector('.alloc-invoice').addEventListener('change', async (e) => {
     const invoiceId = Number(e.target.value);
     const lineSel = tr.querySelector('.alloc-line');
