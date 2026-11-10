@@ -117,100 +117,103 @@
 
     <!-- ==================== TAB: PEMBAYARAN ==================== -->
     <section id="tab-payment" class="tab-panel" style="display:none;">
+
+      <!-- FORM PEMBAYARAN (multi-alokasi) -->
       <div class="card" id="paymentFormCard" style="display:none;">
         <h3 style="margin-top:0;font-size:16px;">Tambah Pembayaran Hutang</h3>
+        <p style="font-size:13px;color:#6b7280;margin-top:0;">
+          Satu pembayaran bisa melunasi beberapa invoice sekaligus (currency harus sama).
+          Untuk USD, isi <b>kurs beli</b> sesuai rate realisasi dari bank.
+        </p>
+
         <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;">
-          <div class="form-row" style="flex:2;min-width:260px;margin:0;">
-            <label for="pInvoice">Invoice</label>
-            <select id="pInvoice" class="input">
-              <option value="">— pilih invoice —</option>
-            </select>
-          </div>
           <div class="form-row" style="flex:1;min-width:140px;margin:0;">
-            <label for="pDate">Tanggal</label>
+            <label for="pDate">Tanggal Bayar <span style="color:#dc2626;">*</span></label>
             <input type="date" id="pDate" class="input">
           </div>
-          <div class="form-row" style="flex:1;min-width:140px;margin:0;">
-            <label for="pAmount">Jumlah</label>
-            <input type="text" id="pAmount" class="input" placeholder="0" inputmode="numeric">
-          </div>
           <div class="form-row" style="flex:1;min-width:120px;margin:0;">
-            <label for="pMethod">Metode</label>
-            <select id="pMethod" class="input">
-              <option value="transfer">Transfer</option>
-              <option value="cash">Cash</option>
-              <option value="giro">Giro</option>
-              <option value="lainnya">Lainnya</option>
+            <label for="pCurrency">Currency <span style="color:#dc2626;">*</span></label>
+            <select id="pCurrency" class="input">
+              <option value="IDR">IDR</option>
+              <option value="USD">USD</option>
             </select>
           </div>
-          <div class="form-row" id="pAccountWrap" style="flex:2;min-width:200px;margin:0;">
-            <label for="pAccount">Rekening (sumber auto-jurnal)</label>
-            <select id="pAccount" class="input">
+          <div class="form-row" style="flex:2;min-width:200px;margin:0;">
+            <label for="pBankCode">Rekening Sumber <span style="color:#dc2626;">*</span></label>
+            <select id="pBankCode" class="input">
               <option value="">— pilih rekening —</option>
             </select>
           </div>
-          <div class="form-row" style="flex:1;min-width:140px;margin:0;">
-            <label for="pRef">No. Referensi</label>
-            <input type="text" id="pRef" class="input" placeholder="(opsional)">
+          <div class="form-row" id="pFxWrap" style="flex:1;min-width:160px;margin:0;display:none;">
+            <label for="pFxRate">Kurs Beli USD <span style="color:#dc2626;">*</span></label>
+            <input type="number" id="pFxRate" class="input" step="0.0001" min="0" placeholder="mis. 16700">
           </div>
           <div class="form-row" style="flex:2;min-width:180px;margin:0;">
             <label for="pNote">Catatan</label>
             <input type="text" id="pNote" class="input" placeholder="(opsional)">
           </div>
-          <div style="display:flex;gap:8px;">
-            <button type="button" class="btn btn-primary" id="pSaveBtn">Simpan</button>
+        </div>
+
+        <div style="margin-top:16px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+            <label style="font-size:13px;font-weight:600;">Alokasi ke Invoice</label>
+            <button type="button" class="btn btn-secondary" id="pAddAllocBtn" style="padding:6px 12px;font-size:12px;">
+              + Tambah Invoice
+            </button>
           </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Invoice</th>
+                  <th class="num">Sisa Hutang</th>
+                  <th class="num">Jumlah Bayar</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="tbody-pay-alloc">
+                <tr class="pay-alloc-placeholder">
+                  <td colspan="4" style="text-align:center;color:#9ca3af;padding:8px;">
+                    Belum ada alokasi. Klik "+ Tambah Invoice".
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div style="margin-top:8px;display:flex;gap:24px;justify-content:flex-end;font-size:13px;flex-wrap:wrap;">
+            <div>Total (<span id="payTotalCur">IDR</span>): <b id="payTotalAmount">0</b></div>
+            <div>Estimasi IDR: <b id="payTotalIdr">0</b></div>
+          </div>
+        </div>
+
+        <div class="form-actions" style="margin-top:16px;">
+          <button type="button" class="btn btn-primary" id="pSaveBtn">Simpan Pembayaran</button>
+          <button type="button" class="btn btn-secondary" id="pResetBtn">Reset</button>
         </div>
       </div>
 
-      <div class="card" id="paymentSummaryCard" style="display:none;">
-        <h3 style="margin-top:0;font-size:16px;">Ringkasan Invoice</h3>
-        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;">
-          <div>
-            <div style="font-size:11px;color:#6b7280;text-transform:uppercase;">Invoice</div>
-            <div style="font-weight:600;font-family:monospace;" id="psInvNo">—</div>
-            <div style="font-size:12px;color:#6b7280;" id="psPartner">—</div>
-          </div>
-          <div>
-            <div style="font-size:11px;color:#6b7280;text-transform:uppercase;">Total</div>
-            <div style="font-weight:600;" id="psTotal">—</div>
-          </div>
-          <div>
-            <div style="font-size:11px;color:#6b7280;text-transform:uppercase;">Manual Payment</div>
-            <div id="psManual">—</div>
-          </div>
-          <div>
-            <div style="font-size:11px;color:#6b7280;text-transform:uppercase;">Sisa</div>
-            <div style="font-weight:600;color:#dc2626;" id="psSisa">—</div>
-          </div>
-          <div>
-            <div style="font-size:11px;color:#6b7280;text-transform:uppercase;">Status</div>
-            <div id="psStatus">—</div>
-          </div>
-        </div>
-      </div>
-
+      <!-- RIWAYAT PEMBAYARAN -->
       <div class="card">
         <h3 style="margin-top:0;font-size:16px;">Riwayat Pembayaran Hutang</h3>
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px;">
-          <input type="text" id="paySearch" class="input" placeholder="Cari invoice / vendor..." style="flex:1;min-width:200px;">
-          <input type="date" id="payFrom" class="input" title="Dari tanggal">
-          <input type="date" id="payTo" class="input" title="Sampai tanggal">
-          <button type="button" class="btn btn-secondary" id="payResetBtn" style="padding:8px 14px;font-size:13px;">Reset</button>
+          <input type="text" id="paySearch" class="input" placeholder="Cari payment no / invoice / vendor..." style="flex:1;min-width:220px;">
+          <input type="date" id="payFrom" class="input" title="Dari tanggal bayar">
+          <input type="date" id="payTo" class="input" title="Sampai tanggal bayar">
+          <button type="button" class="btn btn-secondary" id="payRefreshBtn" style="padding:8px 14px;font-size:13px;">Muat ulang</button>
         </div>
         <div class="table-wrap">
           <table>
             <thead>
               <tr>
-                <th>Invoice</th>
-                <th>Vendor</th>
+                <th>Payment No</th>
                 <th>Tanggal</th>
-                <th class="num">Jumlah</th>
-                <th>Metode</th>
-                <th>Rekening</th>
-                <th>Ref</th>
-                <th>Oleh</th>
-                <th>Jurnal</th>
+                <th>Curr</th>
+                <th>Bank</th>
+                <th class="num">Total</th>
+                <th class="num">Total IDR</th>
+                <th class="num">Selisih Kurs</th>
+                <th>Invoice</th>
+                <th>Catatan</th>
                 <th>Aksi</th>
               </tr>
             </thead>
