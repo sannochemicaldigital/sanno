@@ -78,12 +78,12 @@ const state = {
   canManage: false,
   payFilters: { search: '', from: '', to: '' },
   payInvoicesCache: [],
-  selectedInvoice: null,
   paymentsLoaded: false,
   bankAccounts: [],
   clearingLoaded: false,
   allocRowCount: 0,
-  clearingInvoices: []
+  clearingInvoices: [],
+  payAllocCount: 0
 };
 
 // ============================================================
@@ -369,78 +369,376 @@ function closeDetail() {
 }
 
 // ============================================================
-// BANK ACCOUNTS
+// BANK ACCOUNTS (via RPC)
 // ============================================================
 async function loadBankAccounts() {
-  const { data, error } = await supabase
-    .from('accounts')
-    .select('id, code, name')
-    .eq('is_active', true)
-    .like('code', '1-1%')
-    .order('code');
-  if (error) { console.error(error); return; }
-  state.bankAccounts = (data || []).filter(a => !a.code.startsWith('1-12'));
+  const { data, error } = await supabase.rpc('list_bank_accounts');
+  if (error) { console.error('list_bank_accounts:', error); return; }
+  state.bankAccounts = data || [];
 
-  const sel = document.getElementById('pAccount');
+  const sel = document.getElementById('pBankCode');
+  if (!sel) return;
   sel.innerHTML = '<option value="">— pilih rekening —</option>' +
     state.bankAccounts.map(a =>
-      `<option value="${a.id}">${esc(a.code)} — ${esc(a.name)}</option>`
+      `<option value="${esc(a.account_code)}">${esc(a.account_code)} — ${esc(a.account_name)}</option>`
     ).join('');
 }
 
 // ============================================================
-// TAB PEMBAYARAN
+// TAB PEMBAYARAN — LOAD INVOICE CACHE
 // ============================================================
 async function loadPaymentInvoices() {
-  const { data, error } = await supabase
+  // Ambil invoice posted/partial beserta total terbayar (untuk hitung sisa)
+  const { data: invs, error } = await supabase
     .from('purchase_invoices')
-    .select(`id, invoice_no, partner:partners!inner(name), total_idr, currency`)
-    .in('status', ['posted','partial'])
+    .select(`id, invoice_no, currency, total_idr, total_usd, status, partner:partners!inner(name)`)
+    .in('status', ['posted', 'partial'])
     .order('invoice_no', { ascending: true });
 
-  if (error) { console.error(error); return; }
-  state.payInvoicesCache = data || [];
+  if (error) { console.error('loadPaymentInvoices:', error); return; }
 
-  const sel = document.getElementById('pInvoice');
-  sel.innerHTML = '<option value="">— pilih invoice —</option>' +
-    state.payInvoicesCache.map(i =>
-      `<option value="${i.id}">${esc(i.invoice_no)} — ${esc(i.partner?.name || '')} (${esc(i.currency)})</option>`
-    ).join('');
+  // Ambil akumulasi pembayaran per invoice (hanya yg tidak deleted)
+  const { data: pays, error: e2 } = await supabase
+    .from('purchase_payment_allocations')
+    .select('invoice_id, amount, purchase_payments!inner(deleted_at)')
+    .is('purchase_payments.deleted_at', null);
+  if (e2) { console.error('loadPaymentInvoices/alloc:', e2); }
+
+  const paidMap = {};
+  (pays || []).forEach(p => {
+    paidMap[p.invoice_id] = (paidMap[p.invoice_id] || 0) + Number(p.amount || 0);
+  });
+
+  state.payInvoicesCache = (invs || []).map(i => {
+    const paid = paidMap[i.id] || 0;
+    const total = i.currency === 'USD' ? Number(i.total_usd || 0) : Number(i.total_idr || 0);
+    return {
+      ...i,
+      paid_amount: paid,
+      sisa: Math.max(0, total - paid)
+    };
+  });
 }
 
-async function onInvoiceSelect(invoiceId) {
-  if (!invoiceId) {
-    state.selectedInvoice = null;
-    document.getElementById('paymentSummaryCard').style.display = 'none';
+// ============================================================
+// TAB PEMBAYARAN — FORM
+// ============================================================
+function bindPaymentTab() {
+  document.getElementById('pDate').value = new Date().toISOString().slice(0, 10);
+
+  const curSel = document.getElementById('pCurrency');
+  const fxWrap = document.getElementById('pFxWrap');
+  function toggleFx() {
+    fxWrap.style.display = curSel.value === 'USD' ? '' : 'none';
+    document.getElementById('payTotalCur').textContent = curSel.value;
+    // Reset alokasi karena invoice harus match currency
+    resetPayAlloc();
+    updatePaymentTotal();
+  }
+  curSel.addEventListener('change', toggleFx);
+  toggleFx();
+
+  document.getElementById('pAddAllocBtn').addEventListener('click', () => addPayAllocRow());
+  document.getElementById('pResetBtn').addEventListener('click', () => {
+    document.getElementById('pNote').value = '';
+    document.getElementById('pFxRate').value = '';
+    document.getElementById('pDate').value = new Date().toISOString().slice(0, 10);
+    resetPayAlloc();
+    updatePaymentTotal();
+  });
+  document.getElementById('pSaveBtn').addEventListener('click', submitPayment);
+  document.getElementById('payRefreshBtn').addEventListener('click', () => loadPayments());
+
+  let timer;
+  document.getElementById('paySearch').addEventListener('input', () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      state.payFilters.search = document.getElementById('paySearch').value;
+      loadPayments();
+    }, 350);
+  });
+  document.getElementById('payFrom').addEventListener('change', () => {
+    state.payFilters.from = document.getElementById('payFrom').value;
+    loadPayments();
+  });
+  document.getElementById('payTo').addEventListener('change', () => {
+    state.payFilters.to = document.getElementById('payTo').value;
+    loadPayments();
+  });
+
+  // Tampilkan form hanya kalau punya permission
+  const formCard = document.getElementById('paymentFormCard');
+  formCard.style.display = state.canCreatePayment ? 'block' : 'none';
+}
+
+function resetPayAlloc() {
+  const tbody = document.getElementById('tbody-pay-alloc');
+  tbody.innerHTML = `
+    <tr class="pay-alloc-placeholder">
+      <td colspan="4" style="text-align:center;color:#9ca3af;padding:8px;">
+        Belum ada alokasi. Klik "+ Tambah Invoice".
+      </td>
+    </tr>`;
+  state.payAllocCount = 0;
+}
+
+function addPayAllocRow() {
+  state.payAllocCount++;
+  const currency = document.getElementById('pCurrency').value;
+  const tbody = document.getElementById('tbody-pay-alloc');
+  const ph = tbody.querySelector('.pay-alloc-placeholder');
+  if (ph) ph.remove();
+
+  const candidates = (state.payInvoicesCache || []).filter(i =>
+    i.currency === currency && i.sisa > 0.01
+  );
+
+  if (!candidates.length) {
+    toast(`Tidak ada invoice ${currency} dengan sisa hutang`, true);
     return;
   }
-  const { data: inv, error } = await supabase
-    .from('purchase_invoices')
-    .select(`id, invoice_no, total_idr, manual_payment_idr, status, partner:partners!inner(name)`)
-    .eq('id', invoiceId)
-    .single();
-  if (error) { toast('Gagal memuat invoice: ' + error.message, true); return; }
-  state.selectedInvoice = inv;
 
-  const total = Number(inv.total_idr || 0);
-  const manual = Number(inv.manual_payment_idr || 0);
-  const sisa = total - manual;
+  const tr = document.createElement('tr');
+  tr.dataset.allocId = state.payAllocCount;
+  tr.innerHTML = `
+    <td>
+      <select class="pay-alloc-invoice" required style="width:100%;padding:6px;border:1px solid #d0d5dd;border-radius:6px;">
+        <option value="">— pilih invoice —</option>
+        ${candidates.map(i =>
+          `<option value="${i.id}" data-sisa="${i.sisa}">${esc(i.invoice_no)} — ${esc(i.partner?.name || '')} (sisa ${fmt(i.sisa)})</option>`
+        ).join('')}
+      </select>
+    </td>
+    <td class="num pay-alloc-sisa" style="color:#6b7280;">—</td>
+    <td class="num">
+      <input type="number" class="pay-alloc-amount" step="0.01" min="0.01" required
+             style="width:100%;padding:6px;border:1px solid #d0d5dd;border-radius:6px;text-align:right;">
+    </td>
+    <td>
+      <button type="button" class="pay-alloc-remove" title="Hapus"
+              style="background:#fee2e2;color:#991b1b;border:none;border-radius:5px;width:26px;height:26px;font-size:14px;cursor:pointer;font-weight:700;">×</button>
+    </td>
+  `;
+  tbody.appendChild(tr);
 
-  document.getElementById('psInvNo').textContent = inv.invoice_no;
-  document.getElementById('psPartner').textContent = inv.partner?.name || '';
-  document.getElementById('psTotal').textContent = 'Rp ' + fmt(total);
-  document.getElementById('psManual').textContent = 'Rp ' + fmt(manual);
-  document.getElementById('psSisa').textContent = 'Rp ' + fmt(sisa);
-  document.getElementById('psStatus').innerHTML = statusBadge(inv.status);
-  document.getElementById('paymentSummaryCard').style.display = 'block';
+  tr.querySelector('.pay-alloc-invoice').addEventListener('change', (e) => {
+    const opt = e.target.selectedOptions[0];
+    const sisa = opt ? Number(opt.dataset.sisa || 0) : 0;
+    tr.querySelector('.pay-alloc-sisa').textContent = sisa ? fmt(sisa) : '—';
+    const amtInput = tr.querySelector('.pay-alloc-amount');
+    if (sisa > 0 && !amtInput.value) {
+      amtInput.value = sisa.toFixed(2);
+    }
+    updatePaymentTotal();
+  });
 
-  document.getElementById('pAmount').value = sisa > 0 ? String(Math.round(sisa)) : '';
+  tr.querySelector('.pay-alloc-amount').addEventListener('input', updatePaymentTotal);
+
+  tr.querySelector('.pay-alloc-remove').addEventListener('click', () => {
+    tr.remove();
+    if (!document.querySelectorAll('#tbody-pay-alloc tr[data-alloc-id]').length) {
+      resetPayAlloc();
+    }
+    updatePaymentTotal();
+  });
+
+  updatePaymentTotal();
 }
 
+function updatePaymentTotal() {
+  const currency = document.getElementById('pCurrency').value;
+  const fx = Number(document.getElementById('pFxRate').value) || 0;
+
+  let total = 0;
+  document.querySelectorAll('#tbody-pay-alloc .pay-alloc-amount').forEach(inp => {
+    total += Number(inp.value) || 0;
+  });
+
+  document.getElementById('payTotalCur').textContent = currency;
+  document.getElementById('payTotalAmount').textContent = fmt(total);
+
+  if (currency === 'USD') {
+    document.getElementById('payTotalIdr').textContent = fx > 0 ? fmt(total * fx) : '— (isi kurs beli)';
+  } else {
+    document.getElementById('payTotalIdr').textContent = fmt(total);
+  }
+}
+
+function collectPaymentAllocs() {
+  const rows = document.querySelectorAll('#tbody-pay-alloc tr[data-alloc-id]');
+  const allocs = [];
+  for (const tr of rows) {
+    const invId = Number(tr.querySelector('.pay-alloc-invoice').value);
+    const amount = Number(tr.querySelector('.pay-alloc-amount').value);
+    if (!invId) { toast('Semua baris alokasi harus pilih invoice', true); return null; }
+    if (!amount || amount <= 0) { toast('Jumlah bayar harus > 0', true); return null; }
+    allocs.push({ invoice_no: null, invoice_id: invId, amount });
+  }
+  if (!allocs.length) { toast('Minimal 1 alokasi invoice', true); return null; }
+
+  // Map invoice_id → invoice_no untuk payload RPC
+  const map = {};
+  (state.payInvoicesCache || []).forEach(i => { map[i.id] = i.invoice_no; });
+  return allocs.map(a => ({ invoice_no: map[a.invoice_id], amount: a.amount }));
+}
+
+async function submitPayment() {
+  if (!state.canCreatePayment) { toast('Tidak ada akses', true); return; }
+
+  const dateEl = document.getElementById('pDate');
+  const currency = document.getElementById('pCurrency').value;
+  const bankCode = document.getElementById('pBankCode').value;
+  const fx = Number(document.getElementById('pFxRate').value) || 0;
+  const note = document.getElementById('pNote').value.trim() || null;
+
+  if (!dateEl.value) { toast('Tanggal wajib diisi', true); return; }
+  if (!bankCode) { toast('Rekening sumber wajib dipilih', true); return; }
+  if (currency === 'USD' && (!fx || fx <= 0)) { toast('Kurs beli USD wajib diisi', true); return; }
+
+  const allocs = collectPaymentAllocs();
+  if (allocs === null) return;
+
+  const total = allocs.reduce((s, a) => s + a.amount, 0);
+  const confirmMsg = `Simpan pembayaran ${currency} ${fmt(total)}` +
+    (currency === 'USD' ? ` @ kurs ${fmt(fx)} (≈ Rp ${fmt(total * fx)})` : '') +
+    ` ke ${allocs.length} invoice?\n\nJurnal otomatis akan dibuat.`;
+  if (!confirm(confirmMsg)) return;
+
+  const btn = document.getElementById('pSaveBtn');
+  btn.disabled = true; btn.textContent = 'Memproses...';
+
+  try {
+    const payload = {
+      payment_date: dateEl.value,
+      currency,
+      bank_coa_code: bankCode,
+      note,
+      exchange_rate_buy: currency === 'USD' ? fx : 1,
+      allocations: allocs
+    };
+    const { data, error } = await supabase.rpc('add_purchase_payment', { p_payload: payload });
+    if (error) throw error;
+
+    const r = data || {};
+    toast(`✓ Pembayaran ${r.payment_no || ''} tersimpan` +
+      (r.selisih_kurs_idr ? ` · selisih kurs ${fmt(r.selisih_kurs_idr)}` : ''));
+
+    document.getElementById('pResetBtn').click();
+    // reload cache & riwayat
+    await loadPaymentInvoices();
+    await loadPayments();
+  } catch (err) {
+    toast('Gagal: ' + (err.message || err), true);
+  } finally {
+    btn.disabled = false; btn.textContent = 'Simpan Pembayaran';
+  }
+}
+
+// ============================================================
+// TAB PEMBAYARAN — RIWAYAT
+// ============================================================
 async function loadPayments() {
   const tbody = document.getElementById('tbody-payments');
-  tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;color:#9ca3af;padding:16px;">Fitur pembayaran hutang akan tersedia di Phase 2.</td></tr>';
-  document.getElementById('payTotalInfo').textContent = '';
+  tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;color:#9ca3af;padding:16px;">Memuat...</td></tr>';
+
+  let q = supabase
+    .from('purchase_payments')
+    .select(`
+      id, payment_no, payment_date, currency, bank_coa_code,
+      total_amount, exchange_rate_buy, note, journal_id, created_at,
+      allocations:purchase_payment_allocations(
+        amount, amount_idr, selisih_kurs_idr,
+        invoice:purchase_invoices(id, invoice_no)
+      )
+    `)
+    .is('deleted_at', null)
+    .order('payment_date', { ascending: false })
+    .order('id', { ascending: false });
+
+  const f = state.payFilters;
+  if (f.from) q = q.gte('payment_date', f.from);
+  if (f.to) q = q.lte('payment_date', f.to);
+
+  const { data, error } = await q;
+  if (error) {
+    tbody.innerHTML = `<tr><td colspan="10" style="color:#dc2626;">${esc(error.message)}</td></tr>`;
+    return;
+  }
+
+  // filter search (invoice_no / payment_no / vendor via alloc invoice)
+  let rows = data || [];
+  if (f.search) {
+    const s = f.search.toLowerCase();
+    rows = rows.filter(r => {
+      if ((r.payment_no || '').toLowerCase().includes(s)) return true;
+      return (r.allocations || []).some(a =>
+        (a.invoice?.invoice_no || '').toLowerCase().includes(s)
+      );
+    });
+  }
+
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;color:#9ca3af;">Belum ada pembayaran.</td></tr>';
+    document.getElementById('payTotalInfo').textContent = '';
+    return;
+  }
+
+  let totalIdr = 0, totalSelisih = 0;
+  tbody.innerHTML = rows.map(r => {
+    const invNos = (r.allocations || []).map(a => a.invoice?.invoice_no).filter(Boolean);
+    const totalIdrRow = (r.allocations || []).reduce((s, a) => s + Number(a.amount_idr || 0), 0);
+    const selisihRow = (r.allocations || []).reduce((s, a) => s + Number(a.selisih_kurs_idr || 0), 0);
+    totalIdr += totalIdrRow;
+    totalSelisih += selisihRow;
+
+    const selisihColor = selisihRow > 0 ? '#dc2626' : (selisihRow < 0 ? '#059669' : '#6b7280');
+    const selisihLabel = selisihRow > 0 ? `Rugi ${fmt(selisihRow)}` :
+                          selisihRow < 0 ? `Laba ${fmt(-selisihRow)}` : '—';
+
+    return `
+      <tr>
+        <td style="font-family:monospace;font-size:12px;">${esc(r.payment_no)}</td>
+        <td>${fmtDate(r.payment_date)}</td>
+        <td>${esc(r.currency)}</td>
+        <td style="font-size:12px;">${esc(r.bank_coa_code)}</td>
+        <td class="num">${fmt(r.total_amount)}</td>
+        <td class="num">${fmt(totalIdrRow)}</td>
+        <td class="num" style="color:${selisihColor};">${selisihLabel}</td>
+        <td style="font-size:12px;">${invNos.length ? invNos.map(esc).join(', ') : '—'}</td>
+        <td style="font-size:12px;color:#6b7280;">${esc(r.note || '')}</td>
+        <td>
+          ${state.canDeletePayment
+            ? `<button class="btn-del-pay" data-id="${r.id}" data-no="${esc(r.payment_no)}"
+                       style="background:#fee2e2;color:#991b1b;border:none;border-radius:5px;padding:4px 8px;font-size:12px;cursor:pointer;">
+                 Hapus
+               </button>`
+            : '—'}
+        </td>
+      </tr>`;
+  }).join('');
+
+  document.getElementById('payTotalInfo').textContent =
+    `Total IDR dibayar: Rp ${fmt(totalIdr)} · Selisih kurs net: ${fmt(totalSelisih)}`;
+
+  tbody.querySelectorAll('.btn-del-pay').forEach(btn => {
+    btn.addEventListener('click', () => deletePayment(btn.dataset.id, btn.dataset.no));
+  });
+}
+
+async function deletePayment(paymentId, paymentNo) {
+  if (!state.canDeletePayment) { toast('Tidak ada akses hapus', true); return; }
+  if (!confirm(`Hapus pembayaran ${paymentNo}?\n\nJurnal reversal akan dibuat otomatis, status invoice dikembalikan.`)) return;
+
+  try {
+    const { data, error } = await supabase.rpc('delete_purchase_payment', { p_payment_id: Number(paymentId) });
+    if (error) throw error;
+    toast(`✓ ${paymentNo} dihapus (reversal journal #${data?.reversal_journal_id || '-'})`);
+    await loadPaymentInvoices();
+    await loadPayments();
+    if (state.activeTab === 'invoice') await loadInvoices();
+  } catch (err) {
+    toast('Gagal hapus: ' + (err.message || err), true);
+  }
 }
 
 // ============================================================
@@ -829,35 +1127,6 @@ function bindFilters() {
     state.page = 1;
     loadInvoices();
   });
-}
-
-function bindPaymentTab() {
-  const sel = document.getElementById('pInvoice');
-  sel.addEventListener('change', () => onInvoiceSelect(sel.value));
-
-  const methodSel = document.getElementById('pMethod');
-  const accWrap   = document.getElementById('pAccountWrap');
-  function toggleAcc() {
-    const m = methodSel.value;
-    accWrap.style.display = ['transfer','cash','giro'].includes(m) ? '' : 'none';
-  }
-  methodSel.addEventListener('change', toggleAcc);
-  toggleAcc();
-
-  document.getElementById('pSaveBtn').addEventListener('click', () => {
-    toast('Fitur pembayaran hutang akan tersedia di Phase 2.', true);
-  });
-
-  let timer;
-  document.getElementById('paySearch').addEventListener('input', () => {
-    clearTimeout(timer);
-    timer = setTimeout(() => {
-      state.payFilters.search = document.getElementById('paySearch').value;
-      loadPayments();
-    }, 350);
-  });
-
-  document.getElementById('pDate').value = new Date().toISOString().slice(0,10);
 }
 
 // ============================================================
