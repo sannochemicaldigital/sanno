@@ -14,3 +14,14 @@ export async function createPartner(p) {
   if (error) throw error;
   return data;
 }
+
+export async function updatePartner(id, patch) {
+  const { data, error } = await supabase
+    .from('partners')
+    .update(patch)
+    .eq('id', id)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}

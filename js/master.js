@@ -2,7 +2,7 @@
 import { requireAuth, logout } from './auth.js';
 import { renderNav, requirePageAccess } from './access.js';
 import { listAccounts, createAccount } from './accounts.js';
-import { listPartners, createPartner } from './partners.js';
+import { listPartners, createPartner, updatePartner } from './partners.js';
 import { listItems, createItem } from './items.js';
 
 function toast(msg, isError = false) {
@@ -20,12 +20,24 @@ function fmtMoney(n) {
   return 'Rp ' + Number(n).toLocaleString('id-ID');
 }
 
+// ============================================================
+// STATE
+// ============================================================
+const state = {
+  role: null,
+  editingPartnerId: null
+};
+
+const canEditPartner = () =>
+  state.role === 'admin' || state.role === 'superadmin';
+
 (async () => {
   const user = await requireAuth();
   if (!user) return;
 
   const role = await requirePageAccess('master');
   if (!role) return;
+  state.role = role;
 
   document.getElementById('logoutBtn').addEventListener('click', logout);
   await renderNav(document.getElementById('mainNav'), 'master');
@@ -45,6 +57,8 @@ function fmtMoney(n) {
   document.getElementById('form-account').addEventListener('submit', onSubmitAccount);
   document.getElementById('form-partner').addEventListener('submit', onSubmitPartner);
   document.getElementById('form-item').addEventListener('submit', onSubmitItem);
+
+  document.getElementById('partnerCancelBtn').addEventListener('click', cancelEditPartner);
 })();
 
 async function renderAccounts() {
@@ -69,14 +83,24 @@ async function renderPartners() {
   try {
     const rows = await listPartners();
     tb.innerHTML = rows.map(p => `
-      <tr>
+      <tr data-partner-id="${p.id}">
         <td data-label="Kode">${esc(p.code || '—')}</td>
         <td data-label="Nama">${esc(p.name)}</td>
         <td data-label="Tipe">${esc(p.type)}</td>
         <td data-label="Telepon">${esc(p.phone || '—')}</td>
         <td data-label="Email">${esc(p.email || '—')}</td>
+        <td data-label="Aksi">
+          ${canEditPartner()
+            ? `<button class="btn btn-sm btn-edit-partner" data-id="${p.id}">Edit</button>`
+            : `<span style="color:#9ca3af;">—</span>`}
+        </td>
       </tr>
-    `).join('') || `<tr><td colspan="5" style="text-align:center;color:#9ca3af;">Belum ada partner</td></tr>`;
+    `).join('') || `<tr><td colspan="6" style="text-align:center;color:#9ca3af;">Belum ada partner</td></tr>`;
+
+    // Pasang handler tombol edit
+    tb.querySelectorAll('.btn-edit-partner').forEach(btn => {
+      btn.addEventListener('click', () => startEditPartner(Number(btn.dataset.id)));
+    });
   } catch (err) {
     toast('Gagal memuat partner: ' + err.message, true);
   }
@@ -122,22 +146,66 @@ async function onSubmitAccount(e) {
   }
 }
 
+async function startEditPartner(id) {
+  try {
+    const rows = await listPartners();
+    const p = rows.find(x => x.id === id);
+    if (!p) { toast('Partner tidak ditemukan', true); return; }
+
+    const f = document.getElementById('form-partner');
+    f.code.value = p.code || '';
+    f.name.value = p.name || '';
+    f.type.value = p.type || '';
+    f.phone.value = p.phone || '';
+    f.email.value = p.email || '';
+
+    state.editingPartnerId = id;
+    document.getElementById('partnerSubmitBtn').textContent = 'Simpan Perubahan';
+    document.getElementById('partnerCancelBtn').style.display = 'inline-block';
+
+    // Scroll ke form
+    f.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  } catch (err) {
+    toast('Gagal memuat partner: ' + (err.message || err), true);
+  }
+}
+
+function cancelEditPartner() {
+  state.editingPartnerId = null;
+  const f = document.getElementById('form-partner');
+  f.reset();
+  document.getElementById('partnerSubmitBtn').textContent = 'Simpan Partner';
+  document.getElementById('partnerCancelBtn').style.display = 'none';
+  toast('Edit dibatalkan');
+}
+
 async function onSubmitPartner(e) {
   e.preventDefault();
   const f = e.target;
   const btn = f.querySelector('button[type=submit]');
   btn.disabled = true;
   try {
-    await createPartner({
+    const payload = {
       code: f.code.value.trim() || null,
       name: f.name.value.trim(),
       type: f.type.value,
       phone: f.phone.value.trim() || null,
       email: f.email.value.trim() || null
-    });
+    };
+
+    if (state.editingPartnerId) {
+      await updatePartner(state.editingPartnerId, payload);
+      toast('Partner berhasil diperbarui');
+    } else {
+      await createPartner(payload);
+      toast('Partner berhasil disimpan');
+    }
+
+    state.editingPartnerId = null;
     f.reset();
+    document.getElementById('partnerSubmitBtn').textContent = 'Simpan Partner';
+    document.getElementById('partnerCancelBtn').style.display = 'none';
     await renderPartners();
-    toast('Partner berhasil disimpan');
   } catch (err) {
     toast('Gagal simpan partner: ' + (err.message || err), true);
   } finally {
