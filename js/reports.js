@@ -131,51 +131,20 @@ export async function cashflow({ from = null, to = null } = {}) {
 }
 
 // ============================================================
-// AGING PIUTANG
+// AGING PIUTANG (via RPC aging_piutang — sumber: historical_invoices)
 // ============================================================
 export async function agingPiutang({ asOf = null } = {}) {
-  const cutoff = asOf || new Date().toISOString().slice(0, 10);
-
-  const { data: lines, error } = await supabase
-    .from('journal_lines')
-    .select(`
-      partner_id, debit_base, credit_base,
-      journals!inner(journal_date),
-      accounts!inner(code),
-      partners!inner(name, type)
-    `)
-    .like('accounts.code', '1-12%')
-    .not('partner_id', 'is', null)
-    .lte('journals.journal_date', cutoff);
+  const { data, error } = await supabase.rpc('aging_piutang', {
+    p_as_of: asOf || new Date().toISOString().slice(0, 10)
+  });
   if (error) throw error;
-
-  // ✅ FIX: handle 'customer' dan 'both'
-  const custLines = lines.filter(l =>
-    l.partners?.type === 'customer' || l.partners?.type === 'both'
-  );
-
-  const buckets = {};
-  const today = new Date(cutoff);
-
-  for (const l of custLines) {
-    const key = l.partner_id;
-    if (!buckets[key]) {
-      buckets[key] = { name: l.partners.name, b0_30: 0, b31_60: 0, b60p: 0, total: 0 };
-    }
-    const net = Number(l.debit_base) - Number(l.credit_base);
-    const jDate = new Date(l.journals.journal_date);
-    const days = Math.floor((today - jDate) / (1000 * 60 * 60 * 24));
-
-    if (days <= 30)       buckets[key].b0_30  += net;
-    else if (days <= 60)  buckets[key].b31_60 += net;
-    else                  buckets[key].b60p   += net;
-
-    buckets[key].total += net;
-  }
-
-  return Object.values(buckets)
-    .filter(b => Math.abs(b.total) > 0.01)
-    .sort((a, b) => b.total - a.total);
+  return (data || []).map(r => ({
+    name: r.partner_name,
+    b0_30: Number(r.b0_30),
+    b31_60: Number(r.b31_60),
+    b60p: Number(r.b60p),
+    total: Number(r.total)
+  }));
 }
 
 // ============================================================
