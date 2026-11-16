@@ -77,6 +77,36 @@
           </div>
         </form>
       </div>
+      <div class="card" id="card-edit-user" style="display:none;">
+        <h3 style="margin-top:0;font-size:16px;">Edit User</h3>
+        <form id="form-edit-user">
+          <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(160px,1fr));">
+            <div class="form-row">
+              <label>Email</label>
+              <input name="email" disabled>
+            </div>
+            <div class="form-row">
+              <label>Nama Lengkap</label>
+              <input name="full_name" placeholder="Nama user" required>
+            </div>
+            <div class="form-row">
+              <label>Role</label>
+              <select name="role" id="editUserRole" required></select>
+            </div>
+            <div class="form-row">
+              <label>Status</label>
+              <select name="is_active" required>
+                <option value="true">Aktif</option>
+                <option value="false">Nonaktif</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-actions">
+            <button type="submit" class="btn btn-primary" id="saveEditUserBtn">Simpan Perubahan</button>
+            <button type="button" class="btn btn-secondary" id="cancelEditUserBtn">Batal Edit</button>
+          </div>
+        </form>
+      </div>
 
       <div class="card">
         <h3 style="margin-top:0;font-size:16px;">Daftar User</h3>

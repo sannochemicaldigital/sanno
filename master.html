@@ -19,7 +19,6 @@
       <button data-tab="coa" class="active">Chart of Accounts</button>
       <button data-tab="partner">Partner</button>
       <button data-tab="item">Item</button>
-      <button data-tab="user">User</button>
     </div>
 
     <section id="tab-coa" class="tab-panel">
@@ -125,53 +124,7 @@
       </div>
     </section>
 
-    <!-- ===== TAB USER ===== -->
-    <section id="tab-user" class="tab-panel" style="display:none;">
-      <div class="card">
-        <h3 style="margin-top:0;font-size:16px;">Edit User</h3>
-        <form id="form-user">
-          <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(140px,1fr));">
-            <div class="form-row"><label>Email</label><input name="email" disabled></div>
-            <div class="form-row"><label>Nama</label><input name="full_name" placeholder="Nama lengkap" required></div>
-            <div class="form-row">
-              <label>Role</label>
-              <select name="role" required>
-                <option value="">— pilih —</option>
-                <option value="superadmin">Superadmin</option>
-                <option value="admin">Admin</option>
-                <option value="finance">Finance</option>
-                <option value="supervisor">Supervisor</option>
-                <option value="sales">Sales</option>
-                <option value="gudang">Gudang</option>
-                <option value="kasir">Kasir</option>
-              </select>
-            </div>
-            <div class="form-row">
-              <label>Status</label>
-              <select name="is_active" required>
-                <option value="true">Aktif</option>
-                <option value="false">Nonaktif</option>
-              </select>
-            </div>
-          </div>
-          <div class="form-actions">
-            <button type="submit" class="btn btn-primary" id="userSubmitBtn" disabled>Simpan Perubahan</button>
-            <button type="button" class="btn" id="userCancelBtn" style="display:none;">Batal Edit</button>
-          </div>
-        </form>
-      </div>
-      <div class="card">
-        <h3 style="margin-top:0;font-size:16px;">Daftar User</h3>
-        <div class="table-wrap">
-          <table>
-            <thead><tr><th>Email</th><th>Nama</th><th>Role</th><th>Status</th><th>Aksi</th></tr></thead>
-            <tbody id="tbody-users"></tbody>
-          </table>
-        </div>
-      </div>
-    </section>
-  </div>
-
+    
   <div class="toast" id="toast"></div>
 
   <script type="module" src="./js/master.js"></script>
