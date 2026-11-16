@@ -48,7 +48,8 @@
             </div>
           </div>
           <div class="form-actions">
-            <button type="submit" class="btn btn-primary">Simpan Akun</button>
+            <button type="submit" class="btn btn-primary" id="accountSubmitBtn">Simpan Akun</button>
+            <button type="button" class="btn" id="accountCancelBtn" style="display:none;">Batal Edit</button>
           </div>
         </form>
       </div>
@@ -56,7 +57,7 @@
         <h3 style="margin-top:0;font-size:16px;">Daftar Akun</h3>
         <div class="table-wrap">
           <table>
-            <thead><tr><th>Kode</th><th>Nama</th><th>Tipe</th><th>Normal</th></tr></thead>
+            <thead><tr><th>Kode</th><th>Nama</th><th>Tipe</th><th>Normal</th><th>Aksi</th></tr></thead>
             <tbody id="tbody-accounts"></tbody>
           </table>
         </div>
