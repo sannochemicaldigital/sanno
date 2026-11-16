@@ -4,6 +4,7 @@ import { renderNav, requirePageAccess } from './access.js';
 import { listAccounts, createAccount, updateAccount } from './accounts.js';
 import { listPartners, createPartner, updatePartner } from './partners.js';
 import { listItems, createItem } from './items.js';
+import { listProfiles, updateProfile } from './profiles.js';
 
 function toast(msg, isError = false) {
   const el = document.getElementById('toast');
@@ -27,8 +28,8 @@ function fmtMoney(n) {
 function normalizeAccountCode(raw) {
   const s = String(raw ?? '').trim();
   if (!s) return '';
-  if (s.includes('-')) return s;          // sudah ada minus, biarkan
-  if (/^\d{5}$/.test(s)) return s[0] + '-' + s.slice(1); // 5 digit angka
+  if (s.includes('-')) return s;
+  if (/^\d{5}$/.test(s)) return s[0] + '-' + s.slice(1);
   return s;
 }
 
@@ -38,7 +39,8 @@ function normalizeAccountCode(raw) {
 const state = {
   role: null,
   editingPartnerId: null,
-  editingAccountId: null
+  editingAccountId: null,
+  editingUserId: null
 };
 
 const canEdit = () =>
@@ -55,6 +57,12 @@ const canEdit = () =>
   document.getElementById('logoutBtn').addEventListener('click', logout);
   await renderNav(document.getElementById('mainNav'), 'master');
 
+  // Sembunyikan tab User untuk role selain admin/superadmin
+  if (!canEdit()) {
+    const userTabBtn = document.querySelector('.tabs button[data-tab="user"]');
+    if (userTabBtn) userTabBtn.style.display = 'none';
+  }
+
   const tabs = document.querySelectorAll('.tabs button');
   tabs.forEach(btn => {
     btn.addEventListener('click', () => {
@@ -66,13 +74,16 @@ const canEdit = () =>
   });
 
   await Promise.all([renderAccounts(), renderPartners(), renderItems()]);
+  if (canEdit()) await renderUsers();
 
   document.getElementById('form-account').addEventListener('submit', onSubmitAccount);
   document.getElementById('form-partner').addEventListener('submit', onSubmitPartner);
   document.getElementById('form-item').addEventListener('submit', onSubmitItem);
+  document.getElementById('form-user').addEventListener('submit', onSubmitUser);
 
   document.getElementById('partnerCancelBtn').addEventListener('click', cancelEditPartner);
   document.getElementById('accountCancelBtn').addEventListener('click', cancelEditAccount);
+  document.getElementById('userCancelBtn').addEventListener('click', cancelEditUser);
 
   // Auto-format kode akun saat blur (ketik 11140 -> 1-1140)
   document.getElementById('form-account').code.addEventListener('blur', (e) => {
@@ -120,8 +131,6 @@ async function startEditAccount(id) {
     f.name.value = a.name || '';
     f.type.value = a.type || '';
     f.normal_balance.value = a.normal_balance || 'D';
-
-    // Kunci code saat edit (code dipakai relasi & logika laporan)
     f.code.disabled = true;
 
     state.editingAccountId = id;
@@ -159,7 +168,7 @@ async function onSubmitAccount(e) {
       toast('Akun berhasil diperbarui');
     } else {
       await createAccount({
-        code: normalizeAccountCode(f.code.value),   // normalisasi saat submit
+        code: normalizeAccountCode(f.code.value),
         name: f.name.value.trim(),
         type: f.type.value,
         normal_balance: f.normal_balance.value
@@ -315,6 +324,100 @@ async function onSubmitItem(e) {
     toast('Item berhasil disimpan');
   } catch (err) {
     toast('Gagal simpan item: ' + (err.message || err), true);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// ============================================================
+// USERS
+// ============================================================
+async function renderUsers() {
+  const tb = document.getElementById('tbody-users');
+  if (!tb) return;
+  try {
+    const rows = await listProfiles();
+    tb.innerHTML = rows.map(u => `
+      <tr data-user-id="${u.id}">
+        <td data-label="Email">${esc(u.email)}</td>
+        <td data-label="Nama">${esc(u.full_name || '—')}</td>
+        <td data-label="Role">${esc(u.role || '—')}</td>
+        <td data-label="Status">
+          ${u.is_active
+            ? '<span style="color:#059669;font-weight:600;">Aktif</span>'
+            : '<span style="color:#b91c1c;font-weight:600;">Nonaktif</span>'}
+        </td>
+        <td data-label="Aksi">
+          <button class="btn btn-sm btn-edit-user" data-id="${u.id}">Edit</button>
+        </td>
+      </tr>
+    `).join('') || `<tr><td colspan="5" style="text-align:center;color:#9ca3af;">Belum ada user</td></tr>`;
+
+    tb.querySelectorAll('.btn-edit-user').forEach(btn => {
+      btn.addEventListener('click', () => startEditUser(btn.dataset.id));
+    });
+  } catch (err) {
+    toast('Gagal memuat user: ' + err.message, true);
+  }
+}
+
+async function startEditUser(id) {
+  try {
+    const rows = await listProfiles();
+    const u = rows.find(x => x.id === id);
+    if (!u) { toast('User tidak ditemukan', true); return; }
+
+    const f = document.getElementById('form-user');
+    f.email.value = u.email || '';
+    f.full_name.value = u.full_name || '';
+    f.role.value = u.role || '';
+    f.is_active.value = String(!!u.is_active);
+
+    state.editingUserId = id;
+    document.getElementById('userSubmitBtn').disabled = false;
+    document.getElementById('userSubmitBtn').textContent = 'Simpan Perubahan';
+    document.getElementById('userCancelBtn').style.display = 'inline-block';
+
+    f.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  } catch (err) {
+    toast('Gagal memuat user: ' + (err.message || err), true);
+  }
+}
+
+function cancelEditUser() {
+  state.editingUserId = null;
+  const f = document.getElementById('form-user');
+  f.reset();
+  document.getElementById('userSubmitBtn').disabled = true;
+  document.getElementById('userSubmitBtn').textContent = 'Simpan Perubahan';
+  document.getElementById('userCancelBtn').style.display = 'none';
+  toast('Edit dibatalkan');
+}
+
+async function onSubmitUser(e) {
+  e.preventDefault();
+  if (!state.editingUserId) {
+    toast('Pilih user yang akan diedit terlebih dahulu', true);
+    return;
+  }
+  const f = e.target;
+  const btn = f.querySelector('button[type=submit]');
+  btn.disabled = true;
+  try {
+    await updateProfile(state.editingUserId, {
+      full_name: f.full_name.value.trim(),
+      role: f.role.value,
+      is_active: f.is_active.value === 'true'
+    });
+    toast('User berhasil diperbarui. Perubahan role berlaku setelah user login ulang.');
+    state.editingUserId = null;
+    f.reset();
+    document.getElementById('userSubmitBtn').disabled = true;
+    document.getElementById('userSubmitBtn').textContent = 'Simpan Perubahan';
+    document.getElementById('userCancelBtn').style.display = 'none';
+    await renderUsers();
+  } catch (err) {
+    toast('Gagal simpan user: ' + (err.message || err), true);
   } finally {
     btn.disabled = false;
   }
