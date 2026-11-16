@@ -21,6 +21,18 @@ function fmtMoney(n) {
 }
 
 // ============================================================
+// AUTO-FORMAT KODE AKUN
+// "11140" -> "1-1140", "1-1140" tetap "1-1140"
+// ============================================================
+function normalizeAccountCode(raw) {
+  const s = String(raw ?? '').trim();
+  if (!s) return '';
+  if (s.includes('-')) return s;          // sudah ada minus, biarkan
+  if (/^\d{5}$/.test(s)) return s[0] + '-' + s.slice(1); // 5 digit angka
+  return s;
+}
+
+// ============================================================
 // STATE
 // ============================================================
 const state = {
@@ -61,6 +73,11 @@ const canEdit = () =>
 
   document.getElementById('partnerCancelBtn').addEventListener('click', cancelEditPartner);
   document.getElementById('accountCancelBtn').addEventListener('click', cancelEditAccount);
+
+  // Auto-format kode akun saat blur (ketik 11140 -> 1-1140)
+  document.getElementById('form-account').code.addEventListener('blur', (e) => {
+    e.target.value = normalizeAccountCode(e.target.value);
+  });
 })();
 
 // ============================================================
@@ -142,7 +159,7 @@ async function onSubmitAccount(e) {
       toast('Akun berhasil diperbarui');
     } else {
       await createAccount({
-        code: f.code.value.trim(),
+        code: normalizeAccountCode(f.code.value),   // normalisasi saat submit
         name: f.name.value.trim(),
         type: f.type.value,
         normal_balance: f.normal_balance.value
