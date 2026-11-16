@@ -17,12 +17,10 @@ import { supabase } from './supabase-client.js';
 // ============================================================
 // AUDIT LOG
 // ============================================================
-
-// SESUDAH
-let auditInitialized = false;   // [FIX] ganti auditLoaded — dipakai di tab switcher
+let auditInitialized = false;
 let auditCanView = false;
 let auditOffset = 0;
-let auditReqSeq = 0;            // [FIX] race guard (opsional tapi direkomendasikan)
+let auditReqSeq = 0;
 const AUDIT_LIMIT = 50;
 const auditFilters = { action: '', entity: '', dateFrom: '', dateTo: '' };
 
@@ -35,10 +33,8 @@ async function initAuditTab() {
     return;
   }
 
-  // Load opsi filter (actions[], entities[])
   await loadAuditFilterOptions();
 
-  // Bind filter
   document.getElementById('auditAction').addEventListener('change', (e) => {
     auditFilters.action = e.target.value;
     reloadAudit();
@@ -68,7 +64,6 @@ async function initAuditTab() {
   });
   document.getElementById('auditMoreBtn').addEventListener('click', () => loadAudit(true));
 
-  // Load awal
   await reloadAudit();
 }
 
@@ -103,7 +98,7 @@ async function reloadAudit() {
 async function loadAudit(append = false) {
   const tbody = document.getElementById('tbody-audit');
   if (!append) tbody.innerHTML = '';
-const seq = ++auditReqSeq;
+  const seq = ++auditReqSeq;
   try {
     const { data, error } = await supabase.rpc('get_audit_logs', {
       p_user_id: null,
@@ -117,7 +112,7 @@ const seq = ++auditReqSeq;
     if (error) throw error;
 
     const rows = data || [];
-    if (seq !== auditReqSeq) return;   // abaikan respons basi
+    if (seq !== auditReqSeq) return;
     const totalCount = rows[0]?.total_count ?? rows.length;
 
     if (!append && !rows.length) {
@@ -164,7 +159,6 @@ function renderAuditRow(r) {
     </tr>`;
 }
 
-// Toggle payload (delegated event)
 document.addEventListener('click', (e) => {
   const btn = e.target.closest('[data-toggle-payload]');
   if (!btn) return;
@@ -216,7 +210,6 @@ let bankEditId = null;
   document.getElementById('logoutBtn').addEventListener('click', logout);
   await renderNav(document.getElementById('mainNav'), 'settings');
 
-  // Tab switching
   document.querySelectorAll('.tabs button').forEach(btn => {
     btn.addEventListener('click', async () => {
       document.querySelectorAll('.tabs button').forEach(b => b.classList.remove('active'));
@@ -249,42 +242,40 @@ let bankEditId = null;
         await renderPeriods();
       }
       if (btn.dataset.tab === 'audit' && !auditInitialized) {
-  auditInitialized = true;
-  try { await initAuditTab(); }
-  catch (err) {
-    document.getElementById('tbody-audit').innerHTML =
-      `<tr><td colspan="6" style="color:#b91c1c;">Gagal: ${esc(err.message)}</td></tr>`;
-  }
-}
+        auditInitialized = true;
+        try { await initAuditTab(); }
+        catch (err) {
+          document.getElementById('tbody-audit').innerHTML =
+            `<tr><td colspan="6" style="color:#b91c1c;">Gagal: ${esc(err.message)}</td></tr>`;
+        }
+      }
     });
   });
 
-  // Isi dropdown role untuk form user baru
   const roleSel = document.getElementById('newUserRole');
   roleSel.innerHTML = AVAILABLE_ROLES
     .filter(r => r.value !== 'superadmin' || currentRole === 'superadmin')
     .map(r => `<option value="${r.value}">${r.label}</option>`).join('');
 
-  // Preview email dari username
   const usernameEl = document.querySelector('#form-new-user [name=username]');
   usernameEl.addEventListener('input', () => {
     const v = usernameEl.value.trim() || 'username';
     document.getElementById('emailPreview').textContent = `${v}@sanno.local`;
   });
 
-  // Load tab yang butuh data di awal
   await Promise.all([
     renderSettings(),
     renderUsers(),
     renderSalesPartners()
   ]);
 
-  // Event listeners form
   document.getElementById('form-settings').addEventListener('submit', onSaveSettings);
   document.getElementById('form-new-user').addEventListener('submit', onCreateUser);
   document.getElementById('form-company').addEventListener('submit', onSaveCompany);
   document.getElementById('form-bank').addEventListener('submit', onSaveBank);
   document.getElementById('cancelBankEditBtn').addEventListener('click', resetBankForm);
+  document.getElementById('form-edit-user').addEventListener('submit', onSubmitEditUser);
+  document.getElementById('cancelEditUserBtn').addEventListener('click', cancelEditUser);
   attachLockPeriodForm();
 })();
 
@@ -355,48 +346,23 @@ async function renderUsers() {
         <tr>
           <td data-label="Email">${esc(u.email)}</td>
           <td data-label="Nama">${esc(u.full_name || '—')}</td>
-          <td data-label="Role">
-            <select data-role-user="${u.id}" ${canEdit ? '' : 'disabled'}
-                    style="padding:4px 8px;border:1px solid #d0d5dd;border-radius:6px;font-size:13px;">
-              ${AVAILABLE_ROLES
-                .filter(r => r.value !== 'superadmin' || currentRole === 'superadmin')
-                .map(r => `<option value="${r.value}" ${r.value === u.role ? 'selected' : ''}>${r.label}</option>`)
-                .join('')}
-            </select>
-          </td>
+          <td data-label="Role">${esc(u.role || '—')}</td>
           <td data-label="Status">
-            <label style="display:flex;align-items:center;gap:6px;font-size:13px;">
-              <input type="checkbox" data-active-user="${u.id}" ${u.is_active ? 'checked' : ''} ${canEdit ? '' : 'disabled'}>
-              ${u.is_active ? 'Aktif' : 'Nonaktif'}
-            </label>
+            ${u.is_active
+              ? '<span style="color:#059669;font-weight:600;">Aktif</span>'
+              : '<span style="color:#9ca3af;">Nonaktif</span>'}
           </td>
           <td data-label="Aksi">
             ${canEdit ? `<button class="btn btn-primary" style="padding:4px 10px;font-size:12px;"
-                          data-save-user="${u.id}">Simpan</button>` : ''}
+                          data-edit-user="${u.id}">Edit</button>` : ''}
             ${canDelete ? `<button class="btn btn-danger" style="padding:4px 10px;font-size:12px;"
                           data-del-user="${u.id}" data-email="${esc(u.email)}">Hapus</button>` : ''}
           </td>
         </tr>`;
     }).join('') || '<tr><td colspan="5" style="text-align:center;color:#9ca3af;">Belum ada user</td></tr>';
 
-    tbody.querySelectorAll('[data-save-user]').forEach(btn => {
-      btn.addEventListener('click', async () => {
-        const uid = btn.dataset.saveUser;
-        const role = tbody.querySelector(`[data-role-user="${uid}"]`).value;
-        const isActive = tbody.querySelector(`[data-active-user="${uid}"]`).checked;
-        const row = btn.closest('tr');
-        const fullName = row.querySelector('[data-label="Nama"]').textContent.trim();
-        try {
-          await updateUser(uid, {
-            full_name: fullName === '—' ? null : fullName,
-            role, is_active: isActive
-          });
-          toast('✓ User diupdate');
-          await renderUsers();
-        } catch (err) {
-          toast('Gagal: ' + (err.message || err), true);
-        }
-      });
+    tbody.querySelectorAll('[data-edit-user]').forEach(btn => {
+      btn.addEventListener('click', () => startEditUser(btn.dataset.editUser));
     });
 
     tbody.querySelectorAll('[data-del-user]').forEach(btn => {
@@ -414,6 +380,66 @@ async function renderUsers() {
   } catch (err) {
     tbody.innerHTML = `<tr><td colspan="5" style="color:#b91c1c;">${esc(err.message)}</td></tr>`;
   }
+}
+
+async function startEditUser(id) {
+  try {
+    const users = await listUsers();
+    const u = users.find(x => x.id === id);
+    if (!u) { toast('User tidak ditemukan', true); return; }
+
+    const f = document.getElementById('form-edit-user');
+    f.dataset.userId = id;
+    f.email.value = u.email || '';
+    f.full_name.value = u.full_name || '';
+    f.is_active.value = String(!!u.is_active);
+
+    const roleSel = document.getElementById('editUserRole');
+    roleSel.innerHTML = AVAILABLE_ROLES
+      .filter(r => r.value !== 'superadmin' || currentRole === 'superadmin')
+      .map(r => `<option value="${r.value}" ${r.value === u.role ? 'selected' : ''}>${r.label}</option>`)
+      .join('');
+
+    document.getElementById('card-edit-user').style.display = 'block';
+    f.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  } catch (err) {
+    toast('Gagal memuat user: ' + (err.message || err), true);
+  }
+}
+
+async function onSubmitEditUser(e) {
+  e.preventDefault();
+  const f = e.target;
+  const btn = document.getElementById('saveEditUserBtn');
+  btn.disabled = true;
+  btn.textContent = 'Menyimpan...';
+
+  try {
+    const userId = f.dataset.userId;
+    if (!userId) throw new Error('User tidak dipilih');
+
+    await updateUser(userId, {
+      full_name: f.full_name.value.trim(),
+      role: f.role.value,
+      is_active: f.is_active.value === 'true'
+    });
+
+    toast('✓ User diperbarui. Perubahan role berlaku setelah user login ulang.');
+    cancelEditUser();
+    await renderUsers();
+  } catch (err) {
+    toast('Gagal: ' + (err.message || err), true);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Simpan Perubahan';
+  }
+}
+
+function cancelEditUser() {
+  const f = document.getElementById('form-edit-user');
+  f.reset();
+  delete f.dataset.userId;
+  document.getElementById('card-edit-user').style.display = 'none';
 }
 
 async function onCreateUser(e) {
@@ -626,7 +652,6 @@ async function renderBank() {
     return;
   }
 
-  // Isi dropdown akun COA
   const coa = await listBankCoaAccounts();
   const sel = document.getElementById('bankCoaSelect');
   sel.innerHTML = '<option value="">— pilih akun —</option>' +
