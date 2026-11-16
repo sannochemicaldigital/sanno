@@ -134,6 +134,34 @@ function periodLabel(from, to) {
     state.to = null;
     loadActive();
   });
+    // ===== YTD / MTD =====
+  const pad = n => String(n).padStart(2, '0');
+  const todayStr = () => {
+    const d = new Date();
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  };
+
+  document.getElementById('btnYtd').addEventListener('click', () => {
+    const d = new Date();
+    const from = `${d.getFullYear()}-01-01`;
+    const to = todayStr();
+    document.getElementById('filterFrom').value = from;
+    document.getElementById('filterTo').value = to;
+    state.from = from;
+    state.to = to;
+    loadActive();
+  });
+
+  document.getElementById('btnMtd').addEventListener('click', () => {
+    const d = new Date();
+    const from = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-01`;
+    const to = todayStr();
+    document.getElementById('filterFrom').value = from;
+    document.getElementById('filterTo').value = to;
+    state.from = from;
+    state.to = to;
+    loadActive();
+  });
   document.getElementById('exportCsv').addEventListener('click', exportCsv);
   document.getElementById('printReportBtn').addEventListener('click', printReport);
 
