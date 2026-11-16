@@ -1,7 +1,7 @@
 // js/master.js
 import { requireAuth, logout } from './auth.js';
 import { renderNav, requirePageAccess } from './access.js';
-import { listAccounts, createAccount } from './accounts.js';
+import { listAccounts, createAccount, updateAccount } from './accounts.js';
 import { listPartners, createPartner, updatePartner } from './partners.js';
 import { listItems, createItem } from './items.js';
 
@@ -25,10 +25,11 @@ function fmtMoney(n) {
 // ============================================================
 const state = {
   role: null,
-  editingPartnerId: null
+  editingPartnerId: null,
+  editingAccountId: null
 };
 
-const canEditPartner = () =>
+const canEdit = () =>
   state.role === 'admin' || state.role === 'superadmin';
 
 (async () => {
@@ -59,25 +60,111 @@ const canEditPartner = () =>
   document.getElementById('form-item').addEventListener('submit', onSubmitItem);
 
   document.getElementById('partnerCancelBtn').addEventListener('click', cancelEditPartner);
+  document.getElementById('accountCancelBtn').addEventListener('click', cancelEditAccount);
 })();
 
+// ============================================================
+// ACCOUNTS
+// ============================================================
 async function renderAccounts() {
   const tb = document.getElementById('tbody-accounts');
   try {
     const rows = await listAccounts();
     tb.innerHTML = rows.map(a => `
-      <tr>
+      <tr data-account-id="${a.id}">
         <td data-label="Kode">${esc(a.code)}</td>
         <td data-label="Nama">${esc(a.name)}</td>
         <td data-label="Tipe">${esc(a.type)}</td>
         <td data-label="Normal">${esc(a.normal_balance)}</td>
+        <td data-label="Aksi">
+          ${canEdit()
+            ? `<button class="btn btn-sm btn-edit-account" data-id="${a.id}">Edit</button>`
+            : `<span style="color:#9ca3af;">—</span>`}
+        </td>
       </tr>
-    `).join('') || `<tr><td colspan="4" style="text-align:center;color:#9ca3af;">Belum ada akun</td></tr>`;
+    `).join('') || `<tr><td colspan="5" style="text-align:center;color:#9ca3af;">Belum ada akun</td></tr>`;
+
+    tb.querySelectorAll('.btn-edit-account').forEach(btn => {
+      btn.addEventListener('click', () => startEditAccount(Number(btn.dataset.id)));
+    });
   } catch (err) {
     toast('Gagal memuat akun: ' + err.message, true);
   }
 }
 
+async function startEditAccount(id) {
+  try {
+    const rows = await listAccounts();
+    const a = rows.find(x => x.id === id);
+    if (!a) { toast('Akun tidak ditemukan', true); return; }
+
+    const f = document.getElementById('form-account');
+    f.code.value = a.code || '';
+    f.name.value = a.name || '';
+    f.type.value = a.type || '';
+    f.normal_balance.value = a.normal_balance || 'D';
+
+    // Kunci code saat edit (code dipakai relasi & logika laporan)
+    f.code.disabled = true;
+
+    state.editingAccountId = id;
+    document.getElementById('accountSubmitBtn').textContent = 'Simpan Perubahan';
+    document.getElementById('accountCancelBtn').style.display = 'inline-block';
+
+    f.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  } catch (err) {
+    toast('Gagal memuat akun: ' + (err.message || err), true);
+  }
+}
+
+function cancelEditAccount() {
+  state.editingAccountId = null;
+  const f = document.getElementById('form-account');
+  f.reset();
+  f.code.disabled = false;
+  document.getElementById('accountSubmitBtn').textContent = 'Simpan Akun';
+  document.getElementById('accountCancelBtn').style.display = 'none';
+  toast('Edit dibatalkan');
+}
+
+async function onSubmitAccount(e) {
+  e.preventDefault();
+  const f = e.target;
+  const btn = f.querySelector('button[type=submit]');
+  btn.disabled = true;
+  try {
+    if (state.editingAccountId) {
+      await updateAccount(state.editingAccountId, {
+        name: f.name.value.trim(),
+        type: f.type.value,
+        normal_balance: f.normal_balance.value
+      });
+      toast('Akun berhasil diperbarui');
+    } else {
+      await createAccount({
+        code: f.code.value.trim(),
+        name: f.name.value.trim(),
+        type: f.type.value,
+        normal_balance: f.normal_balance.value
+      });
+      toast('Akun berhasil disimpan');
+    }
+    state.editingAccountId = null;
+    f.reset();
+    f.code.disabled = false;
+    document.getElementById('accountSubmitBtn').textContent = 'Simpan Akun';
+    document.getElementById('accountCancelBtn').style.display = 'none';
+    await renderAccounts();
+  } catch (err) {
+    toast('Gagal simpan akun: ' + (err.message || err), true);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// ============================================================
+// PARTNERS
+// ============================================================
 async function renderPartners() {
   const tb = document.getElementById('tbody-partners');
   try {
@@ -90,59 +177,18 @@ async function renderPartners() {
         <td data-label="Telepon">${esc(p.phone || '—')}</td>
         <td data-label="Email">${esc(p.email || '—')}</td>
         <td data-label="Aksi">
-          ${canEditPartner()
+          ${canEdit()
             ? `<button class="btn btn-sm btn-edit-partner" data-id="${p.id}">Edit</button>`
             : `<span style="color:#9ca3af;">—</span>`}
         </td>
       </tr>
     `).join('') || `<tr><td colspan="6" style="text-align:center;color:#9ca3af;">Belum ada partner</td></tr>`;
 
-    // Pasang handler tombol edit
     tb.querySelectorAll('.btn-edit-partner').forEach(btn => {
       btn.addEventListener('click', () => startEditPartner(Number(btn.dataset.id)));
     });
   } catch (err) {
     toast('Gagal memuat partner: ' + err.message, true);
-  }
-}
-
-async function renderItems() {
-  const tb = document.getElementById('tbody-items');
-  try {
-    const rows = await listItems();
-    tb.innerHTML = rows.map(i => `
-      <tr>
-        <td data-label="SKU">${esc(i.sku)}</td>
-        <td data-label="Nama">${esc(i.name)}</td>
-        <td data-label="Satuan">${esc(i.unit)}</td>
-        <td data-label="Stok">${Number(i.stock_qty).toLocaleString('id-ID')}</td>
-        <td data-label="Avg Cost">${fmtMoney(i.avg_cost)}</td>
-      </tr>
-    `).join('') || `<tr><td colspan="5" style="text-align:center;color:#9ca3af;">Belum ada item</td></tr>`;
-  } catch (err) {
-    toast('Gagal memuat item: ' + err.message, true);
-  }
-}
-
-async function onSubmitAccount(e) {
-  e.preventDefault();
-  const f = e.target;
-  const btn = f.querySelector('button[type=submit]');
-  btn.disabled = true;
-  try {
-    await createAccount({
-      code: f.code.value.trim(),
-      name: f.name.value.trim(),
-      type: f.type.value,
-      normal_balance: f.normal_balance.value
-    });
-    f.reset();
-    await renderAccounts();
-    toast('Akun berhasil disimpan');
-  } catch (err) {
-    toast('Gagal simpan akun: ' + (err.message || err), true);
-  } finally {
-    btn.disabled = false;
   }
 }
 
@@ -163,7 +209,6 @@ async function startEditPartner(id) {
     document.getElementById('partnerSubmitBtn').textContent = 'Simpan Perubahan';
     document.getElementById('partnerCancelBtn').style.display = 'inline-block';
 
-    // Scroll ke form
     f.scrollIntoView({ behavior: 'smooth', block: 'center' });
   } catch (err) {
     toast('Gagal memuat partner: ' + (err.message || err), true);
@@ -210,6 +255,27 @@ async function onSubmitPartner(e) {
     toast('Gagal simpan partner: ' + (err.message || err), true);
   } finally {
     btn.disabled = false;
+  }
+}
+
+// ============================================================
+// ITEMS
+// ============================================================
+async function renderItems() {
+  const tb = document.getElementById('tbody-items');
+  try {
+    const rows = await listItems();
+    tb.innerHTML = rows.map(i => `
+      <tr>
+        <td data-label="SKU">${esc(i.sku)}</td>
+        <td data-label="Nama">${esc(i.name)}</td>
+        <td data-label="Satuan">${esc(i.unit)}</td>
+        <td data-label="Stok">${Number(i.stock_qty).toLocaleString('id-ID')}</td>
+        <td data-label="Avg Cost">${fmtMoney(i.avg_cost)}</td>
+      </tr>
+    `).join('') || `<tr><td colspan="5" style="text-align:center;color:#9ca3af;">Belum ada item</td></tr>`;
+  } catch (err) {
+    toast('Gagal memuat item: ' + err.message, true);
   }
 }
 
