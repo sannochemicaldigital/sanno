@@ -132,9 +132,15 @@
             <label for="pDate">Tanggal</label>
             <input type="date" id="pDate" class="input">
           </div>
-          <div class="form-row" style="flex:1;min-width:140px;margin:0;">
-            <label for="pAmount">Jumlah (IDR)</label>
-            <input type="text" id="pAmount" class="input" placeholder="0" inputmode="numeric">
+          <div class="form-row" style="flex:1;min-width:150px;margin:0;">
+            <label for="pAmount" id="pAmountLabel">Jumlah (IDR)</label>
+            <input type="text" id="pAmount" class="input" placeholder="0" inputmode="decimal">
+            <div id="pAmountHint" style="font-size:11px;color:#6b7280;margin-top:2px;line-height:1.35;"></div>
+          </div>
+          <div class="form-row" id="pRateBuyWrap" style="flex:1;min-width:150px;margin:0;display:none;">
+            <label for="pRateBuy">Kurs beli (Rp/USD)</label>
+            <input type="text" id="pRateBuy" class="input" placeholder="0" inputmode="numeric">
+            <div style="font-size:11px;color:#6b7280;margin-top:2px;line-height:1.35;">Kurs realisasi saat dana masuk</div>
           </div>
           <div class="form-row" style="flex:1;min-width:120px;margin:0;">
             <label for="pMethod">Metode</label>
@@ -213,7 +219,7 @@
                 <th>Invoice</th>
                 <th>Partner</th>
                 <th>Tanggal</th>
-                <th class="num">Jumlah (IDR)</th>
+                <th class="num">Jumlah</th>
                 <th>Metode</th>
                 <th>Rekening</th>
                 <th>Ref</th>
@@ -299,7 +305,7 @@
             <thead>
               <tr>
                 <th>Tanggal</th>
-                <th class="num">Jumlah (IDR)</th>
+                <th class="num">Jumlah</th>
                 <th>Metode</th>
                 <th>Rekening</th>
                 <th>Ref</th>
