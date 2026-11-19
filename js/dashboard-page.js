@@ -11,6 +11,9 @@ import { supabase } from './supabase-client.js';
 // ============================================================
 const fmt = n => 'Rp ' + Number(n || 0).toLocaleString('id-ID');
 const fmtShort = n => 'Rp ' + Number(n || 0).toLocaleString('id-ID', { maximumFractionDigits: 0 });
+const fmtUsd = n => 'USD ' + Number(n || 0).toLocaleString('id-ID', {
+  minimumFractionDigits: 2, maximumFractionDigits: 2
+});
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({
   '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
 }[c]));
@@ -239,14 +242,17 @@ async function renderPiutangCard() {
 }
 
 // ============================================================
-// HUTANG CARD — konsolidasi (2-1100 + hutang_summary)
+// HUTANG CARD — konsolidasi (2-1100 IDR + 2-1101 USD + hutang_summary)
 // ============================================================
 async function renderHutangCard() {
+  // 2-1100 = hutang dagang IDR, 2-1101 = hutang dagang USD (valas).
+  // Saldo di v_account_balance sudah dalam IDR (debit_base/credit_base),
+  // jadi penjumlahan sah untuk kartu total; rincian per mata uang tetap
+  // ditampilkan supaya nilai USD tidak "hilang" seperti sebelumnya.
   const { data: acc, error: e1 } = await supabase
     .from('v_account_balance')
-    .select('code, name, balance')
-    .eq('code', '2-1100')
-    .single();
+    .select('id, code, name, balance')
+    .in('code', ['2-1100', '2-1101']);
   if (e1) { console.warn('[v_account_balance] hutang error:', e1.message); return ''; }
 
   // Coba ambil dari view hutang_summary (kalau sudah dibuat)
@@ -255,19 +261,61 @@ async function renderHutangCard() {
     .select('*')
     .maybeSingle();
 
-  const saldo = Number(acc?.balance || 0);
+  const row = code => (acc || []).find(a => a.code === code);
+  const saldoIdr = Number(row('2-1100')?.balance || 0);
+  const saldoUsd = Number(row('2-1101')?.balance || 0);   // setara IDR
+  const saldo = saldoIdr + saldoUsd;
+
+  // Nominal mata uang asli pada 2-1101 (baris jurnal berkurs USD)
+  let usdNominal = null;
+  const accUsd = row('2-1101');
+  if (accUsd?.id && saldoUsd) {
+    const { data: usdLines, error: e2 } = await supabase
+      .from('journal_lines')
+      .select('debit, credit, journals!inner(currency_code)')
+      .eq('account_id', accUsd.id)
+      .eq('journals.currency_code', 'USD');
+    if (e2) console.warn('[journal_lines] nominal USD error:', e2.message);
+    else usdNominal = (usdLines || [])
+      .reduce((t, l) => t + Number(l.credit || 0) - Number(l.debit || 0), 0);
+  }
+
   const overdue = Number(sum?.total_overdue_idr || 0);
-  const countOpen = Number(sum?.count_open || 0);
-  const countPaid = Number(sum?.count_paid || 0);
+  let countOpen = Number(sum?.count_open || 0);
+  let countPaid = Number(sum?.count_paid || 0);
+
+  // Kalau view hutang_summary belum ada di DB (sum null), jangan tampilkan
+  // angka 0 palsu -> hitung langsung dari status invoice.
+  if (!sum) {
+    const { data: invStatus } = await supabase
+      .from('purchase_invoices')
+      .select('status');
+    const rows = invStatus || [];
+    countOpen = rows.filter(r => r.status === 'posted' || r.status === 'partial').length;
+    countPaid = rows.filter(r => r.status === 'paid').length;
+  }
+
   const overdueColor = overdue > 0 ? '#b91c1c' : '#059669';
+  const rincian = saldoUsd
+    ? ('IDR ' + fmtShort(saldoIdr) + ' · ' +
+       (usdNominal === null
+          ? 'USD setara ' + fmtShort(saldoUsd)
+          : fmtUsd(usdNominal) + ' (setara ' + fmtShort(saldoUsd) + ')'))
+    : '';
+  const overdueHtml = sum
+    ? `Overdue: <strong style="color:${overdueColor};">${fmtShort(overdue)}</strong>`
+    : '';
+
+  const info = [`${countOpen} invoice terbuka · ${countPaid} lunas`];
+  if (rincian) info.push(rincian);
+  if (overdueHtml) info.push(overdueHtml);
 
   return `
     <div class="card" style="border-left:4px solid #dc2626;">
       <div style="font-size:12px;color:#666;margin-bottom:6px;">Hutang Dagang</div>
       <div style="font-size:22px;font-weight:700;color:#dc2626;">${fmtShort(saldo)}</div>
       <div style="font-size:11px;color:#6b7280;margin-top:6px;line-height:1.5;">
-        ${countOpen} invoice terbuka · ${countPaid} lunas<br>
-        Overdue: <strong style="color:${overdueColor};">${fmtShort(overdue)}</strong>
+        ${info.join('<br>')}
       </div>
     </div>`;
 }
@@ -275,6 +323,16 @@ async function renderHutangCard() {
 // ============================================================
 // FINANCE / SUPERVISOR / ADMIN / VIEWER
 // ============================================================
+async function saldoAkun(code) {
+  const { data, error } = await supabase
+    .from('v_account_balance')
+    .select('balance')
+    .eq('code', code)
+    .maybeSingle();
+  if (error) { console.warn('[v_account_balance] ' + code + ':', error.message); return 0; }
+  return Number(data?.balance || 0);
+}
+
 async function renderFinanceDashboard(container) {
   const data = await dashboardBalances();
   const map = Object.fromEntries(data.map(d => [d.key, d]));
@@ -300,10 +358,13 @@ async function renderFinanceDashboard(container) {
   }
   if (await hasPermission('finance.hutang.view')) {
     cards.push(card('Hutang Bank', map.hutang_bank?.balance));
-    // Hutang Dagang — konsolidasi (2-1100 + hutang_summary)
+    // Hutang Dagang — konsolidasi (2-1100 IDR + 2-1101 USD + hutang_summary)
     const hutangHtml = await renderHutangCard();
     if (hutangHtml) cards.push(hutangHtml);
-    cards.push(card('Hutang Pihak Ketiga', map.hutang_pihak3?.balance));
+    // dashboard_mapping belum punya baris 'hutang_pihak3' di seed SQL-02,
+    // jadi kalau kosong ambil langsung akun 2-1110 (Hutang Pihak Ketiga).
+    const pihak3 = map.hutang_pihak3?.balance ?? await saldoAkun('2-1110');
+    cards.push(card('Hutang Pihak Ketiga', pihak3));
   }
 
   container.innerHTML = cards.length
