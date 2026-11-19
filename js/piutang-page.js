@@ -5,6 +5,13 @@ import { renderNav, requirePageAccess } from './access.js';
 import { hasPermission, preloadPermissions } from './permissions.js';
 import { agingPiutang } from './reports.js';
 
+// Penanda build: muncul di console + atribut <body data-build>.
+// Dipakai untuk memastikan browser TIDAK memuat versi lama dari cache.
+const BUILD = 'v10.2.0';
+document.body.dataset.build = BUILD;
+console.info('[piutang-page] build ' + BUILD +
+  ' — Simpan: add_sales_receipt · Hapus: delete_sales_receipt');
+
 // ============================================================
 // UTIL
 // ============================================================
@@ -66,6 +73,19 @@ function parseNumberId(s) {
   if (!t) return NaN;
   if (t.includes(',')) t = t.replace(/\./g, '').replace(',', '.');
   else t = t.replace(/\./g, '');
+  return Number(t);
+}
+// USD: titik = desimal (7371.50), koma = desimal bila tidak ada titik (7371,5),
+// format Indonesia (7.371,50) tetap didukung.
+function parseNumberUsd(s) {
+  if (s === null || s === undefined) return NaN;
+  let t = String(s).trim().replace(/\s/g, '');
+  if (!t) return NaN;
+  if (t.includes(',') && t.includes('.')) {
+    t = t.replace(/\./g, '').replace(',', '.');
+  } else if (t.includes(',')) {
+    t = t.replace(',', '.');
+  }
   return Number(t);
 }
 
@@ -374,22 +394,29 @@ async function openDetail(invoiceId) {
   // Section Pembayaran
   const { data: pays, error: e3 } = await supabase
     .from('historical_invoice_payments')
-    .select(`id, payment_date, amount_idr, method, reference_no, note, created_at, created_by, account:accounts(code, name)`)
+    .select(`id, payment_date, amount_idr, amount_usd, exchange_rate_buy, method, reference_no, note, created_at, created_by, account:accounts(code, name)`)
     .eq('invoice_id', invoiceId)
     .order('payment_date', { ascending: true })
     .order('id', { ascending: true });
 
   if (!e3 && pays && pays.length) {
     paySection.style.display = 'block';
+    const isUsd = String(inv.currency || 'IDR').toUpperCase() === 'USD';
     const totalManual = pays.reduce((s, p) => s + Number(p.amount_idr || 0), 0);
+    const paidUsd = pays.reduce((s, p) => s + Number(p.amount_usd || 0), 0);
     const partial = Number(inv.partial_payment_idr || 0);
     const totalPaid = partial + totalManual;
     const sisa = Number(inv.total_idr || 0) - totalPaid;
+    const sisaUsd = Number(inv.subtotal || 0) - paidUsd;
 
     payBody.innerHTML = pays.map(p => `
       <tr>
         <td>${fmtDate(p.payment_date)}</td>
-        <td class="num">${fmt(p.amount_idr)}</td>
+        <td class="num">${
+          p.amount_usd !== null && p.amount_usd !== undefined
+            ? `USD ${fmt(p.amount_usd)}<div style="font-size:11px;color:#6b7280;">Rp ${fmt(p.amount_idr)} @ ${fmt(p.exchange_rate_buy)}</div>`
+            : `Rp ${fmt(p.amount_idr)}`
+        }</td>
         <td>${esc(p.method)}</td>
         <td style="font-size:12px;">${esc(p.account?.code || '')} ${esc(p.account?.name || '')}</td>
         <td style="font-size:12px;">${esc(p.reference_no || '')}</td>
@@ -401,19 +428,21 @@ async function openDetail(invoiceId) {
     paySummary.innerHTML = `
       <div style="display:flex;gap:16px;flex-wrap:wrap;background:#f9fafb;padding:10px 12px;border-radius:8px;">
         <div><span style="color:#6b7280;">Total dibayar:</span> <strong>${fmt(totalPaid)}</strong></div>
+        ${isUsd ? `<div><span style="color:#6b7280;">Diterima USD:</span> <strong>${fmt(paidUsd)}</strong></div>` : ''}
         <div><span style="color:#6b7280;">Excel (Titip):</span> ${fmt(partial)}</div>
         <div><span style="color:#6b7280;">Manual:</span> ${fmt(totalManual)}</div>
-        <div><span style="color:#6b7280;">Sisa:</span> <strong style="color:${sisa > 0 ? '#dc2626' : '#059669'};">${fmt(sisa)}</strong></div>
+        <div><span style="color:#6b7280;">Sisa:</span> <strong style="color:${(isUsd ? sisaUsd : sisa) > 0 ? '#dc2626' : '#059669'};">${isUsd ? 'USD ' + fmt(sisaUsd) : fmt(sisa)}</strong></div>
       </div>
     `;
   } else if (pays && pays.length === 0) {
+    const isUsd = String(inv.currency || 'IDR').toUpperCase() === 'USD';
     const partial = Number(inv.partial_payment_idr || 0);
-    if (partial > 0) {
+    if (partial > 0 || isUsd) {
       paySection.style.display = 'block';
       payBody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#9ca3af;padding:8px;">Belum ada pembayaran manual (hanya titip Excel).</td></tr>';
       paySummary.innerHTML = `<div style="background:#f9fafb;padding:10px 12px;border-radius:8px;">
         <span style="color:#6b7280;">Excel (Titip):</span> <strong>${fmt(partial)}</strong> ·
-        <span style="color:#6b7280;">Sisa:</span> <strong style="color:#dc2626;">${fmt(Number(inv.total_idr||0) - partial)}</strong>
+        <span style="color:#6b7280;">Sisa:</span> <strong style="color:#dc2626;">${isUsd ? 'USD ' + fmt(Number(inv.subtotal || 0) - Number(inv.paid_usd || 0)) : fmt(Number(inv.total_idr||0) - partial)}</strong>
       </div>`;
     }
   }
@@ -439,8 +468,21 @@ async function loadBankAccounts() {
   const sel = document.getElementById('pAccount');
   sel.innerHTML = '<option value="">— pilih rekening —</option>' +
     state.bankAccounts.map(a =>
-      `<option value="${a.id}">${esc(a.code)} — ${esc(a.name)}</option>`
+      `<option value="${esc(a.code)}">${esc(a.code)} — ${esc(a.name)}</option>`
     ).join('');
+}
+
+// Kurs USD terakhir dari master kurs (dipakai sebagai default kurs beli).
+async function latestUsdRate() {
+  const { data, error } = await supabase
+    .from('exchange_rates')
+    .select('rate_to_base, rate_date')
+    .eq('currency_code', 'USD')
+    .order('rate_date', { ascending: false })
+    .limit(1);
+  if (error || !data || !data.length) return null;
+  const r = Number(data[0].rate_to_base);
+  return isNaN(r) || r <= 0 ? null : r;
 }
 
 // ============================================================
@@ -471,27 +513,55 @@ async function onInvoiceSelect(invoiceId) {
   }
   const { data: inv, error } = await supabase
     .from('historical_invoices')
-    .select(`id, invoice_no, total_idr, partial_payment_idr, manual_payment_idr, status, partner:partners!inner(name)`)
+    .select(`id, invoice_no, currency, subtotal, exchange_rate, paid_usd,
+             total_idr, partial_payment_idr, manual_payment_idr, status,
+             partner:partners!inner(name)`)
     .eq('id', invoiceId)
     .single();
   if (error) { toast('Gagal memuat invoice: ' + error.message, true); return; }
   state.selectedInvoice = inv;
 
-  const total = Number(inv.total_idr || 0);
+  const isUsd   = String(inv.currency || 'IDR').toUpperCase() === 'USD';
+  const total   = Number(inv.total_idr || 0);
   const partial = Number(inv.partial_payment_idr || 0);
-  const manual = Number(inv.manual_payment_idr || 0);
-  const sisa = total - partial - manual;
+  const manual  = Number(inv.manual_payment_idr || 0);
+  const sisa    = total - partial - manual;
+  // USD: sisa dihitung dalam mata uang asli (subtotal - SUM(amount_usd)), sama seperti RPC
+  const sisaUsd = Number(inv.subtotal || 0) - Number(inv.paid_usd || 0);
 
   document.getElementById('psInvNo').textContent = inv.invoice_no;
   document.getElementById('psPartner').textContent = inv.partner?.name || '';
-  document.getElementById('psTotal').textContent = 'Rp ' + fmt(total);
+  document.getElementById('psTotal').textContent = isUsd
+    ? `USD ${fmt(inv.subtotal)} @ ${fmt(inv.exchange_rate)}`
+    : 'Rp ' + fmt(total);
   document.getElementById('psPartial').textContent = 'Rp ' + fmt(partial);
-  document.getElementById('psManual').textContent = 'Rp ' + fmt(manual);
-  document.getElementById('psSisa').textContent = 'Rp ' + fmt(sisa);
+  document.getElementById('psManual').textContent = isUsd
+    ? `USD ${fmt(inv.paid_usd)} (Rp ${fmt(manual)})`
+    : 'Rp ' + fmt(manual);
+  document.getElementById('psSisa').textContent = isUsd ? 'USD ' + fmt(sisaUsd) : 'Rp ' + fmt(sisa);
   document.getElementById('psStatus').innerHTML = statusBadge(inv.status);
   document.getElementById('paymentSummaryCard').style.display = 'block';
 
-  document.getElementById('pAmount').value = sisa > 0 ? String(Math.round(sisa)) : '';
+  // Form menyesuaikan mata uang invoice
+  const lbl      = document.getElementById('pAmountLabel');
+  const hint     = document.getElementById('pAmountHint');
+  const rateWrap = document.getElementById('pRateBuyWrap');
+  lbl.textContent = isUsd ? 'Jumlah (USD)' : 'Jumlah (IDR)';
+  document.getElementById('pAmount').value = isUsd
+    ? (sisaUsd > 0 ? sisaUsd.toFixed(2) : '')
+    : (sisa > 0 ? String(Math.round(sisa)) : '');
+
+  if (isUsd) {
+    rateWrap.style.display = '';
+    hint.textContent = `Sisa USD ${fmt(sisaUsd)} · kurs invoice ${fmt(inv.exchange_rate)}. ` +
+      `Isi kurs beli (kurs realisasi) — selisih kurs otomatis ke 5-9100.`;
+    const r = await latestUsdRate();
+    const rate = r || Number(inv.exchange_rate || 0);
+    document.getElementById('pRateBuy').value = rate > 0 ? String(Math.round(rate)) : '';
+  } else {
+    rateWrap.style.display = 'none';
+    hint.textContent = '';
+  }
 }
 
 async function loadPayments() {
@@ -501,7 +571,8 @@ async function loadPayments() {
   let q = supabase
     .from('historical_invoice_payments')
     .select(`
-      id, payment_date, amount_idr, method, reference_no, note, created_at, journal_id,
+      id, payment_date, amount_idr, amount_usd, exchange_rate_buy, selisih_kurs_idr,
+      method, reference_no, note, created_at, journal_id,
       account:accounts(id, code, name),
       invoice:historical_invoices!inner(
         id, invoice_no,
@@ -539,7 +610,11 @@ function renderPaymentsTable(rows) {
       <td style="font-family:monospace;font-size:12px;">${esc(r.invoice?.invoice_no || '—')}</td>
       <td>${esc(r.invoice?.partner?.name || '—')}</td>
       <td>${fmtDate(r.payment_date)}</td>
-      <td class="num" style="font-weight:600;">${fmt(r.amount_idr)}</td>
+      <td class="num" style="font-weight:600;">${
+        r.amount_usd !== null && r.amount_usd !== undefined
+          ? `USD ${fmt(r.amount_usd)}<div style="font-size:11px;color:#6b7280;font-weight:400;">Rp ${fmt(r.amount_idr)} @ ${fmt(r.exchange_rate_buy)}</div>`
+          : `Rp ${fmt(r.amount_idr)}`
+      }</td>
       <td>${esc(r.method)}</td>
       <td style="font-size:12px;">${esc(r.account?.code || '')} ${esc(r.account?.name || '')}</td>
       <td style="font-size:12px;">${esc(r.reference_no || '')}</td>
@@ -547,7 +622,7 @@ function renderPaymentsTable(rows) {
       <td style="font-size:11px;">${r.journal_id ? `<span style="background:#dbeafe;color:#1e40af;padding:2px 6px;border-radius:4px;">JV</span>` : '—'}</td>
       <td>
         ${state.canDeletePayment
-          ? `<button type="button" class="btn btn-danger" data-del-pay="${r.id}" style="padding:4px 10px;font-size:12px;">Hapus</button>`
+          ? `<button type="button" class="btn btn-danger" data-del-pay="${r.id}" data-del-jv="${r.journal_id || ''}" style="padding:4px 10px;font-size:12px;">Hapus</button>`
           : '—'}
       </td>
     </tr>
@@ -557,40 +632,55 @@ function renderPaymentsTable(rows) {
     `Menampilkan ${rows.length} pembayaran · Total: Rp ${fmt(total)}`;
 
   tbody.querySelectorAll('button[data-del-pay]').forEach(btn => {
-    btn.addEventListener('click', () => deletePayment(Number(btn.dataset.delPay)));
+    btn.addEventListener('click', () => deletePayment(Number(btn.dataset.delPay), btn.dataset.delJv || null));
   });
 }
 
 async function submitPayment() {
-  const invoiceId  = document.getElementById('pInvoice').value;
-  const date       = document.getElementById('pDate').value;
-  const amountRaw  = document.getElementById('pAmount').value;
-  const method     = document.getElementById('pMethod').value;
-  const accountId  = document.getElementById('pAccount').value;
-  const ref        = document.getElementById('pRef').value.trim() || null;
-  const note       = document.getElementById('pNote').value.trim() || null;
+  const inv       = state.selectedInvoice;
+  const date      = document.getElementById('pDate').value;
+  const amountRaw = document.getElementById('pAmount').value;
+  const method    = document.getElementById('pMethod').value;
+  const bankCode  = document.getElementById('pAccount').value;
+  const rateRaw   = document.getElementById('pRateBuy').value;
+  const ref       = document.getElementById('pRef').value.trim() || null;
+  const note      = document.getElementById('pNote').value.trim() || null;
 
-  if (!invoiceId) { toast('Pilih invoice dulu', true); return; }
-  if (!date)      { toast('Tanggal wajib diisi', true); return; }
-  const amount = parseNumberId(amountRaw);
+  if (!inv)      { toast('Pilih invoice dulu', true); return; }
+  if (!date)     { toast('Tanggal wajib diisi', true); return; }
+  if (!bankCode) { toast('Pilih rekening dulu (wajib untuk auto-jurnal)', true); return; }
+
+  const isUsd  = String(inv.currency || 'IDR').toUpperCase() === 'USD';
+  // USD: jumlah diisi dalam USD (sisa dihitung dalam USD oleh RPC)
+  const amount = isUsd ? parseNumberUsd(amountRaw) : parseNumberId(amountRaw);
   if (!amount || amount <= 0) { toast('Jumlah tidak valid', true); return; }
-  if (['transfer','cash','giro'].includes(method) && !accountId) {
-    toast('Pilih rekening dulu (untuk auto-jurnal)', true); return;
+
+  let rateBuy = null;
+  if (isUsd) {
+    rateBuy = parseNumberId(rateRaw);
+    if (!rateBuy || rateBuy <= 0) { toast('Kurs beli wajib diisi (> 0)', true); return; }
+    if (!String(bankCode).startsWith('1-112') &&
+        !confirm(`Rekening ${bankCode} bukan rekening USD. Tetap simpan penerimaan USD ke rekening ini?`)) {
+      return;
+    }
   }
 
   const btn = document.getElementById('pSaveBtn');
   btn.disabled = true;
   btn.textContent = 'Menyimpan...';
 
-  const { data, error } = await supabase.rpc('add_historical_payment', {
-    p_invoice_id: Number(invoiceId),
-    p_payment_date: date,
-    p_amount_idr: amount,
-    p_method: method,
-    p_reference_no: ref,
-    p_note: note,
-    p_account_id: accountId ? Number(accountId) : null
-  });
+  const payload = {
+    receipt_date: date,
+    currency: isUsd ? 'USD' : 'IDR',
+    bank_coa_code: bankCode,
+    method,
+    reference_no: ref,
+    note,
+    allocations: [{ invoice_no: inv.invoice_no, amount }]
+  };
+  if (isUsd) payload.exchange_rate_buy = rateBuy;
+
+  const { data, error } = await supabase.rpc('add_sales_receipt', { p_payload: payload });
 
   btn.disabled = false;
   btn.textContent = 'Simpan';
@@ -598,28 +688,62 @@ async function submitPayment() {
   if (error) { toast('Gagal: ' + error.message, true); return; }
 
   const jn = data?.journal_no ? ` · Jurnal ${data.journal_no}` : '';
-  toast('✓ Pembayaran tersimpan' + jn);
+  const fx = data && Math.abs(Number(data.selisih_kurs_idr || 0)) > 0.01
+    ? ` · selisih kurs Rp ${fmt(data.selisih_kurs_idr)}`
+    : '';
+  toast('✓ Penerimaan tersimpan' + jn + fx);
 
   document.getElementById('pAmount').value = '';
   document.getElementById('pRef').value = '';
   document.getElementById('pNote').value = '';
-  document.getElementById('pAccount').value = '';
 
-  if (state.selectedInvoice) {
-    await onInvoiceSelect(state.selectedInvoice.id);
-  }
   await loadPayments();
   await loadPaymentInvoices();
+
+  // pertahankan invoice terpilih; bila sudah lunas (keluar dari daftar) form direset
+  const sel = document.getElementById('pInvoice');
+  if (state.selectedInvoice) {
+    sel.value = String(state.selectedInvoice.id);
+    if (!sel.value) {
+      state.selectedInvoice = null;
+      document.getElementById('paymentSummaryCard').style.display = 'none';
+      document.getElementById('pRateBuyWrap').style.display = 'none';
+      document.getElementById('pAmountHint').textContent = '';
+      document.getElementById('pAmountLabel').textContent = 'Jumlah (IDR)';
+    } else {
+      await onInvoiceSelect(state.selectedInvoice.id);
+    }
+  }
 }
 
-async function deletePayment(paymentId) {
-  if (!confirm('Hapus pembayaran ini? Jurnal terkait juga akan dihapus & status invoice dihitung ulang.')) return;
-  const { error } = await supabase.rpc('delete_historical_payment', { p_payment_id: paymentId });
+async function deletePayment(paymentId, journalId) {
+  const jv = journalId ? Number(journalId) : null;
+  const msg = jv
+    ? 'Hapus penerimaan ini? Jurnal REC-* beserta SELURUH pembayaran dalam jurnal tersebut akan dihapus dan status invoice dihitung ulang.'
+    : 'Hapus pembayaran lama ini (tanpa jurnal)? Status invoice akan dihitung ulang.';
+  if (!confirm(msg)) return;
+
+  let error = null;
+  if (jv) {
+    const res = await supabase.rpc('delete_sales_receipt', { p_journal_id: jv });
+    error = res.error;
+    // Baris LAMA (add_historical_payment) memakai jurnal JV-*, bukan REC-*.
+    // delete_sales_receipt menolaknya -> jatuh ke RPC lama (hapus 1 baris).
+    if (error && /bukan jurnal penerimaan piutang/i.test(error.message || '')) {
+      const res2 = await supabase.rpc('delete_historical_payment', { p_payment_id: paymentId });
+      error = res2.error;
+    }
+  } else {
+    const res2 = await supabase.rpc('delete_historical_payment', { p_payment_id: paymentId });
+    error = res2.error;
+  }
+
   if (error) { toast('Gagal: ' + error.message, true); return; }
   toast('✓ Pembayaran & jurnal dihapus');
   await loadPayments();
   await loadPaymentInvoices();
   if (state.selectedInvoice) {
+    document.getElementById('pInvoice').value = String(state.selectedInvoice.id);
     await onInvoiceSelect(state.selectedInvoice.id);
   }
 }
@@ -628,14 +752,9 @@ function bindPaymentTab() {
   const sel = document.getElementById('pInvoice');
   sel.addEventListener('change', () => onInvoiceSelect(sel.value));
 
-  const methodSel = document.getElementById('pMethod');
-  const accWrap   = document.getElementById('pAccountWrap');
-  function toggleAcc() {
-    const m = methodSel.value;
-    accWrap.style.display = ['transfer','cash','giro'].includes(m) ? '' : 'none';
-  }
-  methodSel.addEventListener('change', toggleAcc);
-  toggleAcc();
+  // Rekening selalu wajib: add_sales_receipt butuh bank_coa_code untuk semua metode,
+  // karena setiap penerimaan membuat jurnal Dr Bank / Cr Piutang.
+  document.getElementById('pAccountWrap').style.display = '';
 
   document.getElementById('pSaveBtn').addEventListener('click', submitPayment);
 

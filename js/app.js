@@ -1,13 +1,9 @@
-// app.js
-// Jalankan di browser / Node (dengan fetch). Membutuhkan:
-//   SUPABASE_URL  dan  SUPABASE_ANON_KEY
+// js/app.js — helper API (login, COA, jurnal, dashboard) untuk test.js.
+// Client-nya DIPINJAM dari js/supabase-client.js supaya hanya ada SATU
+// URL/anon key di repo (project: dqwzueaxphtcwnzvfxlp).
+import { supabase } from './supabase-client.js';
 
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-
-const SUPABASE_URL = 'https://ylssphgggpmirwiivbvw.supabase.co';   // ganti
-const SUPABASE_ANON_KEY = 'sb_publishable_pgXl15Ax0p-0236hTxSGcw_nIJCHMY6';                // ganti
-
-export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+export { supabase };
 
 // ============================================================
 // AUTH
