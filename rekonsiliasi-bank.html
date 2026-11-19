@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Rekonsiliasi Bank — Sanno Accounting</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>🏦</text></svg>">
+  <link rel="stylesheet" href="./css/style.css">
+</head>
+<body>
+  <div class="container">
+    <div class="topbar">
+      <h1>Rekonsiliasi Bank</h1>
+      <div style="display:flex;align-items:center;gap:8px;">
+        <span id="roleBadge" style="font-size:12px;color:#6b7280;"></span>
+        <button class="btn btn-danger" id="logoutBtn">Keluar</button>
+      </div>
+    </div>
+
+    <nav class="nav" id="mainNav"></nav>
+
+    <div class="tabs">
+      <button data-tab="ringkasan" class="active">Ringkasan</button>
+      <button data-tab="baris">Baris Rekening Koran</button>
+      <button data-tab="import">Import CSV</button>
+    </div>
+
+    <!-- ==================== TAB: RINGKASAN ==================== -->
+    <section id="tab-ringkasan" class="tab-panel">
+      <div class="card">
+        <div style="display:flex;gap:24px;flex-wrap:wrap;align-items:center;">
+          <div>
+            <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:.5px;">Saldo Koran (periode terakhir)</div>
+            <div style="font-size:20px;font-weight:600;" id="sumSaldoKoran">—</div>
+            <div style="font-size:11px;color:#9ca3af;" id="sumSaldoKoranCurrency"></div>
+          </div>
+          <div>
+            <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:.5px;">Saldo GL <span id="sumSaldoGlLabel">1-11xx</span></div>
+            <div style="font-size:20px;font-weight:600;" id="sumSaldoGl">—</div>
+            <div style="font-size:11px;color:#9ca3af;" id="sumSaldoGlCurrency"></div>
+          </div>
+          <div>
+            <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:.5px;">Selisih Koran vs GL</div>
+            <div style="font-size:20px;font-weight:600;color:#dc2626;" id="sumSelisihGl">—</div>
+          </div>
+          <div>
+            <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:.5px;">Baris Belum Cocok</div>
+            <div style="font-size:20px;font-weight:600;" id="sumUnmatched">—</div>
+          </div>
+          <div>
+            <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:.5px;">Total File</div>
+            <div style="font-size:20px;font-weight:600;" id="sumImports">—</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+          <h3 style="margin:0;font-size:16px;">File Rekening Koran</h3>
+          <button type="button" class="btn btn-secondary" id="reloadImportsBtn" style="padding:6px 12px;font-size:12px;">Muat ulang</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>File</th>
+                <th>Akun</th>
+                <th>Periode</th>
+                <th class="num">Saldo Awal</th>
+                <th class="num">Masuk</th>
+                <th class="num">Keluar</th>
+                <th class="num">Saldo Akhir</th>
+                <th class="num">Selisih Saldo</th>
+                <th class="num">Cocok</th>
+                <th class="num">Belum</th>
+                <th class="num">Abaikan</th>
+                <th class="num" title="Dalam mata uang akun (IDR = nilai base, valas = nominal asli)">Saldo GL</th>
+                <th class="num" title="Saldo koran periode terakhir dikurangi saldo GL, dalam mata uang akun">Selisih vs GL</th>
+                <th>Status</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="tbody-imports">
+              <tr><td colspan="15" style="text-align:center;color:#9ca3af;padding:16px;">Memuat...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+
+    <!-- ==================== TAB: BARIS ==================== -->
+    <section id="tab-baris" class="tab-panel" style="display:none;">
+      <div class="card">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px;">
+          <select id="fImport" class="input" style="max-width:320px;">
+            <option value="">Semua file</option>
+          </select>
+          <select id="fStatus" class="input" style="max-width:160px;">
+            <option value="">Semua status</option>
+            <option value="unmatched">Belum cocok</option>
+            <option value="auto">Otomatis</option>
+            <option value="manual">Manual</option>
+            <option value="ignored">Diabaikan</option>
+          </select>
+          <input type="text" id="fSearch" class="input" placeholder="Cari keterangan / no jurnal..." style="flex:1;min-width:200px;">
+          <input type="date" id="fFrom" class="input" title="Dari tanggal">
+          <input type="date" id="fTo" class="input" title="Sampai tanggal">
+          <button type="button" class="btn btn-secondary" id="fResetBtn" style="padding:8px 14px;font-size:13px;">Reset</button>
+          <button type="button" class="btn btn-secondary" id="reloadLinesBtn" style="padding:8px 14px;font-size:13px;">Muat ulang</button>
+          <button type="button" class="btn btn-primary" id="autoMatchBtn" style="padding:8px 14px;font-size:13px;">Cocokkan Otomatis</button>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>No</th>
+                <th>Tanggal</th>
+                <th>Keterangan</th>
+                <th>Arah</th>
+                <th class="num">Masuk</th>
+                <th class="num">Keluar</th>
+                <th class="num">Saldo</th>
+                <th>Status</th>
+                <th>Jurnal</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="tbody-lines">
+              <tr><td colspan="10" style="text-align:center;color:#9ca3af;padding:16px;">Memuat...</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-top:12px;font-size:13px;">
+          <span id="linesInfo" style="color:#6b7280;">—</span>
+          <div style="display:flex;gap:8px;">
+            <button type="button" class="btn btn-secondary" id="prevPageBtn" style="padding:6px 12px;font-size:12px;">‹ Sebelumnya</button>
+            <button type="button" class="btn btn-secondary" id="nextPageBtn" style="padding:6px 12px;font-size:12px;">Berikutnya ›</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ==================== TAB: IMPORT ==================== -->
+    <section id="tab-import" class="tab-panel" style="display:none;">
+      <div class="card">
+        <h3 style="margin:0 0 4px;font-size:16px;">Import Rekening Koran (CSV)</h3>
+        <p style="margin:0 0 12px;font-size:12px;color:#6b7280;">
+          Format kolom: <code>tanggal;bulan;tipe;keterangan;masuk_debet;keluar_kredit;saldo</code>
+          (tipe OPEN/MUTASI) atau header generik
+          <code>date;description;debit;credit;balance</code>.
+          Debit = uang masuk, credit = uang keluar. Baris <b>OPEN</b> disimpan sebagai saldo awal
+          dan tidak ikut dihitung pada total maupun pencocokan.
+          Untuk rekening valas pilih <b>mata uang</b> yang sama dengan file koran
+          (contoh CIMB USD = 1-1120 / USD); pencocokan memakai nominal mata uang asli.
+        </p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;">
+          <div>
+            <label style="display:block;font-size:12px;color:#6b7280;margin-bottom:4px;">Akun bank (COA)</label>
+            <select id="impCoa" class="input" style="min-width:240px;"></select>
+          </div>
+          <div>
+            <label style="display:block;font-size:12px;color:#6b7280;margin-bottom:4px;">Mata uang file</label>
+            <select id="impCurrency" class="input" style="min-width:110px;">
+              <option value="IDR">IDR</option>
+              <option value="USD">USD</option>
+              <option value="SGD">SGD</option>
+            </select>
+          </div>
+          <div style="flex:1;min-width:240px;">
+            <label style="display:block;font-size:12px;color:#6b7280;margin-bottom:4px;">File CSV</label>
+            <input type="file" id="impFile" class="input" accept=".csv,text/csv">
+          </div>
+          <button type="button" class="btn btn-primary" id="previewBtn">Baca &amp; Pratinjau</button>
+        </div>
+        <div id="impStatus" style="margin-top:10px;font-size:13px;color:#374151;"></div>
+      </div>
+
+      <div class="card" id="previewCard" style="display:none;">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+          <h3 style="margin:0;font-size:16px;">Pratinjau: <span id="previewFile">—</span>
+            <span id="previewCurrency" style="font-size:12px;font-weight:400;color:#6b7280;"></span></h3>
+          <div style="display:flex;gap:8px;">
+            <button type="button" class="btn btn-secondary" id="cancelPreviewBtn" style="padding:8px 14px;font-size:13px;">Batal</button>
+            <button type="button" class="btn btn-primary" id="commitBtn" style="padding:8px 14px;font-size:13px;">Impor ke Database</button>
+          </div>
+        </div>
+        <div style="display:flex;gap:24px;flex-wrap:wrap;margin-bottom:12px;">
+          <div>
+            <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:.5px;">Baris</div>
+            <div style="font-size:18px;font-weight:600;" id="pvRows">—</div>
+          </div>
+          <div>
+            <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:.5px;">Saldo Awal</div>
+            <div style="font-size:18px;font-weight:600;" id="pvOpening">—</div>
+          </div>
+          <div>
+            <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:.5px;">Total Masuk</div>
+            <div style="font-size:18px;font-weight:600;" id="pvMasuk">—</div>
+          </div>
+          <div>
+            <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:.5px;">Total Keluar</div>
+            <div style="font-size:18px;font-weight:600;" id="pvKeluar">—</div>
+          </div>
+          <div>
+            <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:.5px;">Saldo Akhir</div>
+            <div style="font-size:18px;font-weight:600;" id="pvClosing">—</div>
+          </div>
+          <div>
+            <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:.5px;">Uji Rantai Saldo</div>
+            <div style="font-size:18px;font-weight:600;" id="pvChain">—</div>
+          </div>
+        </div>
+        <div id="pvWarnings" style="font-size:12px;color:#92400e;background:#fef3c7;border-radius:8px;padding:8px 10px;display:none;margin-bottom:12px;"></div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>No</th>
+                <th>Tanggal</th>
+                <th>Keterangan</th>
+                <th>Tipe</th>
+                <th class="num">Masuk</th>
+                <th class="num">Keluar</th>
+                <th class="num">Saldo</th>
+              </tr>
+            </thead>
+            <tbody id="tbody-preview"></tbody>
+          </table>
+        </div>
+        <div style="margin-top:8px;font-size:12px;color:#6b7280;" id="pvMore"></div>
+      </div>
+    </section>
+  </div>
+
+  <!-- Modal pilih baris jurnal GL -->
+  <div id="linkModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;align-items:center;justify-content:center;padding:16px;">
+    <div style="background:#fff;border-radius:10px;max-width:1000px;width:100%;max-height:90vh;overflow:auto;padding:20px;box-shadow:0 4px 24px rgba(0,0,0,.2);">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+        <h3 style="margin:0;font-size:16px;">Tautkan ke Baris Jurnal</h3>
+        <button type="button" id="linkCloseBtn"
+                style="background:none;border:none;font-size:22px;cursor:pointer;color:#6b7280;padding:0 6px;">×</button>
+      </div>
+      <div id="linkHeader" style="font-size:13px;color:#374151;margin-bottom:10px;"></div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Jurnal</th>
+              <th>Tanggal</th>
+              <th>Keterangan</th>
+              <th>Memo</th>
+              <th class="num">Debit</th>
+              <th class="num">Kredit</th>
+              <th>Selisih Hari</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="tbody-candidates">
+            <tr><td colspan="8" style="text-align:center;color:#9ca3af;padding:16px;">—</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script type="module" src="./js/bank-recon-page.js"></script>
+</body>
+</html>
