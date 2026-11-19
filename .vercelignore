@@ -1,0 +1,23 @@
+# ---------------------------------------------------------------------------
+# .vercelignore — berkas/folder yang TIDAK ikut diunggah ke Vercel.
+# Situs ini statis: yang dipakai browser hanya *.html, css/, js/.
+# Semua di bawah ini adalah data/alat kerja internal (rekening koran asli,
+# SQL berisi angka keuangan, laporan, dsb). Vercel menyajikan SEMUA file
+# yang diunggah secara publik, jadi folder data wajib dikecualikan.
+# ---------------------------------------------------------------------------
+bank/
+SQL/
+tools/
+node_modules/
+
+# arsip/skrip lokal
+schema.sql
+seed.sql
+.clinerules
+*.log
+deepseek-log.txt
+
+# dokumen internal (berisi angka produksi)
+INSTALASI-SANNO-ACCOUNTING.txt
+KONTEKS-PROYEK-SANNO.txt
+sanno.txt
