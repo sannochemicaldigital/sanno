@@ -25,6 +25,110 @@ export async function dashboardBalances() {
 }
 
 // ============================================================
+// SALDO SEMUA REKENING BANK — untuk SATU kartu "Saldo Bank" di dashboard
+// ------------------------------------------------------------
+// dashboard_mapping hanya memetakan 1 akun per kartu ('bank' -> 1-1100),
+// jadi rekening lain (CIMB IDR 1-1110, CIMB USD 1-1120, OCBC 1-1130, ...)
+// tidak pernah tampil. Fungsi ini mengambil SEMUA akun COA bank (kode 1-11xx)
+// lalu menjumlahkannya dalam satu daftar.
+//
+// Sumber angka tetap buku besar (v_account_balance = debit_base/credit_base,
+// selalu IDR) supaya konsisten dengan laporan & trial balance.
+// Nama/no rekening diambil dari Pengaturan > Rekening Bank (bank_accounts)
+// bila ada; kalau tabel/nama rekening belum diisi, dipakai nama akun COA.
+// Mata uang rekening diambil dari impor rekening koran terakhir
+// (bank_statement_imports.currency_code); nominal valas (USD) dihitung dari
+// journal_lines.debit/credit (mata uang asli, bukan _base).
+// ============================================================
+export async function bankBalanceSummary() {
+  const { data: coa, error: coaErr } = await supabase
+    .from('accounts')
+    .select('id, code, name')
+    .like('code', '1-11%')
+    .eq('is_active', true)
+    .order('code');
+  if (coaErr) throw coaErr;
+
+  const accounts = coa || [];
+  if (!accounts.length) return { total: 0, items: [] };
+
+  const codes = accounts.map(a => a.code);
+
+  // 1. Saldo buku besar (selalu rupiah)
+  const { data: bal, error: balErr } = await supabase
+    .from('v_account_balance')
+    .select('code, balance')
+    .in('code', codes);
+  if (balErr) throw balErr;
+  const saldo = new Map((bal || []).map(r => [r.code, Number(r.balance || 0)]));
+
+  // 2. Nama & nomor rekening (opsional; kalau belum ada, pakai nama COA)
+  const rekening = new Map();     // code -> baris bank_accounts pertama
+  const { data: ba, error: baErr } = await supabase
+    .from('bank_accounts')
+    .select('bank_name, account_no, is_active, sort_order, accounts!account_id(code)')
+    .order('is_active', { ascending: false })
+    .order('sort_order', { ascending: true });
+  if (baErr) console.warn('[bankBalanceSummary] bank_accounts:', baErr.message);
+  else {
+    for (const r of (ba || [])) {
+      const c = r.accounts?.code;
+      // satu COA bisa punya >1 baris rekening; ambil satu saja supaya
+      // saldo tidak terhitung dobel
+      if (c && !rekening.has(c)) rekening.set(c, r);
+    }
+  }
+
+  // 3. Mata uang rekening = mata uang impor rekening koran paling baru
+  const currency = new Map();
+  const { data: imp, error: impErr } = await supabase
+    .from('bank_statement_imports')
+    .select('coa_code, currency_code, period_end')
+    .order('period_end', { ascending: false });
+  if (impErr) console.warn('[bankBalanceSummary] bank_statement_imports:', impErr.message);
+  else {
+    for (const r of (imp || [])) {
+      if (!r.coa_code || currency.has(r.coa_code)) continue;
+      currency.set(r.coa_code, String(r.currency_code || 'IDR').toUpperCase());
+    }
+  }
+
+  // 4. Nominal mata uang asli untuk rekening valas (USD)
+  const valas = accounts.filter(a => (currency.get(a.code) || 'IDR') !== 'IDR');
+  const nominalUsd = new Map();   // account_id -> nominal USD
+  if (valas.length) {
+    const { data: lines, error: lineErr } = await supabase
+      .from('journal_lines')
+      .select('account_id, debit, credit, journals!inner(currency_code)')
+      .in('account_id', valas.map(a => a.id))
+      .eq('journals.currency_code', 'USD');
+    if (lineErr) console.warn('[bankBalanceSummary] nominal USD:', lineErr.message);
+    else {
+      for (const l of (lines || [])) {
+        nominalUsd.set(l.account_id,
+          (nominalUsd.get(l.account_id) || 0) + Number(l.debit || 0) - Number(l.credit || 0));
+      }
+    }
+  }
+
+  const items = accounts.map(a => {
+    const rek = rekening.get(a.code) || null;
+    const cur = currency.get(a.code) || 'IDR';
+    return {
+      code: a.code,
+      name: a.name,
+      bank_name: rek?.bank_name || null,
+      account_no: rek?.account_no || null,
+      currency: cur,
+      balance: saldo.get(a.code) || 0,                                  // rupiah (base)
+      amount_usd: cur === 'USD' ? (nominalUsd.get(a.id) ?? null) : null // nominal asli
+    };
+  });
+
+  return { total: items.reduce((s, i) => s + i.balance, 0), items };
+}
+
+// ============================================================
 // PIUTANG PER PELANGGAN
 // ============================================================
 export async function piutangPerPelanggan() {

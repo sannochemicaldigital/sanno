@@ -3,7 +3,7 @@ import './input-clear.js';
 import { requireAuth, logout } from './auth.js';
 import { renderNav, requirePageAccess } from './access.js';
 import { preloadPermissions, hasPermission } from './permissions.js';
-import { dashboardBalances } from './reports.js';
+import { dashboardBalances, bankBalanceSummary } from './reports.js';
 import { supabase } from './supabase-client.js';
 
 // ============================================================
@@ -315,6 +315,93 @@ async function renderHutangCard() {
 }
 
 // ============================================================
+// SALDO BANK CARD — SATU kotak untuk SEMUA rekening bank (COA 1-11xx)
+// ------------------------------------------------------------
+// Sebelumnya dashboard hanya menampilkan 1 akun (dashboard_mapping 'bank'
+// -> 1-1100 "Bank BCA"), sehingga CIMB IDR/USD dan OCBC tidak terlihat.
+// Kartu ini menjumlahkan semua rekening dari bankBalanceSummary().
+// ============================================================
+async function renderBankCard() {
+  const bukaKartu = isi => `
+    <div class="card" style="border-left:4px solid #0891b2;grid-column:1/-1;">
+      <div style="font-size:12px;color:#666;margin-bottom:6px;">Saldo Bank</div>
+      ${isi}
+    </div>`;
+
+  let ringkas;
+  try {
+    ringkas = await bankBalanceSummary();
+  } catch (err) {
+    console.warn('[dashboard] bankBalanceSummary:', err.message || err);
+    return bukaKartu(`
+      <div style="font-size:13px;color:#b91c1c;">
+        Gagal memuat saldo bank: ${esc(err.message || err)}
+      </div>`);
+  }
+
+  const items = ringkas.items || [];
+  if (!items.length) {
+    return bukaKartu(`
+      <div style="font-size:13px;color:#9ca3af;">
+        Belum ada akun bank aktif (COA 1-11xx) di bagan akun.
+      </div>`);
+  }
+
+  const adaValas = items.some(i => i.currency !== 'IDR');
+
+  const baris = items.map(i => {
+    const judul = i.bank_name || i.name;
+    const noRek = i.account_no ? ` <span style="color:#9ca3af;">· ${esc(i.account_no)}</span>` : '';
+    const valas = i.currency !== 'IDR'
+      ? (i.amount_usd === null
+          ? `<span style="color:#b45309;">${esc(i.currency)} (nominal belum ada)</span>`
+          : `<span style="color:#6b7280;">${fmtUsd(i.amount_usd)}</span>`)
+      : '';
+    const warnaSaldo = i.balance < 0 ? '#b91c1c' : '#111827';
+    return `
+      <tr>
+        <td data-label="Rekening">${esc(judul)}${noRek}</td>
+        <td data-label="Akun" style="color:#6b7280;font-size:12px;">${esc(i.code)}</td>
+        ${adaValas ? `<td data-label="Valas" style="color:#6b7280;font-size:12px;">${valas}</td>` : ''}
+        <td data-label="Saldo" style="text-align:right;font-weight:600;color:${warnaSaldo};">${fmt(i.balance)}</td>
+      </tr>`;
+  }).join('');
+
+  const totalUsd = adaValas
+    ? items.filter(i => i.currency === 'USD' && i.amount_usd !== null)
+           .reduce((s, i) => s + i.amount_usd, 0)
+    : 0;
+
+  return bukaKartu(`
+    <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap;">
+      <div style="font-size:26px;font-weight:700;color:#0891b2;">${fmtShort(ringkas.total)}</div>
+      <div style="font-size:11px;color:#6b7280;text-align:right;">
+        ${items.length} rekening · saldo buku besar (Rp)<br>
+        ${totalUsd ? 'valas USD ' + Number(totalUsd).toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '&nbsp;'}
+      </div>
+    </div>
+    <div class="table-wrap" style="margin-top:10px;">
+      <table>
+        <thead>
+          <tr>
+            <th>Rekening</th>
+            <th>Akun</th>
+            ${adaValas ? '<th>Valas</th>' : ''}
+            <th style="text-align:right;">Saldo (Rp)</th>
+          </tr>
+        </thead>
+        <tbody>${baris}</tbody>
+        <tfoot>
+          <tr>
+            <td colspan="${adaValas ? 3 : 2}" style="font-weight:600;">Total saldo bank</td>
+            <td style="text-align:right;font-weight:700;color:#0891b2;">${fmt(ringkas.total)}</td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>`);
+}
+
+// ============================================================
 // FINANCE / SUPERVISOR / ADMIN / VIEWER
 // ============================================================
 async function saldoAkun(code) {
@@ -343,7 +430,9 @@ async function renderFinanceDashboard(container) {
     cards.push(card('Saldo Kas', map.kas?.balance));
   }
   if (await hasPermission('finance.bank.view')) {
-    cards.push(card('Saldo Bank BCA', map.bank?.balance));
+    // Satu kartu untuk SEMUA rekening bank (BCA, CIMB IDR, CIMB USD, OCBC, ...)
+    const bankHtml = await renderBankCard();
+    if (bankHtml) cards.push(bankHtml);
   }
   if (await hasPermission('finance.piutang.view')) {
     const piutangHtml = await renderPiutangCard();
