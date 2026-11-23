@@ -209,23 +209,17 @@ async function renderKasirDashboard(container) {
 }
 
 // ============================================================
-// PIUTANG CARD — satu angka dari v_account_balance + sub-info piutang_summary
+// PIUTANG CARD — satu angka dari piutang_summary (historical_invoices)
 // ============================================================
 async function renderPiutangCard() {
-  // 1-1200 = piutang IDR, 1-1201 = piutang USD (kalau sudah dibuat)
-  const { data: acc, error: e1 } = await supabase
-    .from('v_account_balance')
-    .select('code, name, balance')
-    .in('code', ['1-1200', '1-1201']);
-  if (e1) { console.warn('[v_account_balance] error:', e1.message); return ''; }
-
-  const { data: sum } = await supabase
+  const { data: sum, error } = await supabase
     .from('piutang_summary')
     .select('*')
     .single();
+  if (error) { console.warn('[piutang_summary] error:', error.message); return ''; }
 
-  const saldo = (acc || []).reduce((t, a) => t + Number(a.balance || 0), 0);
-  const overdue = Number(sum?.total_overdue_idr || 0);
+  const saldo     = Number(sum?.total_sisa_idr || 0);
+  const overdue   = Number(sum?.total_overdue_idr || 0);
   const countOpen = Number(sum?.count_open || 0);
   const countPaid = Number(sum?.count_paid || 0);
   const overdueColor = overdue > 0 ? '#b91c1c' : '#059669';
