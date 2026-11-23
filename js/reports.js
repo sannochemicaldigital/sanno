@@ -40,6 +40,39 @@ export async function dashboardBalances() {
 // (bank_statement_imports.currency_code); nominal valas (USD) dihitung dari
 // journal_lines.debit/credit (mata uang asli, bukan _base).
 // ============================================================
+// PLAFON REKENING KORAN (overdraft)
+// ------------------------------------------------------------
+// Akun-akun berikut BUKAN simpanan biasa: ketiganya fasilitas plafon
+// rekening koran (overdraft). Saldo MINUS pada akun ini secara ekonomi
+// adalah HUTANG BANK, bukan saldo bank. Karena v_account_balance memberi
+// tanda sesuai normal_balance ('D' = debit - kredit), saldo minus di sini
+// berarti akun bersaldo kredit.
+// ============================================================
+export const PLAFON_RK_CODES = ['1-1110', '1-1120', '1-1130'];
+const PLAFON_RK_SET = new Set(PLAFON_RK_CODES);
+export function isPlafonRk(code) { return PLAFON_RK_SET.has(code); }
+
+// Saldo minus akun plafon RK -> hutang bank (nilai positif).
+// Dipakai kartu "Hutang Bank" di dashboard.
+export async function plafonRkHutang() {
+  const { data, error } = await supabase
+    .from('v_account_balance')
+    .select('code, name, balance')
+    .in('code', PLAFON_RK_CODES);
+  if (error) throw error;
+
+  const items = (data || []).map(r => {
+    const saldo = Number(r.balance || 0);
+    return {
+      code: r.code,
+      name: r.name,
+      balance: saldo,
+      hutang: saldo < 0 ? -saldo : 0
+    };
+  });
+  return { total: items.reduce((s, i) => s + i.hutang, 0), items };
+}
+
 export async function bankBalanceSummary() {
   const { data: coa, error: coaErr } = await supabase
     .from('accounts')
@@ -114,18 +147,30 @@ export async function bankBalanceSummary() {
   const items = accounts.map(a => {
     const rek = rekening.get(a.code) || null;
     const cur = currency.get(a.code) || 'IDR';
+    const saldoAkun = saldo.get(a.code) || 0;                 // rupiah (base)
+    const plafon = isPlafonRk(a.code);
     return {
       code: a.code,
       name: a.name,
       bank_name: rek?.bank_name || null,
       account_no: rek?.account_no || null,
       currency: cur,
-      balance: saldo.get(a.code) || 0,                                  // rupiah (base)
+      balance: saldoAkun,
+      plafon,                                                 // akun plafon rekening koran
+      hutang: plafon && saldoAkun < 0 ? -saldoAkun : 0,        // minus plafon = hutang bank
       amount_usd: cur === 'USD' ? (nominalUsd.get(a.id) ?? null) : null // nominal asli
     };
   });
 
-  return { total: items.reduce((s, i) => s + i.balance, 0), items };
+  const total = items.reduce((s, i) => s + i.balance, 0);
+  const hutangPlafon = items.reduce((s, i) => s + i.hutang, 0);
+
+  return {
+    total,                 // saldo bersih (aset - hutang plafon) = penjumlahan semua baris
+    bankTotal: total + hutangPlafon,   // aset bank: minus plafon RK dikeluarkan (jadi hutang)
+    hutangPlafon,          // total minus akun plafon RK (nilai positif)
+    items
+  };
 }
 
 // ============================================================

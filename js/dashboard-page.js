@@ -3,7 +3,7 @@ import './input-clear.js';
 import { requireAuth, logout } from './auth.js';
 import { renderNav, requirePageAccess } from './access.js';
 import { preloadPermissions, hasPermission } from './permissions.js';
-import { dashboardBalances, bankBalanceSummary } from './reports.js';
+import { dashboardBalances, bankBalanceSummary, plafonRkHutang } from './reports.js';
 import { supabase } from './supabase-client.js';
 
 // ============================================================
@@ -348,6 +348,12 @@ async function renderBankCard() {
   }
 
   const adaValas = items.some(i => i.currency !== 'IDR');
+  // Akun plafon rekening koran (1-1110/1-1120/1-1130): saldo minusnya = HUTANG BANK,
+  // jadi dikeluarkan dari angka aset dan ditampilkan terpisah (lihat kartu Hutang Bank).
+  const totalAset  = Number(ringkas.bankTotal ?? ringkas.total ?? 0);
+  const hutangRk   = Number(ringkas.hutangPlafon || 0);
+  const totalNet   = Number(ringkas.total || 0);          // = totalAset - hutangRk
+  const kodePlafon = items.filter(i => i.plafon).map(i => i.code).join(' / ');
 
   const baris = items.map(i => {
     const judul = i.bank_name || i.name;
@@ -358,11 +364,17 @@ async function renderBankCard() {
           : `<span style="color:#6b7280;">${fmtUsd(i.amount_usd)}</span>`)
       : '';
     const warnaSaldo = i.balance < 0 ? '#b91c1c' : '#111827';
+    const ket = i.plafon
+      ? (i.hutang > 0
+          ? `<span style="color:#b91c1c;font-weight:600;">Plafon RK · hutang</span>`
+          : '<span style="color:#6b7280;">Plafon RK</span>')
+      : '';
     return `
       <tr>
         <td data-label="Rekening">${esc(judul)}${noRek}</td>
         <td data-label="Akun" style="color:#6b7280;font-size:12px;">${esc(i.code)}</td>
         ${adaValas ? `<td data-label="Valas" style="color:#6b7280;font-size:12px;">${valas}</td>` : ''}
+        <td data-label="Ket" style="font-size:11px;">${ket}</td>
         <td data-label="Saldo" style="text-align:right;font-weight:600;color:${warnaSaldo};">${fmt(i.balance)}</td>
       </tr>`;
   }).join('');
@@ -373,11 +385,15 @@ async function renderBankCard() {
     : 0;
 
   return bukaKartu(`
-    <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap;">
-      <div style="font-size:26px;font-weight:700;color:#0891b2;">${fmtShort(ringkas.total)}</div>
-      <div style="font-size:11px;color:#6b7280;text-align:right;">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;">
+      <div>
+        <div style="font-size:11px;color:#6b7280;">Saldo bank (aset)</div>
+        <div style="font-size:26px;font-weight:700;color:${totalAset < 0 ? '#b91c1c' : '#0891b2'};">${fmtShort(totalAset)}</div>
+      </div>
+      <div style="font-size:11px;color:#6b7280;text-align:right;line-height:1.6;">
         ${items.length} rekening · saldo buku besar (Rp)<br>
         ${totalUsd ? 'valas USD ' + Number(totalUsd).toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '&nbsp;'}
+        ${hutangRk > 0 ? `<br><span style="color:#b91c1c;font-weight:600;">Hutang bank — plafon RK: ${fmtShort(hutangRk)}</span>` : ''}
       </div>
     </div>
     <div class="table-wrap" style="margin-top:10px;">
@@ -387,18 +403,66 @@ async function renderBankCard() {
             <th>Rekening</th>
             <th>Akun</th>
             ${adaValas ? '<th>Valas</th>' : ''}
+            <th>Ket</th>
             <th style="text-align:right;">Saldo (Rp)</th>
           </tr>
         </thead>
         <tbody>${baris}</tbody>
         <tfoot>
           <tr>
-            <td colspan="${adaValas ? 3 : 2}" style="font-weight:600;">Total saldo bank</td>
-            <td style="text-align:right;font-weight:700;color:#0891b2;">${fmt(ringkas.total)}</td>
+            <td colspan="${adaValas ? 4 : 3}" style="font-weight:600;">
+              Saldo bersih${hutangRk > 0 ? ' (aset − hutang plafon RK)' : ''}
+            </td>
+            <td style="text-align:right;font-weight:700;color:${totalNet < 0 ? '#b91c1c' : '#0891b2'};">${fmt(totalNet)}</td>
           </tr>
         </tfoot>
       </table>
-    </div>`);
+    </div>
+    ${hutangRk > 0 ? `<div style="font-size:11px;color:#6b7280;margin-top:8px;line-height:1.5;">
+      Saldo minus akun plafon rekening koran (${esc(kodePlafon)}) disajikan sebagai
+      <strong style="color:#b91c1c;">Hutang Bank</strong> di kartu Hutang Bank — bukan aset bank.
+    </div>` : ''}`);
+}
+
+// ============================================================
+// HUTANG BANK CARD — akun 2-1000 + saldo minus akun plafon rekening koran
+// ------------------------------------------------------------
+// 1-1110 (CIMB IDR), 1-1120 (CIMB USD), 1-1130 (OCBC) adalah fasilitas
+// plafon rekening koran. Saldo minus pada akun-akun itu = hutang ke bank,
+// sehingga ditampilkan di sini (bukan sebagai aset di kartu Saldo Bank).
+// ============================================================
+async function renderHutangBankCard(saldoHutangBank) {
+  const akunHutang = Number(saldoHutangBank || 0);
+
+  let rk = { total: 0, items: [] };
+  try {
+    rk = await plafonRkHutang();
+  } catch (err) {
+    console.warn('[dashboard] plafonRkHutang:', err.message || err);
+  }
+
+  const hutangRk  = Number(rk.total || 0);
+  const total     = akunHutang + hutangRk;
+  const rincianRk = (rk.items || [])
+    .filter(i => i.hutang > 0)
+    .map(i => `${esc(i.name)} ${fmtShort(i.hutang)}`)
+    .join(' · ');
+
+  const info = [`Akun 2-1000: ${fmtShort(akunHutang)}`];
+  if (hutangRk > 0) {
+    info.push(`Plafon rekening koran: <strong style="color:#b91c1c;">${fmtShort(hutangRk)}</strong>`);
+    if (rincianRk) info.push(`<span style="color:#9ca3af;">${rincianRk}</span>`);
+    info.push('<span style="color:#9ca3af;">berasal dari saldo minus akun plafon RK</span>');
+  }
+
+  return `
+    <div class="card" style="border-left:4px solid #dc2626;">
+      <div style="font-size:12px;color:#666;margin-bottom:6px;">Hutang Bank</div>
+      <div style="font-size:22px;font-weight:700;color:#dc2626;">${fmtShort(total)}</div>
+      <div style="font-size:11px;color:#6b7280;margin-top:6px;line-height:1.5;">
+        ${info.join('<br>')}
+      </div>
+    </div>`;
 }
 
 // ============================================================
@@ -440,7 +504,10 @@ async function renderFinanceDashboard(container) {
     cards.push(card('Piutang Pihak Ketiga', map.piutang_pihak3?.balance));
   }
   if (await hasPermission('finance.hutang.view')) {
-    cards.push(card('Hutang Bank', map.hutang_bank?.balance));
+    // Hutang Bank = akun 2-1000 + saldo minus akun plafon rekening koran
+    // (1-1110 / 1-1120 / 1-1130). Saldo minus itu tidak dihitung sebagai aset
+    // di kartu Saldo Bank, jadi tidak ada angka dobel.
+    cards.push(await renderHutangBankCard(map.hutang_bank?.balance));
     // Hutang Dagang — konsolidasi (2-1100 IDR + 2-1101 USD + hutang_summary)
     const hutangHtml = await renderHutangCard();
     if (hutangHtml) cards.push(hutangHtml);
