@@ -10,6 +10,20 @@ export async function listUsers() {
   return data;
 }
 
+// Direktori ringan id -> label, dipakai untuk menampilkan "siapa yang input"
+// (journals.created_by / audit_logs.user_id).
+export async function getProfileDirectory() {
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('id, email, full_name');
+  if (error) throw error;
+  const map = new Map();
+  (data || []).forEach(p => {
+    map.set(p.id, p.full_name ? `${p.full_name} (${p.email})` : (p.email || p.id));
+  });
+  return map;
+}
+
 export async function createUser({ username, password, full_name, role }) {
   const { data, error } = await supabase.rpc('admin_create_user', {
     p_username: username,

@@ -26,6 +26,98 @@ export async function isPeriodLocked(dateStr) {
 }
 
 // ============================================================
+// MATA UANG & KURS PER BARIS
+// ============================================================
+function fmtNum(n) {
+  return Number(n || 0).toLocaleString('id-ID',
+    { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+// Hitung debit_base/credit_base untuk tiap baris.
+// currency_code per baris boleh kosong -> ikut mata uang header (perilaku lama).
+// Kurs diambil dari: baris -> header -> master exchange_rates.
+export async function prepareJournalLines(lines, {
+  headerCurrency = 'IDR', headerRate = 1, journalDate = null
+} = {}) {
+  const prepared = [];
+  const rateCache = {};
+  let totalDebit = 0, totalCredit = 0;
+
+  for (let i = 0; i < lines.length; i++) {
+    const l = lines[i];
+    const debit  = Number(l.debit  || 0);
+    const credit = Number(l.credit || 0);
+    if (debit > 0 && credit > 0) {
+      throw new Error(`Baris ${i + 1}: tidak boleh debit & kredit sekaligus`);
+    }
+
+    const currency = String(l.currency_code || headerCurrency || 'IDR').trim().toUpperCase();
+    let rate = 1;
+    if (currency !== 'IDR') {
+      rate = Number(l.exchange_rate) || Number(headerRate) || 0;
+      if (!rate) {
+        if (rateCache[currency] === undefined) {
+          rateCache[currency] = await getRate(currency, journalDate);
+        }
+        rate = rateCache[currency];
+      }
+      if (!(rate > 0)) throw new Error(`Baris ${i + 1}: kurs ${currency} tidak valid`);
+    }
+
+    const debit_base  = +(debit  * rate).toFixed(2);
+    const credit_base = +(credit * rate).toFixed(2);
+    totalDebit  += debit_base;
+    totalCredit += credit_base;
+
+    prepared.push({
+      account_id: l.account_id,
+      partner_id: l.partner_id ?? null,
+      item_id:    l.item_id    ?? null,
+      debit, credit,
+      debit_base, credit_base,
+      tax_code:      l.tax_code ?? null,
+      memo:          l.memo ?? null,
+      currency_code: currency,
+      exchange_rate: rate
+    });
+  }
+
+  if (Math.abs(totalDebit - totalCredit) > 0.01) {
+    throw new Error(
+      `Jurnal tidak balance: debit ${fmtNum(totalDebit)} vs kredit ${fmtNum(totalCredit)} (dalam rupiah)`
+    );
+  }
+
+  return { prepared, totalDebit, totalCredit };
+}
+
+// Mata uang header: kalau semua baris memakai satu mata uang, pakai mata uang
+// itu supaya laporan lama (yang membaca journals.currency_code) tetap benar.
+// Kalau campuran, pakai mata uang dokumen yang dipilih di form.
+export function pickHeaderCurrency(lines, fallbackCurrency = 'IDR', fallbackRate = 1) {
+  const list = lines || [];
+  const curs = [...new Set(list.map(l =>
+    String(l.currency_code || fallbackCurrency || 'IDR').trim().toUpperCase()
+  ))];
+
+  if (curs.length === 1) {
+    const cur = curs[0];
+    const line = list.find(l =>
+      String(l.currency_code || fallbackCurrency || 'IDR').trim().toUpperCase() === cur
+    );
+    const rate = cur === 'IDR'
+      ? 1
+      : (Number(line?.exchange_rate) || Number(fallbackRate) || 1);
+    return { currency_code: cur, exchange_rate: rate };
+  }
+
+  return {
+    currency_code: String(fallbackCurrency || 'IDR').trim().toUpperCase(),
+    exchange_rate: Number(fallbackRate) || 1
+  };
+}
+
+// ============================================================
 // BUAT JURNAL (via RPC dengan guard periode)
 // ============================================================
 export async function createJournal({
@@ -36,50 +128,34 @@ export async function createJournal({
     throw new Error('Jurnal harus punya minimal 1 baris');
   }
 
-  const rate = exchange_rate ?? await getRate(currency_code, journal_date);
+  const header = pickHeaderCurrency(lines, currency_code, exchange_rate ?? 1);
+  const headerRate = header.currency_code === 'IDR'
+    ? 1
+    : (Number(exchange_rate) || await getRate(header.currency_code, journal_date));
 
   // Validasi balance di client dulu (biar error cepat & jelas)
-  let totalDebit = 0, totalCredit = 0;
-  const prepared = lines.map(l => {
-    const debit  = Number(l.debit  || 0);
-    const credit = Number(l.credit || 0);
-    if (debit > 0 && credit > 0) {
-      throw new Error('Baris tidak boleh debit & kredit sekaligus');
-    }
-    const debit_base  = +(debit  * rate).toFixed(2);
-    const credit_base = +(credit * rate).toFixed(2);
-    totalDebit  += debit_base;
-    totalCredit += credit_base;
-    return {
-      account_id: l.account_id,
-      partner_id: l.partner_id ?? null,
-      debit, credit,
-      debit_base, credit_base,
-      tax_code:   l.tax_code   ?? null,
-      memo:       l.memo       ?? null
-    };
+  const { prepared } = await prepareJournalLines(lines, {
+    headerCurrency: header.currency_code,
+    headerRate,
+    journalDate: journal_date
   });
-
-  if (Math.abs(totalDebit - totalCredit) > 0.01) {
-    throw new Error(`Jurnal tidak balance: debit ${totalDebit} vs kredit ${totalCredit}`);
-  }
 
   // Panggil RPC (guard periode di database)
   const { data: journalId, error } = await supabase.rpc('create_journal_with_lock', {
     p_journal_date: journal_date,
     p_description: description,
     p_ref_no: ref_no,
-    p_currency_code: currency_code,
-    p_exchange_rate: rate,
+    p_currency_code: header.currency_code,
+    p_exchange_rate: headerRate,
     p_lines: prepared
   });
   if (error) throw error;
 
   // Ambil header untuk return
-  const { data: header, error: hErr } = await supabase
+  const { data: created, error: hErr } = await supabase
     .from('journals').select('*').eq('id', journalId).single();
   if (hErr) throw hErr;
-  return header;
+  return created;
 }
 
 // ============================================================
@@ -133,36 +209,22 @@ export async function updateJournal(journalId, {
     throw new Error(`Periode ${journal_date.slice(0,7)} sudah dikunci. Tidak bisa edit ke periode ini.`);
   }
 
-  const rate = exchange_rate ?? await getRate(currency_code, journal_date);
+  const header = pickHeaderCurrency(lines, currency_code, exchange_rate ?? 1);
+  const headerRate = header.currency_code === 'IDR'
+    ? 1
+    : (Number(exchange_rate) || await getRate(header.currency_code, journal_date));
 
-  let totalDebit = 0, totalCredit = 0;
-  const prepared = lines.map(l => {
-    const debit  = Number(l.debit  || 0);
-    const credit = Number(l.credit || 0);
-    if (debit > 0 && credit > 0) throw new Error('Baris tidak boleh debit & kredit sekaligus');
-    const debit_base  = +(debit  * rate).toFixed(2);
-    const credit_base = +(credit * rate).toFixed(2);
-    totalDebit  += debit_base;
-    totalCredit += credit_base;
-    return {
-      account_id: l.account_id,
-      partner_id: l.partner_id ?? null,
-      item_id:    l.item_id    ?? null,
-      debit, credit, debit_base, credit_base,
-      tax_code:   l.tax_code   ?? null,
-      memo:       l.memo       ?? null
-    };
+  const { prepared } = await prepareJournalLines(lines, {
+    headerCurrency: header.currency_code,
+    headerRate,
+    journalDate: journal_date
   });
-
-  if (Math.abs(totalDebit - totalCredit) > 0.01) {
-    throw new Error(`Jurnal tidak balance: debit ${totalDebit} vs kredit ${totalCredit}`);
-  }
 
   const { error: hErr } = await supabase
     .from('journals')
     .update({
       journal_date, description, ref_no,
-      currency_code, exchange_rate: rate,
+      currency_code: header.currency_code, exchange_rate: headerRate,
       updated_at: new Date().toISOString()
     })
     .eq('id', journalId);
@@ -214,7 +276,14 @@ export async function reverseJournal(journalId) {
     debit_base: Number(l.credit_base),
     credit_base: Number(l.debit_base),
     tax_code:   l.tax_code,
-    memo:       `Reversal: ${l.memo || ''}`.trim()
+    memo:       `Reversal: ${l.memo || ''}`.trim(),
+    // mata uang & kurs per baris ikut jurnal asli (kalau kosong -> header)
+    currency_code: String(l.currency_code || original.currency_code || 'IDR').trim(),
+    exchange_rate: Number(
+      l.exchange_rate ?? (String(l.currency_code || original.currency_code).trim() === 'IDR'
+        ? 1
+        : original.exchange_rate)
+    ) || 1
   }));
 
   const ym = today.slice(0, 7).replace('-', '');

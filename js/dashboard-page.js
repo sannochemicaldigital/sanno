@@ -14,6 +14,16 @@ const fmtShort = n => 'Rp ' + Number(n || 0).toLocaleString('id-ID', { maximumFr
 const fmtUsd = n => 'USD ' + Number(n || 0).toLocaleString('id-ID', {
   minimumFractionDigits: 2, maximumFractionDigits: 2
 });
+// Nominal valuta apa pun (dipakai saldo rekening valas: stok USD ditampilkan apa adanya)
+const fmtValuta = (cur, n) => String(cur || 'IDR') + ' ' + Number(n || 0).toLocaleString('id-ID', {
+  minimumFractionDigits: 2, maximumFractionDigits: 2
+});
+// Kurs rata-rata tersirat: rupiah buku besar / stok valuta
+const kurRata = (rupiah, nominal) => {
+  const n = Number(nominal || 0);
+  if (!n) return '—';
+  return Number(Number(rupiah || 0) / n).toLocaleString('id-ID', { maximumFractionDigits: 2 });
+};
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({
   '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
 }[c]));
@@ -358,10 +368,13 @@ async function renderBankCard() {
   const baris = items.map(i => {
     const judul = i.bank_name || i.name;
     const noRek = i.account_no ? ` <span style="color:#9ca3af;">· ${esc(i.account_no)}</span>` : '';
+    // Nama rekening bisa diklik -> Buku Besar akun tsb (tab bb di reports.html)
+    const ledgerUrl = `./reports.html?tab=bb&akun=${encodeURIComponent(i.code)}`;
+    const nominalAsli = i.balance_native ?? i.amount_usd;   // stok valuta (USD)
     const valas = i.currency !== 'IDR'
-      ? (i.amount_usd === null
+      ? (nominalAsli === null
           ? `<span style="color:#b45309;">${esc(i.currency)} (nominal belum ada)</span>`
-          : `<span style="color:#6b7280;">${fmtUsd(i.amount_usd)}</span>`)
+          : `<span style="color:#6b7280;">stok ${esc(i.currency)} · rata-rata ${kurRata(i.balance, nominalAsli)}</span>`)
       : '';
     const warnaSaldo = i.balance < 0 ? '#b91c1c' : '#111827';
     const ket = i.plafon
@@ -369,19 +382,25 @@ async function renderBankCard() {
           ? `<span style="color:#b91c1c;font-weight:600;">Plafon RK · hutang</span>`
           : '<span style="color:#6b7280;">Plafon RK</span>')
       : '';
+    // Rekening valas: STOK VALUTA jadi angka utama, rupiah jadi angka pendamping
+    // (rupiah buku besar memakai kurs historis per baris jurnal).
+    const saldoSel = (i.currency !== 'IDR' && nominalAsli !== null)
+      ? `<div style="font-weight:700;">${fmtValuta(i.currency, nominalAsli)}</div>
+         <div style="font-size:11px;color:#6b7280;font-weight:500;">setara ${fmt(i.balance)}</div>`
+      : fmt(i.balance);
     return `
       <tr>
-        <td data-label="Rekening">${esc(judul)}${noRek}</td>
+        <td data-label="Rekening"><a href="${ledgerUrl}" title="Buka Buku Besar ${esc(i.code)}" style="color:inherit;text-decoration:none;border-bottom:1px dotted #9ca3af;">${esc(judul)}</a>${noRek}</td>
         <td data-label="Akun" style="color:#6b7280;font-size:12px;">${esc(i.code)}</td>
         ${adaValas ? `<td data-label="Valas" style="color:#6b7280;font-size:12px;">${valas}</td>` : ''}
         <td data-label="Ket" style="font-size:11px;">${ket}</td>
-        <td data-label="Saldo" style="text-align:right;font-weight:600;color:${warnaSaldo};">${fmt(i.balance)}</td>
+        <td data-label="Saldo" style="text-align:right;font-weight:600;color:${warnaSaldo};">${saldoSel}</td>
       </tr>`;
   }).join('');
 
   const totalUsd = adaValas
-    ? items.filter(i => i.currency === 'USD' && i.amount_usd !== null)
-           .reduce((s, i) => s + i.amount_usd, 0)
+    ? items.filter(i => i.currency === 'USD' && (i.balance_native ?? i.amount_usd) !== null)
+           .reduce((s, i) => s + (i.balance_native ?? i.amount_usd), 0)
     : 0;
 
   return bukaKartu(`
@@ -392,7 +411,7 @@ async function renderBankCard() {
       </div>
       <div style="font-size:11px;color:#6b7280;text-align:right;line-height:1.6;">
         ${items.length} rekening · saldo buku besar (Rp)<br>
-        ${totalUsd ? 'valas USD ' + Number(totalUsd).toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '&nbsp;'}
+        ${totalUsd ? 'stok valas USD ' + Number(totalUsd).toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '&nbsp;'}
         ${hutangRk > 0 ? `<br><span style="color:#b91c1c;font-weight:600;">Hutang bank — plafon RK: ${fmtShort(hutangRk)}</span>` : ''}
       </div>
     </div>
@@ -404,7 +423,7 @@ async function renderBankCard() {
             <th>Akun</th>
             ${adaValas ? '<th>Valas</th>' : ''}
             <th>Ket</th>
-            <th style="text-align:right;">Saldo (Rp)</th>
+            <th style="text-align:right;">Saldo${adaValas ? '' : ' (Rp)'}</th>
           </tr>
         </thead>
         <tbody>${baris}</tbody>

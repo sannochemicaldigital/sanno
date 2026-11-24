@@ -37,8 +37,10 @@ export async function dashboardBalances() {
 // Nama/no rekening diambil dari Pengaturan > Rekening Bank (bank_accounts)
 // bila ada; kalau tabel/nama rekening belum diisi, dipakai nama akun COA.
 // Mata uang rekening diambil dari impor rekening koran terakhir
-// (bank_statement_imports.currency_code); nominal valas (USD) dihitung dari
-// journal_lines.debit/credit (mata uang asli, bukan _base).
+// (bank_statement_imports.currency_code); kalau rekening belum pernah diimpor,
+// dipakai valuta dominan baris jurnal. Nominal valas (USD) dihitung dari
+// journal_lines.debit/credit per BARIS (currency_code baris, mata uang asli,
+// bukan _base) sehingga jurnal campuran USD+IDR tetap benar (v11.7).
 // ============================================================
 // PLAFON REKENING KORAN (overdraft)
 // ------------------------------------------------------------
@@ -112,7 +114,10 @@ export async function bankBalanceSummary() {
     }
   }
 
-  // 3. Mata uang rekening = mata uang impor rekening koran paling baru
+  // 3. Mata uang rekening.
+  //    Prioritas 1: mata uang impor rekening koran paling baru.
+  //    Prioritas 2: valuta baris jurnal (v11.7: valuta per baris) — dipakai
+  //                 kalau rekening belum pernah punya impor rekening koran.
   const currency = new Map();
   const { data: imp, error: impErr } = await supabase
     .from('bank_statement_imports')
@@ -122,33 +127,60 @@ export async function bankBalanceSummary() {
   else {
     for (const r of (imp || [])) {
       if (!r.coa_code || currency.has(r.coa_code)) continue;
-      currency.set(r.coa_code, String(r.currency_code || 'IDR').toUpperCase());
+      currency.set(r.coa_code, String(r.currency_code || 'IDR').trim().toUpperCase());
     }
   }
 
-  // 4. Nominal mata uang asli untuk rekening valas (USD)
-  const valas = accounts.filter(a => (currency.get(a.code) || 'IDR') !== 'IDR');
-  const nominalUsd = new Map();   // account_id -> nominal USD
-  if (valas.length) {
-    const { data: lines, error: lineErr } = await supabase
+  // 4. Nominal asli (stok valas) per akun per valuta.
+  //    Diambil dari currency_code BARIS jurnal, bukan header jurnal, supaya
+  //    jurnal campuran (USD + IDR dalam satu jurnal) tetap terhitung benar.
+  //    Hanya baris NON-IDR yang diambil (baris IDR tidak perlu: nominalnya
+  //    sudah sama dengan rupiah buku besar) + baris lama yang currency_code-nya
+  //    masih NULL (ikut valuta header jurnal). Diambil bertahap karena
+  //    PostgREST membatasi 1000 baris per permintaan.
+  const nominal = new Map();      // account_id -> Map(valuta -> nominal)
+  const PAGE = 1000;
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await supabase
       .from('journal_lines')
-      .select('account_id, debit, credit, journals!inner(currency_code)')
-      .in('account_id', valas.map(a => a.id))
-      .eq('journals.currency_code', 'USD');
-    if (lineErr) console.warn('[bankBalanceSummary] nominal USD:', lineErr.message);
-    else {
-      for (const l of (lines || [])) {
-        nominalUsd.set(l.account_id,
-          (nominalUsd.get(l.account_id) || 0) + Number(l.debit || 0) - Number(l.credit || 0));
-      }
+      .select('id, account_id, debit, credit, currency_code, journals!inner(currency_code)')
+      .in('account_id', accounts.map(a => a.id))
+      .or('currency_code.is.null,currency_code.neq.IDR')
+      .order('id', { ascending: true })
+      .range(from, from + PAGE - 1);
+    if (error) {
+      console.warn('[bankBalanceSummary] nominal valas:', error.message);
+      break;
     }
+    for (const l of (data || [])) {
+      const cur = String(l.currency_code || l.journals?.currency_code || 'IDR')
+        .trim().toUpperCase() || 'IDR';
+      if (cur === 'IDR') continue;                            // nominal IDR = rupiah
+      const per = nominal.get(l.account_id) || new Map();
+      per.set(cur, (per.get(cur) || 0) + Number(l.debit || 0) - Number(l.credit || 0));
+      nominal.set(l.account_id, per);
+    }
+    if (!data || data.length < PAGE) break;
+  }
+
+  // Valuta dominan dari baris jurnal (nominal absolut terbesar, selain IDR).
+  function lineCurrency(accountId) {
+    const per = nominal.get(accountId);
+    if (!per || !per.size) return null;
+    let best = null, bestVal = 0;
+    for (const [cur, val] of per) {
+      if (Math.abs(val) > Math.abs(bestVal)) { best = cur; bestVal = val; }
+    }
+    return best;
   }
 
   const items = accounts.map(a => {
     const rek = rekening.get(a.code) || null;
-    const cur = currency.get(a.code) || 'IDR';
+    const cur = currency.get(a.code) || lineCurrency(a.id) || 'IDR';
     const saldoAkun = saldo.get(a.code) || 0;                 // rupiah (base)
     const plafon = isPlafonRk(a.code);
+    const per = nominal.get(a.id) || new Map();
+    const nominalAsli = per.has(cur) ? per.get(cur) : null;   // stok valuta akun
     return {
       code: a.code,
       name: a.name,
@@ -156,9 +188,10 @@ export async function bankBalanceSummary() {
       account_no: rek?.account_no || null,
       currency: cur,
       balance: saldoAkun,
+      balance_native: nominalAsli,                            // nominal asli (USD) kalau valas
       plafon,                                                 // akun plafon rekening koran
       hutang: plafon && saldoAkun < 0 ? -saldoAkun : 0,        // minus plafon = hutang bank
-      amount_usd: cur === 'USD' ? (nominalUsd.get(a.id) ?? null) : null // nominal asli
+      amount_usd: cur === 'USD' ? nominalAsli : null           // kompatibilitas pemakai lama
     };
   });
 
@@ -475,4 +508,149 @@ export async function salesReport({ from = null, to = null } = {}) {
   });
 
   return { rows, totals };
+}
+
+// ============================================================
+// BUKU BESAR (LEDGER) PER AKUN — mendukung valuta per baris (v11.7)
+// ------------------------------------------------------------
+// Kolom nominal memakai mata uang ASLI baris jurnal (journal_lines.debit
+// /credit + currency_code), kolom rupiah memakai _base (kurs historis,
+// tidak pernah direvaluasi). Saldo berjalan dihitung dua jalur:
+//   - saldo valuta asli -> hanya baris yang valutanya = valuta akun
+//   - saldo rupiah      -> seluruh baris (kolom base)
+// Saldo awal = akumulasi baris bertanggal < `from`.
+// ============================================================
+export async function ledgerAccountList() {
+  const { data, error } = await supabase
+    .from('accounts')
+    .select('id, code, name, type, is_fx_monetary')
+    .eq('is_active', true)
+    .order('code');
+  if (error) throw error;
+  return data || [];
+}
+
+// Valuta baris: currency_code baris -> valuta header (data lama) -> IDR
+function lineCurrencyOf(line) {
+  return String(line.currency_code || line.journals?.currency_code || 'IDR')
+    .trim().toUpperCase() || 'IDR';
+}
+
+export async function ledgerByAccount({ accountCode, from = null, to = null } = {}) {
+  if (!accountCode) throw new Error('Akun belum dipilih');
+
+  const { data: acc, error: accErr } = await supabase
+    .from('accounts')
+    .select('id, code, name, type, normal_balance, is_fx_monetary')
+    .eq('code', accountCode)
+    .single();
+  if (accErr) throw accErr;
+
+  // Ambil SELURUH baris akun s/d `to` (saldo awal butuh baris sebelum `from`),
+  // bertahap karena PostgREST membatasi 1000 baris per permintaan.
+  const PAGE = 1000;
+  const lines = [];
+  for (let offset = 0; ; offset += PAGE) {
+    let q = supabase
+      .from('journal_lines')
+      .select('id, journal_id, debit, credit, debit_base, credit_base, '
+        + 'currency_code, exchange_rate, memo, '
+        + 'journals!inner(journal_no, journal_date, description, currency_code, exchange_rate)')
+      .eq('account_id', acc.id)
+      .order('id', { ascending: true })
+      .range(offset, offset + PAGE - 1);
+    if (to) q = q.lte('journals.journal_date', to);
+    const { data, error } = await q;
+    if (error) throw error;
+    if (data && data.length) lines.push(...data);
+    if (!data || data.length < PAGE) break;
+  }
+
+  // Kronologis: tanggal jurnal -> id jurnal -> id baris
+  lines.sort((a, b) => {
+    const da = a.journals?.journal_date || '';
+    const db = b.journals?.journal_date || '';
+    if (da !== db) return da < db ? -1 : 1;
+    if (Number(a.journal_id) !== Number(b.journal_id)) {
+      return Number(a.journal_id) - Number(b.journal_id);
+    }
+    return Number(a.id) - Number(b.id);
+  });
+
+  // Valuta akun = valuta non-IDR dengan perputaran absolut terbesar.
+  // (Akun Rupiah yang kebetulan punya 1-2 baris valas tetap dianggap IDR.)
+  const turnover = new Map();
+  for (const l of lines) {
+    const cur = lineCurrencyOf(l);
+    if (cur === 'IDR') continue;
+    turnover.set(cur, (turnover.get(cur) || 0)
+      + Math.abs(Number(l.debit || 0) - Number(l.credit || 0)));
+  }
+  let currency = 'IDR', bestTurnover = 0;
+  for (const [cur, val] of turnover) {
+    if (val > bestTurnover) { currency = cur; bestTurnover = val; }
+  }
+  const isValas = currency !== 'IDR';
+
+  let openNative = 0;
+  let openBase = 0;
+  let runNative = 0;
+  let runBase = 0;
+  let sumDebitBase = 0;
+  let sumCreditBase = 0;
+  const rows = [];
+
+  for (const l of lines) {
+    const cur  = lineCurrencyOf(l);
+    const d    = Number(l.debit || 0);
+    const c    = Number(l.credit || 0);
+    const dB   = Number(l.debit_base || 0);
+    const cB   = Number(l.credit_base || 0);
+    const jd   = l.journals?.journal_date || '';
+    const same = cur === currency;          // baris sevaluta dengan akun
+
+    if (from && jd < from) {
+      openBase += dB - cB;
+      if (same) openNative += d - c;
+      continue;
+    }
+
+    runBase += dB - cB;
+    if (same) runNative += d - c;
+    sumDebitBase  += dB;
+    sumCreditBase += cB;
+
+    rows.push({
+      line_id:        l.id,
+      journal_id:     l.journal_id,
+      journal_date:   jd,
+      journal_no:     l.journals?.journal_no || '',
+      description:    l.memo || l.journals?.description || '',
+      currency:       cur,
+      exchange_rate:  Number(l.exchange_rate) || Number(l.journals?.exchange_rate) || null,
+      debit:          d,
+      credit:         c,
+      debit_base:     dB,
+      credit_base:    cB,
+      balance:        runBase,
+      balance_native: same ? runNative : null
+    });
+  }
+
+  return {
+    account: acc,
+    currency,
+    is_valas: isValas,
+    opening: {
+      native: isValas ? openNative : openBase,
+      base:   openBase
+    },
+    rows,
+    totals: {
+      debit:           sumDebitBase,
+      credit:          sumCreditBase,
+      closing_native:  isValas ? openNative + runNative : openBase + runBase,
+      closing_base:    openBase + runBase
+    }
+  };
 }
