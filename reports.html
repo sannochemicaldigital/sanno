@@ -56,6 +56,7 @@
       <button data-tab="sp">Penjualan per Sales</button>
       <button data-tab="lr">Laba Rugi</button>
       <button data-tab="nc">Neraca</button>
+      <button data-tab="bb">Buku Besar</button>
     </div>
 
     <!-- ===== TAB TRIAL BALANCE ===== -->
@@ -236,10 +237,40 @@
         <div id="ncStatus" style="margin-top:12px;font-size:14px;"></div>
       </div>
     </section>
+
+    <!-- ===== TAB BUKU BESAR ===== -->
+    <section id="tab-bb" class="tab-panel" style="display:none;">
+      <div class="card">
+        <div class="report-header">
+          <h3>Buku Besar</h3>
+          <span id="bbPeriod" style="font-size:13px;color:#6b7280;"></span>
+        </div>
+        <div class="filter-row" style="margin-bottom:12px;">
+          <div class="form-row" style="flex:2;min-width:260px;">
+            <label>Akun</label>
+            <select id="bbAccount">
+              <option value="">— pilih akun —</option>
+            </select>
+          </div>
+          <div class="form-row" style="flex:0;">
+            <button class="btn btn-primary" id="bbLoad">Tampilkan</button>
+          </div>
+        </div>
+        <div id="bbSummary" style="display:none;margin-bottom:12px;"></div>
+        <div class="table-wrap">
+          <table>
+            <thead id="thead-bb"></thead>
+            <tbody id="tbody-bb"></tbody>
+            <tfoot id="tfoot-bb"></tfoot>
+          </table>
+        </div>
+        <div id="bbNote" style="margin-top:10px;font-size:12px;color:#6b7280;line-height:1.5;"></div>
+      </div>
+    </section>
   </div>
 
   <div class="toast" id="toast"></div>
 
-  <script type="module" src="./js/reports-page.js"></script>
+  <script type="module" src="./js/reports-page.js?v=11.8"></script>
 </body>
 </html>

@@ -23,24 +23,36 @@
           <div class="form-row"><label>Deskripsi</label><input name="description" placeholder="mis. Penjualan tunai" required></div>
           <div class="form-row"><label>No. Referensi</label><input name="ref_no" placeholder="opsional"></div>
           <div class="form-row">
-            <label>Mata Uang</label>
+            <label>Mata Uang Dokumen</label>
             <select name="currency_code" id="currencySelect"><option value="IDR">IDR</option></select>
           </div>
           <div class="form-row" id="rateRow" style="display:none;">
-            <label>Kurs ke IDR</label>
-            <input name="exchange_rate" type="number" step="0.000001" placeholder="16000">
+            <label>Kurs Default (non-IDR)</label>
+            <input name="exchange_rate" type="number" step="0.000001" placeholder="18305">
           </div>
         </div>
 
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;">
-          <label style="font-size:13px;font-weight:500;">Baris Jurnal</label>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;gap:12px;flex-wrap:wrap;">
+          <div>
+            <label style="font-size:13px;font-weight:500;">Baris Jurnal</label>
+            <div style="font-size:11px;color:#6b7280;">
+              Valuta &amp; kurs diisi <b>per baris</b> — boleh campur USD dan IDR dalam satu jurnal.
+              Kolom <b>Rupiah</b> = nominal &times; kurs (otomatis).
+            </div>
+          </div>
           <button type="button" class="btn btn-secondary" id="addLineBtn">+ Tambah Baris</button>
         </div>
 
         <div class="journal-lines" id="journalLines"></div>
 
         <div class="journal-summary">
-          <div>Debit: <span id="totalDebit">Rp 0</span> &nbsp;|&nbsp; Kredit: <span id="totalCredit">Rp 0</span></div>
+          <div class="sum-left">
+            <div id="totalByCurrency" class="sum-cur" style="display:none;"></div>
+            <div class="sum-base">
+              Basis Rupiah — Debit: <span id="totalDebit">Rp 0</span>
+              &nbsp;|&nbsp; Kredit: <span id="totalCredit">Rp 0</span>
+            </div>
+          </div>
           <div id="balanceStatus" class="balance-bad">Belum balance</div>
         </div>
 
@@ -60,6 +72,6 @@
 
   <div class="toast" id="toast"></div>
 
-  <script type="module" src="./js/journal-form.js"></script>
+  <script type="module" src="./js/journal-form.js?v=11.9.1"></script>
 </body>
 </html>
