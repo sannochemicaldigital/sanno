@@ -11,6 +11,7 @@ import { createJournal } from './journals.js';
 import { listAccounts } from './accounts.js';
 import { listPartners } from './partners.js';
 import { getValasBookRate, getValasBookRateAcrossAccounts } from './bank-accounts.js';
+import { getTaxRate, listTaxRates, upsertTaxRates, deleteTaxRate } from './tax-rates.js';
 
 // ============================================================
 // UTIL
@@ -101,6 +102,10 @@ const state = {
   genRateTouched: false,
   genRateReq: 0,
   genCur: 'IDR',
+  genRateMode: 'book',
+  genRateSource: '',
+  kursRows: [],
+  kursParsed: null,
   accounts: null,
   partners: null
 };
@@ -592,9 +597,29 @@ function renderGenHeader() {
 // Tampilkan / sembunyikan field kurs sesuai mata uang terpilih.
 function applyGenCurrency() {
   const cur = normCurrency(state.genCur);
-  document.getElementById('genRateWrap').style.display = cur === 'IDR' ? 'none' : '';
+  const isIdr = cur === 'IDR';
+  document.getElementById('genRateWrap').style.display = isIdr ? 'none' : '';
+  document.getElementById('genRateModeWrap').style.display = isIdr ? 'none' : '';
   document.getElementById('genRateCur').textContent = cur;
+  renderGenRateMode();
   return cur;
+}
+
+// v11.14 — sumber kurs: 'book' (rata-rata kurs buku stok valas akun) atau
+// 'tax' (kurs pajak KMK terakhir dengan tanggal <= tanggal jurnal).
+function renderGenRateMode() {
+  const mode = state.genRateMode === 'tax' ? 'tax' : 'book';
+  state.genRateMode = mode;
+  const sel = document.getElementById('genRateMode');
+  if (sel && sel.value !== mode) sel.value = mode;
+  const hint = document.getElementById('genRateModeHint');
+  if (hint) {
+    hint.textContent = mode === 'tax'
+      ? 'Kurs pajak KMK (tax_exchange_rates) yang berlaku pada tanggal jurnal.'
+      : 'Rata-rata kurs buku stok valas akun bank ini (debit − kredit riwayat GL).';
+  }
+  const btn = document.getElementById('genRateResetBtn');
+  if (btn) btn.textContent = mode === 'tax' ? 'Hitung ulang kurs pajak' : 'Hitung ulang kurs buku';
 }
 
 // v11.13 — mata uang jurnal. Default: mata uang file koran. Kalau file tercatat
@@ -662,10 +687,62 @@ function renderGenPreview() {
     (g.cur === 'IDR'
       ? ''
       : `<div style="margin-top:6px;color:#6b7280;">Kurs ${esc(g.cur)} ` +
-        `${g.rate > 0 ? fmt(g.rate) : '—'} · kedua baris memakai mata uang &amp; kurs yang sama.</div>`) +
+        `${g.rate > 0 ? fmt(g.rate) : '—'} · sumber: ` +
+        `<b>${state.genRateSource === 'tax' ? 'kurs pajak KMK' : 'kurs buku stok'}</b>` +
+        ` · kedua baris memakai mata uang &amp; kurs yang sama.</div>`) +
     (sameAsBank
       ? `<div style="margin-top:6px;color:#dc2626;">Akun lawan tidak boleh sama dengan akun bank.</div>`
       : '');
+}
+
+// v11.14 — DISPATCHER sumber kurs jurnal.
+//   state.genRateMode === 'tax'  -> kurs pajak KMK (tabel tax_exchange_rates)
+//   state.genRateMode === 'book' -> kurs buku stok valas akun bank
+async function refreshGenRate() {
+  if (state.genRateMode === 'tax') { await refreshGenRateTax(); return; }
+  await refreshGenRateBook();
+}
+
+// v11.14 — KURS PAJAK (KMK).
+// Dipakai saat transaksi sudah lama sehingga stok valas GL per tanggal itu
+// belum ada. Kurs yang dipakai = baris KMK terakhir dengan rate_date <=
+// tanggal jurnal (persis "kurs pajak yang berlaku di tanggal itu").
+async function refreshGenRateTax() {
+  const g = genAmounts();
+  const hint = document.getElementById('genRateHint');
+  const rateInput = document.getElementById('genRate');
+  if (!g || !hint || !rateInput) return;
+  if (g.cur === 'IDR') { hint.textContent = ''; return; }
+  if (state.genRateTouched) return;
+
+  const token = ++state.genRateReq;
+  const asOf = document.getElementById('genDate').value || g.line.line_date;
+  hint.style.color = '#6b7280';
+  hint.textContent = 'Mencari kurs pajak KMK…';
+
+  try {
+    const row = await getTaxRate(g.cur, asOf);
+    if (token !== state.genRateReq) return;
+    if (row && Number(row.rate_to_idr) > 0) {
+      rateInput.value = String(Math.round(Number(row.rate_to_idr) * 10000) / 10000);
+      state.genRateSource = 'tax';
+      hint.innerHTML = `Kurs pajak <b>KMK ${esc(g.cur)}</b> berlaku ${fmtDate(row.rate_date)}: ` +
+        `<b>${fmt(row.rate_to_idr)}</b> — dipakai untuk transaksi ${fmtDate(asOf)}. Boleh diubah.`;
+      hint.style.color = '#6b7280';
+    } else {
+      rateInput.value = '';
+      state.genRateSource = '';
+      hint.style.color = '#b45309';
+      hint.innerHTML = `Belum ada kurs pajak ${esc(g.cur)} dengan tanggal &le; ${fmtDate(asOf)}. ` +
+        `Isi dulu di tab <b>Kurs Pajak (KMK)</b>, atau ganti Sumber kurs ke “Buku stok valas akun”.`;
+    }
+  } catch (e) {
+    if (token !== state.genRateReq) return;
+    hint.style.color = '#dc2626';
+    hint.textContent = 'Gagal membaca kurs pajak: ' + (e.message || e) +
+      ' — pastikan SQL-v11.13-kurs-pajak-kmk.sql sudah dijalankan.';
+  }
+  renderGenPreview();
 }
 
 // v11.13 — kurs buku bertingkat:
@@ -674,8 +751,9 @@ function renderGenPreview() {
 //       pakai kurs buku SELURUH riwayat akun + hint peringatan
 //   (3) kalau akun itu belum punya stok valas sama sekali -> kurs buku
 //       gabungan akun valas (sumber disebut di hint)
-//   (4) kalau semua kosong -> isi manual
-async function refreshGenRate() {
+//   (4) v11.14: kalau semua kosong -> pindah otomatis ke kurs pajak KMK,
+//       baru terakhir minta isi manual
+async function refreshGenRateBook() {
   const g = genAmounts();
   const hint = document.getElementById('genRateHint');
   if (!g || !hint) return;
@@ -717,6 +795,7 @@ async function refreshGenRate() {
     }
 
     if (r && r.rate) {
+      state.genRateSource = 'book';
       rateInput.value = String(Math.round(r.rate * 10000) / 10000);
       const saldo = `saldo ${esc(g.cur)} ${fmt(r.saldo_valas)} = Rp ${fmt(r.saldo_idr)}`;
       const sumber = combo && combo.accounts && combo.accounts.length
@@ -737,11 +816,29 @@ async function refreshGenRate() {
       }
       if (mode !== 'asof' || Number(r.saldo_valas) < 0) hint.style.color = '#92400e';
     } else {
-      rateInput.value = '';
-      hint.style.color = '#b45309';
-      hint.textContent =
-        `Belum ada stok ${g.cur} di akun ${code} maupun di akun valas lain — isi kurs manual, ` +
-        `atau ubah "Mata uang" di atas bila transaksi ini bukan ${g.cur}.`;
+      // v11.14 — tidak ada stok valas untuk kurs buku: pakai kurs pajak KMK
+      // (berlaku di tanggal jurnal) sebelum menyerahkan ke input manual.
+      let tax = null;
+      try { tax = await getTaxRate(g.cur, asOf); } catch (e) { tax = null; }
+      if (token !== state.genRateReq) return;
+      if (tax && Number(tax.rate_to_idr) > 0) {
+        state.genRateMode = 'tax';
+        state.genRateSource = 'tax';
+        renderGenRateMode();
+        rateInput.value = String(Math.round(Number(tax.rate_to_idr) * 10000) / 10000);
+        hint.style.color = '#92400e';
+        hint.innerHTML = `Tidak ada stok ${esc(g.cur)} (akun ${esc(code)} maupun akun valas lain). ` +
+          `Otomatis dipakai <b>kurs pajak KMK</b> berlaku ${fmtDate(tax.rate_date)}: ` +
+          `<b>${fmt(tax.rate_to_idr)}</b>. Boleh diubah.`;
+      } else {
+        rateInput.value = '';
+        state.genRateSource = '';
+        hint.style.color = '#b45309';
+        hint.textContent =
+          `Belum ada stok ${g.cur} di akun ${code} maupun di akun valas lain, dan belum ada ` +
+          `kurs pajak KMK untuk tanggal ini — isi kurs manual, isi tab Kurs Pajak (KMK), ` +
+          `atau ubah "Mata uang" di atas bila transaksi ini bukan ${g.cur}.`;
+      }
     }
   } catch (e) {
     if (token !== state.genRateReq) return;
@@ -788,6 +885,9 @@ async function openGenModal(lineId) {
   state.genBankAcc = null;
   state.genRateTouched = false;
   state.genCur = normCurrency(line.currency_code);
+  // v11.14 — default sumber kurs: buku stok; bisa diganti ke pajak KMK.
+  state.genRateMode = 'book';
+  state.genRateSource = '';
 
   const hari = String(line.line_date || '').slice(0, 10);
   document.getElementById('genDate').value = hari;
@@ -800,7 +900,10 @@ async function openGenModal(lineId) {
     `Mata uang file koran: ${state.genCur}. Ganti bila rekening ini valas.`;
   applyGenCurrency();
   document.getElementById('genRate').value = '';
-  document.getElementById('genRateHint').textContent = state.genCur === 'IDR' ? '' : 'Menghitung kurs buku…';
+  document.getElementById('genRateHint').textContent =
+    state.genCur === 'IDR'
+      ? ''
+      : (state.genRateMode === 'tax' ? 'Mencari kurs pajak KMK…' : 'Menghitung kurs buku…');
   document.getElementById('genPreview').innerHTML = '';
   renderGenHeader();
   document.getElementById('genModal').style.display = 'flex';
@@ -1143,6 +1246,230 @@ function viewImportLines(importId) {
 }
 
 // ============================================================
+// TAB KURS PAJAK (KMK) — v11.14
+// ------------------------------------------------------------
+// KMK terbit mingguan dan TIDAK punya API resmi, jadi daftar ditempel manual
+// (salin dari dokumen KMK) lalu disimpan massal lewat RPC
+// upsert_tax_exchange_rates (SQL-v11.13). Format baris yang diterima:
+//   2026-11-19;16600        19/11/2026;16.600
+//   19-11-2026<TAB>16.600,00     2026-11-19   16.600
+// ============================================================
+function parseKmkNumber(raw) {
+  let s = String(raw == null ? '' : raw).replace(/[^0-9.,-]/g, '').trim();
+  if (!s) return NaN;
+  const hasDot = s.includes('.');
+  const hasComma = s.includes(',');
+  if (hasDot && hasComma) {
+    s = s.replace(/\./g, '').replace(',', '.');       // 16.600,00
+  } else if (hasComma) {
+    s = s.replace(',', '.');                          // 16600,00
+  } else if (hasDot && /^\d{1,3}(\.\d{3})+$/.test(s)) {
+    s = s.replace(/\./g, '');                         // 16.600
+  }
+  const n = Number(s);
+  return Number.isFinite(n) ? n : NaN;
+}
+
+function parseKmkDate(raw) {
+  const s = String(raw == null ? '' : raw).trim();
+  let m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+  m = s.match(/^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{4})$/);
+  if (!m) return '';
+  const d = Number(m[1]);
+  const mo = Number(m[2]);
+  if (d < 1 || d > 31 || mo < 1 || mo > 12) return '';
+  return `${m[3]}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+}
+
+// Hasil: { currency, rows: [{rate_date, rate_to_idr}], errors: [teks] }
+function parseKmkPaste(text, currency) {
+  const cur = normCurrency(currency);
+  const rows = [];
+  const errors = [];
+  const seen = new Map();
+
+  String(text || '').split(/\r?\n/).forEach((rawLine, idx) => {
+    const line = rawLine.trim();
+    if (!line) return;
+
+    let parts = line.split(/[;|\t]+|\s{2,}/).map(t => t.trim()).filter(Boolean);
+    if (parts.length < 2 || !parts.some(p => parseKmkDate(p))) {
+      parts = line.split(/[\s;|,]+/).filter(Boolean);
+    }
+
+    let tgl = '';
+    let tglAt = -1;
+    for (let i = 0; i < parts.length; i++) {
+      const d = parseKmkDate(parts[i]);
+      if (d) { tgl = d; tglAt = i; break; }
+    }
+
+    let nilai = NaN;
+    for (let i = tglAt + 1; i < parts.length; i++) {
+      const v = parseKmkNumber(parts[i]);
+      if (Number.isFinite(v)) { nilai = v; break; }
+    }
+    if (!Number.isFinite(nilai)) {
+      for (let i = 0; i < tglAt; i++) {
+        const v = parseKmkNumber(parts[i]);
+        if (Number.isFinite(v)) { nilai = v; break; }
+      }
+    }
+
+    if (!tgl || !Number.isFinite(nilai) || nilai <= 0 || nilai > 1e9) {
+      errors.push(`Baris ${idx + 1}: "${line}" — ${!tgl ? 'tanggal tidak dikenali' : 'kurs tidak valid'}`);
+      return;
+    }
+
+    const tglLama = seen.get(tgl);
+    if (tglLama) { tglLama.rate_to_idr = nilai; return; }
+    const row = { rate_date: tgl, rate_to_idr: nilai };
+    seen.set(tgl, row);
+    rows.push(row);
+  });
+
+  rows.sort((a, b) => (a.rate_date < b.rate_date ? 1 : a.rate_date > b.rate_date ? -1 : 0));
+  return { currency: cur, rows, errors };
+}
+
+function previewKursPaste(notify = false) {
+  const el = document.getElementById('kursPreview');
+  const hint = document.getElementById('kursSaveHint');
+  if (!el) return null;
+  const cur = normCurrency(document.getElementById('kursCur').value);
+  const parsed = parseKmkPaste(document.getElementById('kursPaste').value, cur);
+  state.kursParsed = parsed;
+
+  if (!parsed.rows.length && !parsed.errors.length) {
+    el.innerHTML = '<span style="color:#6b7280;">Belum ada baris untuk dipratinjau.</span>';
+    if (hint) hint.textContent = '';
+    return parsed;
+  }
+
+  el.innerHTML =
+    `<div style="margin-bottom:6px;">${parsed.rows.length} baris siap disimpan` +
+    (parsed.errors.length
+      ? `, <span style="color:#b45309;">${parsed.errors.length} baris diabaikan</span>`
+      : '') +
+    ` · mata uang <b>${esc(cur)}</b></div>` +
+    (parsed.rows.length
+      ? `<div class="table-wrap"><table><thead><tr><th>Tanggal</th>` +
+        `<th class="num">Kurs (Rp)</th></tr></thead><tbody>` +
+        parsed.rows.slice(0, 12)
+          .map(r => `<tr><td>${fmtDate(r.rate_date)}</td>` +
+            `<td class="num">${fmt(r.rate_to_idr)}</td></tr>`).join('') +
+        `</tbody></table></div>` +
+        (parsed.rows.length > 12
+          ? `<div style="margin-top:4px;color:#6b7280;">… dan ${parsed.rows.length - 12} baris lain</div>`
+          : '')
+      : '') +
+    (parsed.errors.length
+      ? `<div style="margin-top:6px;color:#b45309;">${parsed.errors.slice(0, 8).map(esc).join('<br>')}</div>`
+      : '');
+
+  if (hint) hint.textContent = `${parsed.rows.length} baris siap disimpan.`;
+  if (notify) toast(`${parsed.rows.length} baris valid, ${parsed.errors.length} diabaikan.`);
+  return parsed;
+}
+
+async function saveKursPaste() {
+  if (!state.canRecon) { toast('Tidak ada akses mengubah kurs pajak (finance.bank.recon)', true); return; }
+  const cur = normCurrency(document.getElementById('kursCur').value);
+  const parsed = (state.kursParsed && state.kursParsed.currency === cur)
+    ? state.kursParsed
+    : previewKursPaste(false);
+  if (!parsed || !parsed.rows.length) { toast('Tidak ada baris valid untuk disimpan.', true); return; }
+
+  const btn = document.getElementById('kursSaveBtn');
+  btn.disabled = true;
+  btn.textContent = 'Menyimpan…';
+  try {
+    const res = await upsertTaxRates(cur, parsed.rows);
+    toast(`${res.saved || parsed.rows.length} kurs ${cur} disimpan.`);
+    document.getElementById('kursPaste').value = '';
+    state.kursParsed = null;
+    document.getElementById('kursPreview').innerHTML = '';
+    document.getElementById('kursSaveHint').textContent = '';
+    document.getElementById('kursListCur').value = cur;
+    await loadKursList();
+  } catch (e) {
+    toast('Gagal menyimpan kurs pajak: ' + (e.message || e), true);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Simpan ke Database';
+  }
+}
+
+// Geser tanggal ISO (YYYY-MM-DD) sejumlah hari, tanpa pengaruh zona waktu.
+function shiftIsoDate(iso, days) {
+  const [y, m, d] = String(iso).slice(0, 10).split('-').map(Number);
+  const dt = new Date(Date.UTC(y, (m || 1) - 1, d || 1));
+  dt.setUTCDate(dt.getUTCDate() + Number(days || 0));
+  return dt.toISOString().slice(0, 10);
+}
+
+async function loadKursList() {
+  const tbody = document.getElementById('tbody-kurs');
+  const info = document.getElementById('kursListInfo');
+  if (!tbody) return;
+  const cur = normCurrency(document.getElementById('kursListCur').value);
+  tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:#9ca3af;padding:16px;">Memuat…</td></tr>';
+  if (info) info.textContent = '';
+
+  try {
+    const rows = await listTaxRates({ currency: cur, limit: 300 });
+    state.kursRows = rows;
+
+    if (!rows.length) {
+      tbody.innerHTML = `<tr><td colspan="4" style="text-align:center;color:#9ca3af;padding:16px;">` +
+        `Belum ada kurs ${esc(cur)}. Tempel daftar KMK di form atas.</td></tr>`;
+      return;
+    }
+
+    // Baris terbaru di atas -> kurs berlaku sampai sehari sebelum baris
+    // berikutnya yang lebih tua.
+    tbody.innerHTML = rows.map((r, i) => {
+      const lebihTua = rows.slice(i + 1).find(x => x.rate_date < r.rate_date);
+      const selesai = lebihTua ? shiftIsoDate(lebihTua.rate_date, -1) : null;
+      return `<tr>` +
+        `<td>${fmtDate(r.rate_date)}</td>` +
+        `<td class="num">${fmt(r.rate_to_idr)}</td>` +
+        `<td>${selesai ? `s/d ${fmtDate(selesai)}` : '<span style="color:#6b7280;">s/d sekarang</span>'}</td>` +
+        `<td style="text-align:right;">` +
+        (state.canRecon
+          ? `<button type="button" class="btn btn-danger" data-kurs-del="${esc(r.rate_date)}" ` +
+            `style="padding:2px 8px;font-size:11px;">Hapus</button>`
+          : '') +
+        `</td></tr>`;
+    }).join('');
+
+    if (info) {
+      info.textContent = `${rows.length} baris kurs ${cur} (terbaru di atas).` +
+        (state.canRecon ? '' : ' Hanya pengguna dengan izin rekonsiliasi bank yang bisa mengubah.');
+    }
+  } catch (e) {
+    tbody.innerHTML = `<tr><td colspan="4" style="text-align:center;color:#dc2626;padding:16px;">` +
+      `${esc(e.message || String(e))}</td></tr>`;
+    if (info) info.textContent = 'Pastikan SQL-v11.13-kurs-pajak-kmk.sql sudah dijalankan di Supabase.';
+  }
+}
+
+async function removeKursRow(rateDate) {
+  if (!state.canRecon) { toast('Tidak ada akses menghapus kurs pajak', true); return; }
+  const cur = normCurrency(document.getElementById('kursListCur').value);
+  if (!confirm(`Hapus kurs pajak ${cur} tanggal ${fmtDate(rateDate)}?`)) return;
+  try {
+    const res = await deleteTaxRate(cur, rateDate);
+    if (!res.deleted) toast('Baris tidak ditemukan.', true);
+    else toast('Kurs pajak dihapus.');
+    await loadKursList();
+  } catch (e) {
+    toast('Gagal menghapus kurs pajak: ' + (e.message || e), true);
+  }
+}
+
+// ============================================================
 // TAB & EVENT
 // ============================================================
 function switchTab(tab) {
@@ -1155,6 +1482,7 @@ function switchTab(tab) {
 
   if (tab === 'ringkasan') loadImports();
   else if (tab === 'baris') loadLines();
+  else if (tab === 'kurs') loadKursList();
   else if (tab === 'import' && !document.getElementById('impCoa').dataset.loaded) loadBankAccounts();
 }
 
@@ -1294,11 +1622,35 @@ function bindEvents() {
     renderGenPreview();
     refreshGenRate();
   });
-  // Hitung ulang kurs buku (mis. setelah ubah manual)
+  // Hitung ulang kurs (buku atau pajak KMK, sesuai Sumber kurs)
   document.getElementById('genRateResetBtn').addEventListener('click', () => {
     state.genRateTouched = false;
     document.getElementById('genRate').value = '';
     refreshGenRate();
+  });
+  // v11.14 — ganti sumber kurs: buku stok valas <-> pajak KMK
+  document.getElementById('genRateMode').addEventListener('change', e => {
+    state.genRateMode = e.target.value === 'tax' ? 'tax' : 'book';
+    state.genRateTouched = false;
+    state.genRateSource = '';
+    document.getElementById('genRate').value = '';
+    renderGenRateMode();
+    refreshGenRate();
+  });
+
+  // Tab Kurs Pajak (KMK) — v11.14
+  document.getElementById('kursPreviewBtn').addEventListener('click', () => previewKursPaste(true));
+  document.getElementById('kursPaste').addEventListener('input', () => { state.kursParsed = null; });
+  document.getElementById('kursSaveBtn').addEventListener('click', saveKursPaste);
+  document.getElementById('kursReloadBtn').addEventListener('click', loadKursList);
+  document.getElementById('kursCur').addEventListener('change', () => previewKursPaste(true));
+  document.getElementById('kursListCur').addEventListener('change', () => {
+    document.getElementById('kursCur').value = document.getElementById('kursListCur').value;
+    loadKursList();
+  });
+  document.getElementById('tbody-kurs').addEventListener('click', e => {
+    const btn = e.target.closest('button[data-kurs-del]');
+    if (btn) removeKursRow(btn.dataset.kursDel);
   });
 }
 
@@ -1332,6 +1684,12 @@ function bindEvents() {
   const importTabBtn = document.querySelector('.tabs button[data-tab="import"]');
   if (!state.canImport) importTabBtn.style.display = 'none';
   if (!state.canRecon) document.getElementById('autoMatchBtn').style.display = 'none';
+  // v11.14 — kurs pajak: semua boleh melihat, hanya finance.bank.recon boleh menulis
+  if (!state.canRecon) {
+    document.getElementById('kursSaveBtn').style.display = 'none';
+    document.getElementById('kursSaveHint').textContent =
+      'Hanya pengguna dengan izin rekonsiliasi bank yang bisa mengubah kurs pajak.';
+  }
 
   bindEvents();
   await loadImports();
