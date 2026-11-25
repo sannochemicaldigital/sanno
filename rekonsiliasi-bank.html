@@ -92,6 +92,13 @@
     <!-- ==================== TAB: BARIS ==================== -->
     <section id="tab-baris" class="tab-panel" style="display:none;">
       <div class="card">
+        <p style="margin:0 0 10px;font-size:12px;color:#6b7280;">
+          Tombol <b>Tautkan</b> menautkan baris ke jurnal yang <i>sudah ada</i> (nominal sama, akun sama, ±90 hari;
+          bila beda pembulatan dicari dengan toleransi ±Rp1 / ±0,01 valas).
+          Bila transaksi belum pernah dijurnal, pakai <b>Buat Jurnal</b> — akun bank terisi otomatis
+          (mis. uang keluar → Kredit Bank), tinggal pilih akun lawannya (mis. bunga pinjaman → Beban Bunga),
+          lalu baris koran langsung ditautkan. Baris yang salah taut tetap bisa <b>Lepas</b> lalu diperbaiki.
+        </p>
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px;">
           <select id="fImport" class="input" style="max-width:320px;">
             <option value="">Semua file</option>
@@ -266,8 +273,57 @@
     </div>
   </div>
 
+  <!-- Modal buat jurnal baru dari baris rekening koran -->
+  <div id="genModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;align-items:center;justify-content:center;padding:16px;">
+    <div style="background:#fff;border-radius:10px;max-width:820px;width:100%;max-height:90vh;overflow:auto;padding:20px;box-shadow:0 4px 24px rgba(0,0,0,.2);">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+        <h3 style="margin:0;font-size:16px;">Buat Jurnal dari Baris Rekening Koran</h3>
+        <button type="button" id="genCloseBtn"
+                style="background:none;border:none;font-size:22px;cursor:pointer;color:#6b7280;padding:0 6px;">×</button>
+      </div>
+      <div id="genHeader" style="font-size:13px;color:#374151;margin-bottom:12px;"></div>
+
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;">
+        <div>
+          <label for="genDate" style="display:block;font-size:12px;color:#6b7280;margin-bottom:4px;">Tanggal jurnal *</label>
+          <input type="date" id="genDate" class="input">
+        </div>
+        <div>
+          <label for="genPartner" style="display:block;font-size:12px;color:#6b7280;margin-bottom:4px;">Partner (opsional)</label>
+          <select id="genPartner" class="input"><option value="">— tanpa partner —</option></select>
+        </div>
+        <div style="grid-column:1/-1;">
+          <label for="genDesc" style="display:block;font-size:12px;color:#6b7280;margin-bottom:4px;">Keterangan jurnal *</label>
+          <input type="text" id="genDesc" class="input" placeholder="mis. Pembayaran bunga pinjaman">
+        </div>
+        <div style="grid-column:1/-1;">
+          <label for="genCounter" style="display:block;font-size:12px;color:#6b7280;margin-bottom:4px;">Akun lawan (COA) *</label>
+          <select id="genCounter" class="input"><option value="">— pilih akun lawan —</option></select>
+        </div>
+        <div id="genRateWrap" style="display:none;">
+          <label for="genRate" style="display:block;font-size:12px;color:#6b7280;margin-bottom:4px;">
+            Kurs <span id="genRateCur">USD</span> *
+          </label>
+          <input type="number" id="genRate" class="input" step="0.01" min="0" placeholder="otomatis">
+          <div id="genRateHint" style="font-size:11px;color:#6b7280;margin-top:4px;"></div>
+        </div>
+        <div>
+          <label for="genMemo" style="display:block;font-size:12px;color:#6b7280;margin-bottom:4px;">Memo (opsional)</label>
+          <input type="text" id="genMemo" class="input" placeholder="keterangan tambahan">
+        </div>
+      </div>
+
+      <div id="genPreview" style="margin-top:12px;font-size:12px;color:#374151;background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:10px;"></div>
+
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px;">
+        <button type="button" class="btn btn-secondary" id="genCancelBtn">Batal</button>
+        <button type="button" class="btn btn-primary" id="genSaveBtn">Simpan &amp; Tautkan</button>
+      </div>
+    </div>
+  </div>
+
   <div class="toast" id="toast"></div>
 
-  <script type="module" src="./js/bank-recon-page.js?v=11.11"></script>
+  <script type="module" src="./js/bank-recon-page.js?v=11.12"></script>
 </body>
 </html>
