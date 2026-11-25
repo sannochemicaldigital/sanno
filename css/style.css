@@ -118,6 +118,45 @@ tbody tr:hover { background: #f9fafb; }
   padding: 10px; background: #f9fafb; border-radius: 8px;
 }
 
+/* Khusus form jurnal: akun | partner | valuta | kurs | debit | kredit | rupiah | hapus */
+/* Lebar kolom mengikuti panjang teksnya supaya satu baris jurnal tetap utuh:
+   "— pilih akun —" (12 karakter), "— (opsional) —" (10), "IDR" (3), kurs (5).
+   Sisa lebar diberikan ke Debit/Kredit agar tidak pecah jadi dua baris. */
+#journalLines .line-row {
+  grid-template-columns:
+    minmax(0, 132px)   /* Akun    */
+    minmax(0, 112px)   /* Partner */
+    minmax(0, 70px)    /* Valuta  */
+    minmax(0, 84px)    /* Kurs    */
+    minmax(0, 1fr)     /* Debit   */
+    minmax(0, 1fr)     /* Kredit  */
+    minmax(0, 128px)   /* Rupiah  */
+    36px;
+}
+/* Field sempit: rapatkan padding supaya teks pilihan tetap terbaca */
+#journalLines .line-row select,
+#journalLines .line-row input {
+  padding-left: 6px;
+  padding-right: 6px;
+}
+
+.line-row .lf { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.line-row .lf > label {
+  font-size: 11px; font-weight: 600; color: #6b7280; letter-spacing: .2px;
+}
+.line-row .line-rate:disabled {
+  background: #eef0f3; color: #6b7280; cursor: not-allowed;
+}
+.line-row .line-base {
+  display: block; text-align: right; font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  padding: 9px 8px; background: #eef2ff; border-radius: 6px;
+  color: #1e3a8a; font-weight: 600; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis;
+}
+.line-row .line-base.base-zero { color: #9ca3af; font-weight: 500; }
+.line-row .line-base.base-credit { color: #b45309; }
+
 .line-row input, .line-row select {
   width: 100%; padding: 8px 10px; font-size: 13px;
   border: 1px solid #d0d5dd; border-radius: 6px;
@@ -138,6 +177,14 @@ tbody tr:hover { background: #f9fafb; }
 .journal-summary .balance-ok { color: #059669; font-weight: 600; }
 .journal-summary .balance-bad { color: #dc2626; font-weight: 600; }
 
+.journal-summary .sum-left { display: flex; flex-direction: column; gap: 5px; }
+.journal-summary .sum-cur { display: flex; gap: 8px; flex-wrap: wrap; }
+.journal-summary .sum-cur-item {
+  background: #e0e7ff; color: #3730a3; border-radius: 6px;
+  padding: 2px 8px; font-size: 12px; font-variant-numeric: tabular-nums;
+}
+.journal-summary .sum-base { font-size: 14px; }
+
 .journal-list-item {
   padding: 10px 0; border-bottom: 1px solid #eef0f3;
   font-size: 14px;
@@ -146,12 +193,17 @@ tbody tr:hover { background: #f9fafb; }
 .journal-list-item .meta { color: #6b7280; font-size: 12px; }
 
 @media (max-width: 700px) {
-  .line-row {
+  /* #journalLines dipakai juga di sini supaya menang dari aturan lebar kolom
+     di atas (specificity ID), jadi di layar kecil baris tetap 2 kolom. */
+  .line-row,
+  #journalLines .line-row {
     grid-template-columns: 1fr 1fr;
     gap: 6px;
   }
   .line-row .line-account,
-  .line-row .line-partner {
+  .line-row .line-partner,
+  .line-row .lf-account,
+  .line-row .lf-partner {
     grid-column: 1 / -1;
   }
   .line-row .line-remove {
@@ -190,6 +242,15 @@ tbody tr:hover { background: #f9fafb; }
 .badge-equity    { background: #fef3c7; color: #92400e; }
 .badge-revenue   { background: #d1fae5; color: #065f46; }
 .badge-expense   { background: #fce7f3; color: #9f1239; }
+
+/* ==== Buku Besar (reports.html tab bb) ====
+   Kolom Tanggal / Valuta / Kurs isinya pendek, jadi dipatok lebarnya
+   supaya kolom Keterangan & rupiah tidak tergeser. */
+.tbl-ledger th, .tbl-ledger td { padding: 8px; }
+.tbl-ledger th.col-date, .tbl-ledger td.col-date { width: 86px; white-space: nowrap; }
+.tbl-ledger th.col-cur,  .tbl-ledger td.col-cur  { width: 54px; }
+.tbl-ledger th.col-rate, .tbl-ledger td.col-rate { width: 80px; white-space: nowrap; }
+
 
 /* ==== Laba Rugi & Neraca ==== */
 .report-section-title {
@@ -250,3 +311,15 @@ tbody tr:hover { background: #f9fafb; }
   flex: 1;
   min-width: 0;
 }
+
+/* ==== Rekonsiliasi Bank ==== */
+/* Sel aksi berisi beberapa tombol (Tautkan / Lepas / Abaikan / Batal).
+   Dibuat flex-wrap + nowrap per tombol supaya tidak terpotong ("Ab..."). */
+.row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  justify-content: flex-end;
+  min-width: 150px;
+}
+.row-actions .btn { white-space: nowrap; }
