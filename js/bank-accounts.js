@@ -111,3 +111,66 @@ export async function listBankCoaAccounts() {
   if (error) throw error;
   return data || [];
 }
+
+// ============================================================
+// KURS BUKU RATA-RATA STOK VALAS DI SATU AKUN
+// ------------------------------------------------------------
+// Dipakai halaman Hutang (pembayaran USD dari rekening valas).
+// Kurs buku = nilai buku akun dibagi saldo valas:
+//     rate = SUM(debit_base - credit_base) / SUM(debit - credit)
+// Hanya baris jurnal dengan mata uang yang diminta yang dihitung,
+// s.d. tanggal pembayaran (opsional).
+//
+// Catatan: RPC lama (mis. add_purchase_payment) menyisipkan
+// journal_lines tanpa currency_code (NULL = ikut journals.currency_code),
+// jadi mata uang baris dibaca dari journals.currency_code bila NULL.
+//
+// Hasil: { account_id, code, name, currency, saldo_valas, saldo_idr, rate }
+//        rate = null bila saldo valas 0 (belum ada stok).
+// ============================================================
+export async function getValasBookRate(coaCode, currency = 'USD', asOf = null) {
+  const code = String(coaCode || '').trim();
+  const cur = String(currency || 'USD').trim().toUpperCase();
+  if (!code) throw new Error('Kode akun wajib diisi');
+
+  const { data: acc, error: accErr } = await supabase
+    .from('accounts')
+    .select('id, code, name')
+    .eq('code', code)
+    .maybeSingle();
+  if (accErr) throw accErr;
+  if (!acc) throw new Error(`Akun ${code} tidak ditemukan`);
+
+  let q = supabase
+    .from('journal_lines')
+    .select('debit, credit, debit_base, credit_base, currency_code, journals!inner(journal_date, currency_code)')
+    .eq('account_id', acc.id);
+  if (asOf) q = q.lte('journals.journal_date', asOf);
+
+  const { data, error } = await q;
+  if (error) throw error;
+
+  let valas = 0;
+  let idr = 0;
+  (data || []).forEach(l => {
+    const lineCur = String(l.currency_code || l.journals?.currency_code || 'IDR')
+      .trim().toUpperCase();
+    if (lineCur !== cur) return;
+    valas += Number(l.debit || 0) - Number(l.credit || 0);
+    idr   += Number(l.debit_base || 0) - Number(l.credit_base || 0);
+  });
+
+  const saldoValas = Math.round(valas * 100) / 100;
+  const saldoIdr   = Math.round(idr * 100) / 100;
+  const rate = Math.abs(saldoValas) > 0.005 ? saldoIdr / saldoValas : null;
+
+  return {
+    account_id: acc.id,
+    code: acc.code,
+    name: acc.name,
+    currency: cur,
+    saldo_valas: saldoValas,
+    saldo_idr: saldoIdr,
+    rate
+  };
+}

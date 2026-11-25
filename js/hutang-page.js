@@ -4,6 +4,7 @@ import { requireAuth, logout } from './auth.js';
 import { renderNav, requirePageAccess } from './access.js';
 import { hasPermission, preloadPermissions } from './permissions.js';
 import { agingHutang } from './reports.js';
+import { getValasBookRate } from './bank-accounts.js';
 
 // ============================================================
 // UTIL
@@ -83,7 +84,11 @@ const state = {
   clearingLoaded: false,
   allocRowCount: 0,
   clearingInvoices: [],
-  payAllocCount: 0
+  payAllocCount: 0,
+  // Kurs buku rata-rata stok valas (auto-fill, boleh diubah manual)
+  bookRate: null,
+  bookRateReq: 0,
+  payRateTouched: false
 };
 
 // ============================================================
@@ -426,22 +431,50 @@ function bindPaymentTab() {
 
   const curSel = document.getElementById('pCurrency');
   const fxWrap = document.getElementById('pFxWrap');
+  const rateInput = document.getElementById('pFxRate');
+
   function toggleFx() {
-    fxWrap.style.display = curSel.value === 'USD' ? '' : 'none';
+    const isUsd = curSel.value === 'USD';
+    fxWrap.style.display = isUsd ? '' : 'none';
     document.getElementById('payTotalCur').textContent = curSel.value;
+    state.payRateTouched = false;
+    if (!isUsd) {
+      rateInput.value = '';
+      state.bookRate = null;
+      hideFxHint();
+    } else {
+      refreshFxBookRate();
+    }
     resetPayAlloc();
     updatePaymentTotal();
   }
   curSel.addEventListener('change', toggleFx);
   toggleFx();
 
+  // Ganti rekening sumber -> kurs buku dihitung ulang untuk akun tersebut
+  document.getElementById('pBankCode').addEventListener('change', () => {
+    state.payRateTouched = false;
+    refreshFxBookRate();
+  });
+  // Tanggal bayar berubah -> kurs buku dihitung s.d. tanggal tersebut
+  document.getElementById('pDate').addEventListener('change', () => {
+    if (!state.payRateTouched) refreshFxBookRate();
+  });
+  // Kurs diubah manual -> jangan ditimpa auto-fill lagi
+  rateInput.addEventListener('input', () => {
+    state.payRateTouched = true;
+    updatePaymentTotal();
+  });
+
   document.getElementById('pAddAllocBtn').addEventListener('click', () => addPayAllocRow());
   document.getElementById('pResetBtn').addEventListener('click', () => {
     document.getElementById('pNote').value = '';
-    document.getElementById('pFxRate').value = '';
+    rateInput.value = '';
     document.getElementById('pDate').value = new Date().toISOString().slice(0, 10);
+    state.payRateTouched = false;
     resetPayAlloc();
     updatePaymentTotal();
+    refreshFxBookRate();
   });
   document.getElementById('pSaveBtn').addEventListener('click', submitPayment);
   document.getElementById('payRefreshBtn').addEventListener('click', () => loadPayments());
@@ -465,6 +498,75 @@ function bindPaymentTab() {
 
   const formCard = document.getElementById('paymentFormCard');
   formCard.style.display = state.canCreatePayment ? 'block' : 'none';
+}
+
+// ------------------------------------------------------------
+// Kurs buku USD: auto-fill dari rata-rata kurs buku stok USD
+// di rekening sumber (akun COA yang dipilih), bisa diubah manual.
+// ------------------------------------------------------------
+function hideFxHint() {
+  const el = document.getElementById('pFxHint');
+  if (!el) return;
+  el.style.display = 'none';
+  el.textContent = '';
+}
+
+function showFxHint(text, warn = false) {
+  const el = document.getElementById('pFxHint');
+  if (!el) return;
+  el.textContent = text || '';
+  el.style.display = text ? 'block' : 'none';
+  el.style.color = warn ? '#92400e' : '#6b7280';
+}
+
+async function refreshFxBookRate() {
+  const currency = document.getElementById('pCurrency').value;
+  const bankCode = document.getElementById('pBankCode').value;
+  const rateInput = document.getElementById('pFxRate');
+
+  if (currency !== 'USD') {
+    state.bookRate = null;
+    hideFxHint();
+    return;
+  }
+  if (!bankCode) {
+    state.bookRate = null;
+    showFxHint('Pilih rekening sumber dulu — kurs buku USD akan terisi otomatis dari akun tersebut.', true);
+    return;
+  }
+
+  const token = ++state.bookRateReq;
+  showFxHint('Menghitung kurs buku rata-rata…');
+  try {
+    const r = await getValasBookRate(
+      bankCode, currency, document.getElementById('pDate').value || null
+    );
+    if (token !== state.bookRateReq) return;
+    state.bookRate = r;
+
+    if (!r.rate) {
+      state.bookRate = null;
+      showFxHint(
+        `Kurs buku ${r.code} belum bisa dihitung: saldo ${r.currency} di akun ini 0. ` +
+        `Isi kurs buku manual.`, true
+      );
+      return;
+    }
+
+    if (!state.payRateTouched) rateInput.value = r.rate.toFixed(4);
+    const minus = r.saldo_valas < 0 ? ' (saldo minus)' : '';
+    showFxHint(
+      `Kurs buku rata-rata ${r.code} ${r.name}: ${fmt(r.rate)} · ` +
+      `saldo ${fmt(r.saldo_valas)} ${r.currency} = Rp ${fmt(r.saldo_idr)}${minus}. ` +
+      `Boleh diubah manual bila perlu.`
+    );
+  } catch (e) {
+    if (token !== state.bookRateReq) return;
+    console.error('getValasBookRate:', e);
+    showFxHint('Gagal menghitung kurs buku: ' + (e.message || e) + ' — isi kurs manual.', true);
+  } finally {
+    if (token === state.bookRateReq) updatePaymentTotal();
+  }
 }
 
 function resetPayAlloc() {
@@ -554,7 +656,7 @@ function updatePaymentTotal() {
   document.getElementById('payTotalAmount').textContent = fmt(total);
 
   if (currency === 'USD') {
-    document.getElementById('payTotalIdr').textContent = fx > 0 ? fmt(total * fx) : '— (isi kurs beli)';
+    document.getElementById('payTotalIdr').textContent = fx > 0 ? fmt(total * fx) : '— (isi kurs buku)';
   } else {
     document.getElementById('payTotalIdr').textContent = fmt(total);
   }
@@ -588,14 +690,14 @@ async function submitPayment() {
 
   if (!dateEl.value) { toast('Tanggal wajib diisi', true); return; }
   if (!bankCode) { toast('Rekening sumber wajib dipilih', true); return; }
-  if (currency === 'USD' && (!fx || fx <= 0)) { toast('Kurs beli USD wajib diisi', true); return; }
+  if (currency === 'USD' && (!fx || fx <= 0)) { toast('Kurs buku USD wajib diisi (> 0)', true); return; }
 
   const allocs = collectPaymentAllocs();
   if (allocs === null) return;
 
   const total = allocs.reduce((s, a) => s + a.amount, 0);
   const confirmMsg = `Simpan pembayaran ${currency} ${fmt(total)}` +
-    (currency === 'USD' ? ` @ kurs ${fmt(fx)} (≈ Rp ${fmt(total * fx)})` : '') +
+    (currency === 'USD' ? ` @ kurs buku ${fmt(fx)} (≈ Rp ${fmt(total * fx)})` : '') +
     ` ke ${allocs.length} invoice?\n\nJurnal otomatis akan dibuat.`;
   if (!confirm(confirmMsg)) return;
 

@@ -15,6 +15,18 @@ import { supabase } from './supabase-client.js';
 
 const BASE_CURRENCY = 'IDR';
 
+// Deteksi valuta dari NAMA akun ("Bank CIMB USD", "Piutang Dagang USD", ...).
+// CATATAN PENTING: accounts.is_fx_monetary TIDAK dipakai sebagai penanda akun
+// valas, karena SQL-v10.1 menandai SEMUA akun moneter = true — termasuk bank
+// IDR 1-1100 Bank BCA dan 1-1110 Bank CIMB. Flag itu hanya berarti "direvaluasi
+// di Trial Balance kurs pajak", bukan "akun ini menampung USD".
+const CURRENCY_HINTS = ['USD', 'SGD', 'EUR', 'JPY', 'CNY', 'GBP', 'AUD'];
+function accountCurrencyHint(acc) {
+  if (!acc) return null;
+  const nm = String(acc.name || '').toUpperCase();
+  return CURRENCY_HINTS.find(c => nm.includes(c)) || null;
+}
+
 const state = {
   accounts: [],
   partners: [],
@@ -261,6 +273,8 @@ function addLine(preset = null) {
     const accId = Number(div.querySelector('.line-account').value);
     const acc = state.accountsById[accId];
     const partnerSel = div.querySelector('.line-partner');
+    // Kolom akun sengaja sempit -> tampilkan nama lengkap lewat tooltip
+    div.querySelector('.line-account').title = acc ? `${acc.code} — ${acc.name}` : '';
     if (acc && (acc.code.startsWith('1-12') || acc.code.startsWith('2-11'))) {
       partnerSel.style.borderColor = '#f59e0b';
       partnerSel.title = 'Partner wajib untuk akun piutang/hutang';
@@ -269,10 +283,12 @@ function addLine(preset = null) {
       partnerSel.title = '';
     }
 
-    // Akun moneter valas (1-1120 / 1-1201 / 2-1101): sarankan valuta dokumen
+    // Akun valas (nama memuat kode valuta: "Bank CIMB USD", "Piutang Dagang USD"):
+    // sarankan valuta dokumen untuk baris ini. Akun bank IDR (1-1100 / 1-1110)
+    // TIDAK diusulkan, karena is_fx_monetary juga true untuk akun moneter IDR.
     const curSel = div.querySelector('.line-currency');
-    if (acc && acc.is_fx_monetary && div.dataset.curTouched !== '1'
-        && curSel.value === BASE_CURRENCY) {
+    const hint = accountCurrencyHint(acc);
+    if (hint && div.dataset.curTouched !== '1' && curSel.value === BASE_CURRENCY) {
       const docCur = String(document.getElementById('currencySelect').value || BASE_CURRENCY).trim();
       if (docCur !== BASE_CURRENCY) {
         curSel.value = docCur;
@@ -338,20 +354,22 @@ async function fillRateFromDb(div, cur) {
   }
 }
 
-// Penanda lunak: akun moneter valas (1-1120 / 1-1201 / 2-1101) diisi valuta IDR.
+// Penanda lunak: akun valas (nama memuat USD dsb.) diisi valuta IDR.
 // Kasus inilah yang dulu membuat jurnal pembelian USD tercatat "rupiah" di akun
 // valas. Bukan error (nilainya tetap seimbang), hanya penanda supaya valuta
-// baris diperiksa sebelum simpan.
+// baris diperiksa sebelum simpan. Akun bank IDR tidak pernah ditandai, sehingga
+// input jurnal 1 baris seperti biasa tidak terganggu.
 function auditFxAccount(div) {
   const accSel = div.querySelector('.line-account');
   const curSel = div.querySelector('.line-currency');
   if (!accSel || !curSel) return;
   const acc = state.accountsById[Number(accSel.value)];
+  const hint = accountCurrencyHint(acc);
   const isIdr = String(curSel.value || BASE_CURRENCY).trim() === BASE_CURRENCY;
-  if (acc && acc.is_fx_monetary && isIdr) {
+  if (hint && isIdr) {
     curSel.style.borderColor = '#f59e0b';
-    curSel.title = `Akun ${acc.code} adalah akun valuta asing. `
-      + 'Kalau transaksi ini dalam USD, pilih valuta USD pada baris ini.';
+    curSel.title = `Akun ${acc.code} (${acc.name}) adalah akun valas ${hint}. `
+      + `Kalau transaksi ini dalam ${hint}, pilih valuta ${hint} pada baris ini.`;
   } else {
     curSel.style.borderColor = '';
     curSel.title = '';

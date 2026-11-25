@@ -281,9 +281,9 @@ function renderLines() {
           acts.push(`<button type="button" class="btn btn-secondary" data-act="unlink" data-id="${l.id}" style="padding:3px 8px;font-size:11px;">Lepas</button>`);
         }
         if (l.match_status === 'ignored') {
-          acts.push(`<button type="button" class="btn btn-secondary" data-act="unignore" data-id="${l.id}" style="padding:3px 8px;font-size:11px;">Batal abaikan</button>`);
+          acts.push(`<button type="button" class="btn btn-secondary" data-act="unignore" data-id="${l.id}" title="Batalkan abaikan — baris kembali ke Belum cocok" style="padding:3px 8px;font-size:11px;">Batal</button>`);
         } else if (l.match_status === 'unmatched') {
-          acts.push(`<button type="button" class="btn btn-secondary" data-act="ignore" data-id="${l.id}" style="padding:3px 8px;font-size:11px;">Abaikan</button>`);
+          acts.push(`<button type="button" class="btn btn-secondary" data-act="ignore" data-id="${l.id}" title="Abaikan baris ini (bisa dibatalkan dengan tombol Batal)" style="padding:3px 8px;font-size:11px;">Abaikan</button>`);
         }
       }
       const jurnal = l.journal_no
@@ -299,7 +299,7 @@ function renderLines() {
         <td class="num">${fmtMoney(l.balance, cur)}</td>
         <td>${matchBadge(l.match_status)}</td>
         <td>${jurnal}</td>
-        <td style="white-space:nowrap;">${acts.join(' ')}</td>
+        <td><div class="row-actions">${acts.join('')}</div></td>
       </tr>`;
     }).join('');
   }
@@ -337,13 +337,16 @@ async function unlinkLine(id) {
 }
 
 async function ignoreLine(id, ignore) {
+  if (!state.canRecon) { toast('Tidak ada akses rekonsiliasi bank', true); return; }
   const ok = await updateLine(id, {
     matched_journal_line_id: null,
     match_status: ignore ? 'ignored' : 'unmatched',
     matched_at: null
   });
   if (!ok) return;
-  toast(ignore ? 'Baris diabaikan.' : 'Baris dikembalikan ke belum cocok.');
+  toast(ignore
+    ? 'Baris diabaikan. Klik tombol "Batal" pada baris itu untuk membatalkan.'
+    : 'Baris dikembalikan ke belum cocok.');
   await Promise.all([loadLines(), loadImports()]);
 }
 
