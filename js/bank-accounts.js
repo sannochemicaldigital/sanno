@@ -174,3 +174,77 @@ export async function getValasBookRate(coaCode, currency = 'USD', asOf = null) {
     rate
   };
 }
+
+// ============================================================
+// KURS BUKU RATA-RATA STOK VALAS — GABUNGAN SELURUH AKUN VALAS
+// ------------------------------------------------------------
+// Fallback bila akun yang dipilih BELUM punya stok valas di GL
+// (mis. rekening valas baru / transaksi bank belum pernah dijurnal).
+// Yang dipakai: nilai buku gabungan akun valas (is_fx_monetary = true)
+// dibagi saldo valas gabungan, s.d. tanggal tertentu (opsional).
+//
+// Hasil: { currency, saldo_valas, saldo_idr, rate, accounts: [{code,name,saldo_valas}] }
+//        rate = null bila gabungan saldo valas 0.
+// ============================================================
+export async function getValasBookRateAcrossAccounts(currency = 'USD', asOf = null) {
+  const cur = String(currency || 'USD').trim().toUpperCase();
+
+  const { data: accs, error: accErr } = await supabase
+    .from('accounts')
+    .select('id, code, name')
+    .eq('is_fx_monetary', true)
+    .eq('is_active', true);
+  if (accErr) throw accErr;
+  const ids = (accs || []).map(a => a.id);
+  if (!ids.length) {
+    return { currency: cur, saldo_valas: 0, saldo_idr: 0, rate: null, accounts: [] };
+  }
+
+  // Ambil baris per halaman supaya tidak terpotong batas baris PostgREST.
+  const PAGE = 1000;
+  const rows = [];
+  for (let page = 0; page < 40; page++) {
+    let q = supabase
+      .from('journal_lines')
+      .select('account_id, debit, credit, debit_base, credit_base, currency_code, journals!inner(journal_date, currency_code)')
+      .in('account_id', ids);
+    if (asOf) q = q.lte('journals.journal_date', asOf);
+    const from = page * PAGE;
+    const { data, error } = await q.range(from, from + PAGE - 1);
+    if (error) throw error;
+    rows.push(...(data || []));
+    if (!data || data.length < PAGE) break;
+  }
+
+  let valas = 0;
+  let idr = 0;
+  const perAcc = new Map();
+  rows.forEach(l => {
+    const lineCur = String(l.currency_code || l.journals?.currency_code || 'IDR')
+      .trim().toUpperCase();
+    if (lineCur !== cur) return;
+    const d = Number(l.debit || 0) - Number(l.credit || 0);
+    const b = Number(l.debit_base || 0) - Number(l.credit_base || 0);
+    valas += d;
+    idr += b;
+    const key = String(l.account_id);
+    const prev = perAcc.get(key) || 0;
+    perAcc.set(key, prev + d);
+  });
+
+  const saldoValas = Math.round(valas * 100) / 100;
+  const saldoIdr = Math.round(idr * 100) / 100;
+  const rate = Math.abs(saldoValas) > 0.005 ? saldoIdr / saldoValas : null;
+
+  const byId = new Map((accs || []).map(a => [String(a.id), a]));
+  const accounts = [...perAcc.entries()]
+    .filter(([, s]) => Math.abs(s) > 0.005)
+    .map(([id, s]) => ({
+      code: byId.get(id)?.code || id,
+      name: byId.get(id)?.name || '',
+      saldo_valas: Math.round(s * 100) / 100
+    }))
+    .sort((a, b) => Math.abs(b.saldo_valas) - Math.abs(a.saldo_valas));
+
+  return { currency: cur, saldo_valas: saldoValas, saldo_idr: saldoIdr, rate, accounts };
+}

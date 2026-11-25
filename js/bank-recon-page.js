@@ -10,7 +10,7 @@ import { parseBankStatementCsv, summarizeStatement } from './bank-recon-csv.js';
 import { createJournal } from './journals.js';
 import { listAccounts } from './accounts.js';
 import { listPartners } from './partners.js';
-import { getValasBookRate } from './bank-accounts.js';
+import { getValasBookRate, getValasBookRateAcrossAccounts } from './bank-accounts.js';
 
 // ============================================================
 // UTIL
@@ -100,6 +100,7 @@ const state = {
   genBankAcc: null,
   genRateTouched: false,
   genRateReq: 0,
+  genCur: 'IDR',
   accounts: null,
   partners: null
 };
@@ -557,17 +558,64 @@ function closeLinkModal() {
 //   uang KELUAR bank -> Debit akun lawan ... Kredit Bank
 // Setelah jurnal dibuat, baris koran langsung ditautkan (match_status manual).
 // ============================================================
+function genLineMoney() {
+  const line = state.genLine;
+  if (!line) return { amt: 0, cur: 'IDR' };
+  const amt = Math.abs(Number(
+    line.amount || (Number(line.masuk || 0) || Number(line.keluar || 0))
+  ));
+  return { amt, cur: normCurrency(state.genCur) };
+}
+
 function genAmounts() {
   const line = state.genLine;
   if (!line) return null;
-  const cur = normCurrency(line.currency_code);
-  const amount = Math.abs(Number(
-    line.amount || (Number(line.masuk || 0) || Number(line.keluar || 0))
-  ));
+  const { amt, cur } = genLineMoney();
   const rate = cur === 'IDR'
     ? 1
     : Number(document.getElementById('genRate').value || 0);
-  return { line, cur, amount, rate, isIn: line.arah === 'IN' };
+  return { line, cur, amount: amt, rate, isIn: line.arah === 'IN' };
+}
+
+// Header modal: nominal selalu mengikuti mata uang jurnal yang dipilih.
+function renderGenHeader() {
+  const line = state.genLine;
+  if (!line) return;
+  const { amt, cur } = genLineMoney();
+  document.getElementById('genHeader').innerHTML =
+    `Baris #${line.line_no} · ${fmtDate(line.line_date)} · ${esc(line.description || '')}<br>` +
+    `${line.arah === 'IN' ? 'Uang <b>masuk</b>' : 'Uang <b>keluar</b>'} ` +
+    `<b>${genMoney(amt, cur)}</b> · akun bank ${esc(line.coa_code)}` +
+    (cur === 'IDR' ? '' : ` · <b>${esc(cur)}</b>`);
+}
+
+// Tampilkan / sembunyikan field kurs sesuai mata uang terpilih.
+function applyGenCurrency() {
+  const cur = normCurrency(state.genCur);
+  document.getElementById('genRateWrap').style.display = cur === 'IDR' ? 'none' : '';
+  document.getElementById('genRateCur').textContent = cur;
+  return cur;
+}
+
+// v11.13 — mata uang jurnal. Default: mata uang file koran. Kalau file tercatat
+// IDR tetapi akun ini punya stok valas (USD/SGD), tawarkan valas itu supaya
+// kurs buku otomatis terisi (file koran lama bisa salah tercatat IDR).
+async function detectGenCurrency(line) {
+  const fromFile = normCurrency(line.currency_code);
+  if (fromFile !== 'IDR') return { cur: fromFile, note: '' };
+  for (const c of ['USD', 'SGD']) {
+    try {
+      const r = await getValasBookRate(line.coa_code, c, null);
+      if (r && r.rate) {
+        return {
+          cur: c,
+          note: `File koran tercatat ${fromFile}, tetapi akun ${line.coa_code} punya stok ${c} ` +
+            `(saldo ${fmt(r.saldo_valas)} ${c}). Dipakai ${c} — ubah ke IDR bila transaksi ini memang rupiah.`
+        };
+      }
+    } catch (e) { /* akun tanpa riwayat valas — lanjut */ }
+  }
+  return { cur: fromFile, note: '' };
 }
 
 function genMoney(n, cur) {
@@ -620,31 +668,85 @@ function renderGenPreview() {
       : '');
 }
 
+// v11.13 — kurs buku bertingkat:
+//   (1) rata-rata kurs buku s.d. tanggal jurnal (stok valas per tanggal itu)
+//   (2) kalau stok per tanggal itu 0 (jurnal GL belum sampai tanggal koran),
+//       pakai kurs buku SELURUH riwayat akun + hint peringatan
+//   (3) kalau akun itu belum punya stok valas sama sekali -> kurs buku
+//       gabungan akun valas (sumber disebut di hint)
+//   (4) kalau semua kosong -> isi manual
 async function refreshGenRate() {
   const g = genAmounts();
-  if (!g || g.cur === 'IDR') return;
-  if (state.genRateTouched) return;
-  const token = ++state.genRateReq;
   const hint = document.getElementById('genRateHint');
-  hint.style.color = '#6b7280';
-  hint.textContent = 'Menghitung kurs buku...';
+  if (!g || !hint) return;
+  const rateInput = document.getElementById('genRate');
+  if (g.cur === 'IDR') { hint.textContent = ''; return; }
+  if (state.genRateTouched) return;
+
+  const token = ++state.genRateReq;
+  const code = g.line.coa_code;
   const asOf = document.getElementById('genDate').value || g.line.line_date;
+  hint.style.color = '#6b7280';
+  hint.textContent = 'Menghitung kurs buku…';
+
   try {
-    const r = await getValasBookRate(g.line.coa_code, g.cur, asOf);
+    let mode = 'asof';
+    let r = await getValasBookRate(code, g.cur, asOf);
     if (token !== state.genRateReq) return;
-    if (r.rate) {
-      document.getElementById('genRate').value = String(Math.round(r.rate * 10000) / 10000);
-      hint.innerHTML = `Kurs buku rata-rata <b>${esc(g.line.coa_code)}</b>: ${fmt(r.rate)} — ` +
-        `saldo ${esc(g.cur)} ${fmt(r.saldo_valas)} = Rp ${fmt(r.saldo_idr)}. Boleh diubah.`;
+    if (!r || !r.rate) {
+      mode = 'histori';
+      r = await getValasBookRate(code, g.cur, null);
+      if (token !== state.genRateReq) return;
+    }
+
+    // v11.13 — akun ini belum punya stok valas sama sekali:
+    // pakai kurs buku rata-rata gabungan akun valas (sumber disebut di hint).
+    let combo = null;
+    if (!r || !r.rate) {
+      mode = 'gabungan';
+      combo = await getValasBookRateAcrossAccounts(g.cur, asOf);
+      if (token !== state.genRateReq) return;
+      if (!combo || !combo.rate) {
+        combo = await getValasBookRateAcrossAccounts(g.cur, null);
+        if (token !== state.genRateReq) return;
+        mode = 'gabungan-historis';
+      }
+      if (combo && combo.rate) {
+        r = { rate: combo.rate, saldo_valas: combo.saldo_valas, saldo_idr: combo.saldo_idr };
+      }
+    }
+
+    if (r && r.rate) {
+      rateInput.value = String(Math.round(r.rate * 10000) / 10000);
+      const saldo = `saldo ${esc(g.cur)} ${fmt(r.saldo_valas)} = Rp ${fmt(r.saldo_idr)}`;
+      const sumber = combo && combo.accounts && combo.accounts.length
+        ? combo.accounts.slice(0, 3).map(x => esc(x.code)).join(', ')
+        : '';
+      if (mode === 'asof') {
+        hint.innerHTML = `Kurs buku rata-rata <b>${esc(code)}</b> s.d. ${fmtDate(asOf)}: ` +
+          `<b>${fmt(r.rate)}</b> — ${saldo}. Boleh diubah.`;
+      } else if (mode === 'histori') {
+        hint.innerHTML = `Stok ${esc(g.cur)} <b>${esc(code)}</b> per ${fmtDate(asOf)} masih 0 — ` +
+          `dipakai kurs buku seluruh riwayat akun: <b>${fmt(r.rate)}</b> (${saldo}). Boleh diubah.`;
+      } else {
+        hint.innerHTML = `Akun <b>${esc(code)}</b> belum punya stok ${esc(g.cur)} — ` +
+          `dipakai kurs buku rata-rata ${esc(g.cur)} gabungan akun valas` +
+          (sumber ? ` (${sumber})` : '') +
+          `${mode === 'gabungan-historis' ? ' seluruh riwayat' : ` s.d. ${fmtDate(asOf)}`}: ` +
+          `<b>${fmt(r.rate)}</b> (${saldo}). Boleh diubah.`;
+      }
+      if (mode !== 'asof' || Number(r.saldo_valas) < 0) hint.style.color = '#92400e';
     } else {
-      document.getElementById('genRate').value = '';
+      rateInput.value = '';
       hint.style.color = '#b45309';
-      hint.textContent = `Saldo ${g.cur} di akun ${g.line.coa_code} 0 — isi kurs manual.`;
+      hint.textContent =
+        `Belum ada stok ${g.cur} di akun ${code} maupun di akun valas lain — isi kurs manual, ` +
+        `atau ubah "Mata uang" di atas bila transaksi ini bukan ${g.cur}.`;
     }
   } catch (e) {
     if (token !== state.genRateReq) return;
     hint.style.color = '#dc2626';
-    hint.textContent = 'Gagal mengambil kurs buku: ' + (e.message || e) + ' — isi kurs manual.';
+    hint.textContent = 'Gagal menghitung kurs buku: ' + (e.message || e) + ' — isi kurs manual.';
   }
   renderGenPreview();
 }
@@ -685,28 +787,22 @@ async function openGenModal(lineId) {
   state.genLine = line;
   state.genBankAcc = null;
   state.genRateTouched = false;
+  state.genCur = normCurrency(line.currency_code);
 
-  const cur = normCurrency(line.currency_code);
-  const amount = Math.abs(Number(
-    line.amount || (Number(line.masuk || 0) || Number(line.keluar || 0))
-  ));
   const hari = String(line.line_date || '').slice(0, 10);
-
-  document.getElementById('genHeader').innerHTML =
-    `Baris #${line.line_no} · ${fmtDate(line.line_date)} · ${esc(line.description || '')}<br>` +
-    `${line.arah === 'IN' ? 'Uang <b>masuk</b>' : 'Uang <b>keluar</b>'} ` +
-    `<b>${genMoney(amount, cur)}</b> · akun bank ${esc(line.coa_code)}` +
-    (cur === 'IDR' ? '' : ` · <b>${esc(cur)}</b>`);
   document.getElementById('genDate').value = hari;
   document.getElementById('genDesc').value = line.description || '';
   document.getElementById('genMemo').value = '';
   document.getElementById('genCounter').value = '';
   document.getElementById('genPartner').value = '';
-  document.getElementById('genRateWrap').style.display = cur === 'IDR' ? 'none' : '';
-  document.getElementById('genRateCur').textContent = cur;
+  document.getElementById('genCurrency').value = state.genCur;
+  document.getElementById('genCurHint').textContent =
+    `Mata uang file koran: ${state.genCur}. Ganti bila rekening ini valas.`;
+  applyGenCurrency();
   document.getElementById('genRate').value = '';
-  document.getElementById('genRateHint').textContent = cur === 'IDR' ? '' : 'Menghitung kurs buku...';
+  document.getElementById('genRateHint').textContent = state.genCur === 'IDR' ? '' : 'Menghitung kurs buku…';
   document.getElementById('genPreview').innerHTML = '';
+  renderGenHeader();
   document.getElementById('genModal').style.display = 'flex';
 
   const { data: bankAcc, error: baErr } = await supabase
@@ -723,6 +819,19 @@ async function openGenModal(lineId) {
   } catch (e) {
     toast('Gagal memuat daftar akun/partner: ' + (e.message || e), true);
   }
+
+  // v11.13 — deteksi mata uang: kalau file koran tercatat IDR tetapi akun ini
+  // punya stok valas, otomatis pakai valas itu supaya kurs buku terisi.
+  const det = await detectGenCurrency(line);
+  if (det.cur !== state.genCur) {
+    state.genCur = det.cur;
+    document.getElementById('genCurrency').value = det.cur;
+    applyGenCurrency();
+    renderGenHeader();
+  }
+  document.getElementById('genCurHint').textContent = det.note
+    || `Mata uang file koran: ${normCurrency(line.currency_code)}. Ganti bila rekening ini valas.`;
+
   await refreshGenRate();
   renderGenPreview();
 }
@@ -1174,6 +1283,22 @@ function bindEvents() {
   document.getElementById('genRate').addEventListener('input', () => {
     state.genRateTouched = true;
     renderGenPreview();
+  });
+  // v11.13 — ganti mata uang jurnal (mis. file koran tercatat IDR padahal valas)
+  document.getElementById('genCurrency').addEventListener('change', e => {
+    state.genCur = normCurrency(e.target.value);
+    state.genRateTouched = false;
+    document.getElementById('genRate').value = '';
+    applyGenCurrency();
+    renderGenHeader();
+    renderGenPreview();
+    refreshGenRate();
+  });
+  // Hitung ulang kurs buku (mis. setelah ubah manual)
+  document.getElementById('genRateResetBtn').addEventListener('click', () => {
+    state.genRateTouched = false;
+    document.getElementById('genRate').value = '';
+    refreshGenRate();
   });
 }
 
