@@ -1559,25 +1559,82 @@ async function loadKursList() {
       return;
     }
 
-    // Baris terbaru di atas -> kurs berlaku sampai sehari sebelum baris
-    // berikutnya yang lebih tua.
-    tbody.innerHTML = rows.map((r, i) => {
-      const lebihTua = rows.slice(i + 1).find(x => x.rate_date < r.rate_date);
-      const selesai = lebihTua ? shiftIsoDate(lebihTua.rate_date, -1) : null;
+    // KMK berlaku TEPAT 1 PEKAN: Rabu s/d Selasa. Jangan dipaksakan memanjang —
+    // akhir berlaku = akhir pekan KMK, kecuali ada KMK lain yang lebih baru di
+    // pekan yang sama (maka digantikan). Pekan yang belum diisi dibiarkan kosong
+    // dan ditandai, bukan ditutupi kurs lama.
+    const PEWEK_MS = 7 * 86400000;
+    const awalPekanRabu = (iso) => {
+      const t = isoToUtcMs(iso);
+      return utcMsToIso(t - ((new Date(t).getUTCDay() - 3 + 7) % 7) * 86400000);
+    };
+    const urutNaik = rows.slice().sort((a, b) =>
+      (a.rate_date < b.rate_date ? -1 : a.rate_date > b.rate_date ? 1 : 0));
+    const berlaku = new Map();
+    urutNaik.forEach((r, i) => {
+      const awalPekan = awalPekanRabu(r.rate_date);
+      const akhirPekan = utcMsToIso(isoToUtcMs(awalPekan) + 6 * 86400000);
+      const lebihBaru = urutNaik[i + 1] || null;
+      const digantikan = lebihBaru && lebihBaru.rate_date <= akhirPekan
+        ? shiftIsoDate(lebihBaru.rate_date, -1)
+        : null;
+      const selesai = digantikan || akhirPekan;
+      // Jumlah pekan kosong antara akhir pekan ini dan KMK berikutnya.
+      const kosong = lebihBaru
+        ? Math.max(0, Math.round((isoToUtcMs(lebihBaru.rate_date) - isoToUtcMs(selesai) - 86400000) / PEWEK_MS))
+        : 0;
+      berlaku.set(r.rate_date, {
+        awalPekan,
+        akhirPekan,
+        selesai,
+        digantikan: !!digantikan,
+        kosong,
+        berikutnya: lebihBaru ? lebihBaru.rate_date : null,
+        bukanRabu: awalPekan !== String(r.rate_date).slice(0, 10)
+      });
+    });
+
+    const tampilSemua = !!state.kursShowAll;
+    const batas = tampilSemua ? rows.length : 40;
+    tbody.innerHTML = rows.slice(0, batas).map((r) => {
+      const b = berlaku.get(r.rate_date) || {};
+      let catatan = '';
+      if (b.digantikan) {
+        catatan += `<br><span style="font-size:11px;color:#b45309;">digantikan KMK lebih baru di pekan yang sama</span>`;
+      }
+      if (b.bukanRabu) {
+        catatan += `<br><span style="font-size:11px;color:#b45309;">tanggal bukan Rabu — KMK resmi mulai Rabu</span>`;
+      }
+      if (b.kosong > 0) {
+        catatan += `<br><span style="font-size:11px;color:#b45309;">${b.kosong} pekan setelah ini belum ada kurs ` +
+          `(kosong s/d sehari sebelum ${fmtDate(b.berikutnya)})</span>`;
+      }
       return `<tr>` +
         `<td>${fmtDate(r.rate_date)}</td>` +
         `<td class="num">${fmt(r.rate_to_idr)}</td>` +
-        `<td>${selesai ? `s/d ${fmtDate(selesai)}` : '<span style="color:#6b7280;">s/d sekarang</span>'}</td>` +
+        `<td>s/d ${fmtDate(b.selesai)}${catatan}</td>` +
         `<td style="text-align:right;">` +
         (state.canRecon
           ? `<button type="button" class="btn btn-danger" data-kurs-del="${esc(r.rate_date)}" ` +
             `style="padding:2px 8px;font-size:11px;">Hapus</button>`
           : '') +
         `</td></tr>`;
-    }).join('');
+    }).join('') + (rows.length > batas
+      ? `<tr><td colspan="4" style="text-align:center;padding:10px;">` +
+        `<button type="button" class="btn btn-secondary" data-kurs-all="1" ` +
+        `style="padding:4px 10px;font-size:12px;">Tampilkan semua ${rows.length} baris</button>` +
+        `<div style="font-size:11px;color:#6b7280;margin-top:4px;">` +
+        `yang tampil hanya ${batas} baris terbaru</div></td></tr>`
+      : '');
 
     if (info) {
-      info.textContent = `${rows.length} baris kurs ${cur} (terbaru di atas).` +
+      const totalPekanKosong = [...berlaku.values()].reduce((s, b) => s + (b.kosong || 0), 0);
+      info.textContent = `${rows.length} baris kurs ${cur} (terbaru di atas` +
+        (rows.length > batas ? `, ${batas} baris ditampilkan` : '') + '). ' +
+        `KMK berlaku 1 pekan (Rabu–Selasa); kolom "s/d" tidak pernah melebihi Selasa. ` +
+        (totalPekanKosong
+          ? `${totalPekanKosong} pekan di antaranya belum ada kurs — isi lewat form di atas.`
+          : 'Semua pekan berurutan lengkap.') +
         (state.canRecon ? '' : ' Hanya pengguna dengan izin rekonsiliasi bank yang bisa mengubah.');
     }
     refreshKursGapInfo();
@@ -1665,10 +1722,10 @@ function checkKursCoverage() {
       ? `Belum ada: ${contoh}${belum.length > 10 ? ` … (+${belum.length - 10} periode lain)` : ''}<br>`
       : '') +
     `Kurs terbaru: <b>${fmtDate(terakhir)}</b> (${umur} hari lalu) · ` +
-    (gapPair && gapHari > 8
+    (gapPair && gapHari > 14
       ? `jarak terbesar antar kurs tersimpan ${gapHari} hari ` +
         `(${fmtDate(gapPair[0])} → ${fmtDate(gapPair[1])})`
-      : 'tidak ada lubang lebih dari 8 hari');
+      : 'tidak ada lubang lebih dari 2 pekan (batas wajar Idul Fitri)');
 }
 
 // Hitung ulang info kelengkapan hanya bila panel itu sudah pernah ditampilkan.
@@ -1691,6 +1748,18 @@ function fillKursExample() {
   state.kursParsed = null;
   previewKursPaste(true);
   ta.focus();
+}
+
+// v11.16 — buka halaman resmi fiskal untuk pekan KMK sesuai tanggal di form.
+// Situs itu memakai form GET dengan name="date" (bukan "tanggal"), jadi
+// ?date=YYYY-MM-DD langsung menampilkan KMK pekan tersebut.
+function openFiskalKurs() {
+  const el = document.getElementById('kursDate');
+  const iso = el && /^\d{4}-\d{2}-\d{2}$/.test(String(el.value || ''))
+    ? String(el.value).slice(0, 10)
+    : new Date().toISOString().slice(0, 10);
+  window.open('https://fiskal.kemenkeu.go.id/informasi-publik/kurs-pajak?date=' + iso,
+    '_blank', 'noopener');
 }
 
 async function removeKursRow(rateDate) {
@@ -1901,6 +1970,7 @@ function bindEvents() {
   document.getElementById('kursCheckBtn').addEventListener('click', checkKursCoverage);
   document.getElementById('kursCheckFrom').addEventListener('change', refreshKursGapInfo);
   document.getElementById('kursExampleBtn').addEventListener('click', fillKursExample);
+  document.getElementById('kursOpenFiskalBtn').addEventListener('click', openFiskalKurs);
   document.getElementById('kursListCur').addEventListener('change', () => {
     document.getElementById('kursCur').value = document.getElementById('kursListCur').value;
     loadKursList();
@@ -1911,12 +1981,19 @@ function bindEvents() {
   const kursDateEl = document.getElementById('kursDate');
   const nowD = new Date();
   if (kursDateEl && !kursDateEl.value) {
-    kursDateEl.value = `${nowD.getFullYear()}-${String(nowD.getMonth() + 1).padStart(2, '0')}-` +
-      `${String(nowD.getDate()).padStart(2, '0')}`;
+    // Default = Rabu pada pekan berjalan (awal pekan KMK), bukan tanggal hari ini,
+    // supaya tanggal yang disarankan selalu sesuai aturan Rabu–Selasa.
+    const t0 = Date.UTC(nowD.getFullYear(), nowD.getMonth(), nowD.getDate());
+    const dow0 = new Date(t0).getUTCDay();
+    kursDateEl.value = utcMsToIso(t0 - ((dow0 - 3 + 7) % 7) * 86400000);
   }
   document.getElementById('tbody-kurs').addEventListener('click', e => {
     const btn = e.target.closest('button[data-kurs-del]');
-    if (btn) removeKursRow(btn.dataset.kursDel);
+    if (btn) { removeKursRow(btn.dataset.kursDel); return; }
+    if (e.target.closest('button[data-kurs-all]')) {
+      state.kursShowAll = true;
+      loadKursList();
+    }
   });
 }
 
