@@ -1292,6 +1292,9 @@ function parseKmkPaste(text, currency) {
   String(text || '').split(/\r?\n/).forEach((rawLine, idx) => {
     const line = rawLine.trim();
     if (!line) return;
+    // v11.15 — baris judul/keterangan hasil salin dari web/Excel (tanpa angka
+    // sama sekali, mis. "Mata Uang  Kurs") dilewati diam-diam, bukan error.
+    if (!/[0-9]/.test(line)) return;
 
     let parts = line.split(/[;|\t]+|\s{2,}/).map(t => t.trim()).filter(Boolean);
     if (parts.length < 2 || !parts.some(p => parseKmkDate(p))) {
@@ -1307,17 +1310,22 @@ function parseKmkPaste(text, currency) {
 
     let nilai = NaN;
     for (let i = tglAt + 1; i < parts.length; i++) {
+      // v11.15 — token yang berbentuk tanggal lain (mis. "19/11/2026 s/d
+      // 25/11/2026") JANGAN dibaca sebagai kurs.
+      if (parseKmkDate(parts[i])) continue;
       const v = parseKmkNumber(parts[i]);
       if (Number.isFinite(v)) { nilai = v; break; }
     }
     if (!Number.isFinite(nilai)) {
       for (let i = 0; i < tglAt; i++) {
+        if (parseKmkDate(parts[i])) continue;
         const v = parseKmkNumber(parts[i]);
         if (Number.isFinite(v)) { nilai = v; break; }
       }
     }
 
-    if (!tgl || !Number.isFinite(nilai) || nilai <= 0 || nilai > 1e9) {
+    // Kurs KMK selalu >= 10 (rupiah per unit; JPY/KRW dikutip per 100).
+    if (!tgl || !Number.isFinite(nilai) || nilai < 10 || nilai > 1e9) {
       errors.push(`Baris ${idx + 1}: "${line}" — ${!tgl ? 'tanggal tidak dikenali' : 'kurs tidak valid'}`);
       return;
     }
@@ -1418,12 +1426,13 @@ async function loadKursList() {
   if (info) info.textContent = '';
 
   try {
-    const rows = await listTaxRates({ currency: cur, limit: 300 });
+    const rows = await listTaxRates({ currency: cur, limit: 2000 });
     state.kursRows = rows;
 
     if (!rows.length) {
       tbody.innerHTML = `<tr><td colspan="4" style="text-align:center;color:#9ca3af;padding:16px;">` +
         `Belum ada kurs ${esc(cur)}. Tempel daftar KMK di form atas.</td></tr>`;
+      refreshKursGapInfo();
       return;
     }
 
@@ -1448,11 +1457,116 @@ async function loadKursList() {
       info.textContent = `${rows.length} baris kurs ${cur} (terbaru di atas).` +
         (state.canRecon ? '' : ' Hanya pengguna dengan izin rekonsiliasi bank yang bisa mengubah.');
     }
+    refreshKursGapInfo();
   } catch (e) {
     tbody.innerHTML = `<tr><td colspan="4" style="text-align:center;color:#dc2626;padding:16px;">` +
       `${esc(e.message || String(e))}</td></tr>`;
     if (info) info.textContent = 'Pastikan SQL-v11.13-kurs-pajak-kmk.sql sudah dijalankan di Supabase.';
   }
+}
+
+// ------------------------------------------------------------------
+// v11.15 — CEK KELENGKAPAN daftar kurs pajak (tanpa server).
+// KMK terbit mingguan (mulai Selasa). Aplikasi memakai "kurs terakhir
+// <= tanggal", jadi periode yang kosong tetap memakai kurs periode
+// sebelumnya (boleh, tapi kurang akurat untuk Trial Balance pajak).
+// ------------------------------------------------------------------
+function isoToUtcMs(iso) {
+  const [y, m, d] = String(iso).slice(0, 10).split('-').map(Number);
+  return Date.UTC(y, (m || 1) - 1, d || 1);
+}
+
+function utcMsToIso(ms) {
+  return new Date(ms).toISOString().slice(0, 10);
+}
+
+function checkKursCoverage() {
+  const info = document.getElementById('kursGapInfo');
+  if (!info) return;
+  const cur = normCurrency(document.getElementById('kursListCur').value);
+  const fromEl = document.getElementById('kursCheckFrom');
+  let from = fromEl && fromEl.value ? String(fromEl.value).slice(0, 10) : '2021-01-01';
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(from)) from = '2021-01-01';
+  info.dataset.shown = '1';
+
+  const dates = (state.kursRows || [])
+    .map(r => String(r.rate_date).slice(0, 10))
+    .filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d) && d >= from)
+    .sort();
+
+  if (!dates.length) {
+    info.style.color = '#b45309';
+    info.innerHTML = `Belum ada kurs <b>${esc(cur)}</b> tersimpan sejak ${fmtDate(from)}. ` +
+      `Tempel daftar KMK di kotak atas lalu klik <b>Simpan ke Database</b>.`;
+    return;
+  }
+
+  const now = new Date();
+  const todayMs = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+
+  // Periode KMK dihitung mulai hari Selasa (dow = 2).
+  let t = isoToUtcMs(from);
+  const dow = new Date(t).getUTCDay();
+  t += ((2 - dow + 7) % 7) * 86400000;
+
+  const set = new Set(dates);
+  const belum = [];
+  let total = 0;
+  for (; t <= todayMs && total < 4000; t += 7 * 86400000) {
+    total++;
+    let ada = false;
+    for (let k = 0; k < 7; k++) {
+      if (set.has(utcMsToIso(t + k * 86400000))) { ada = true; break; }
+    }
+    if (!ada) belum.push(utcMsToIso(t));
+  }
+
+  let gapHari = 0;
+  let gapPair = null;
+  for (let i = 1; i < dates.length; i++) {
+    const d = Math.round((isoToUtcMs(dates[i]) - isoToUtcMs(dates[i - 1])) / 86400000);
+    if (d > gapHari) { gapHari = d; gapPair = [dates[i - 1], dates[i]]; }
+  }
+
+  const terakhir = dates[dates.length - 1];
+  const umur = Math.max(0, Math.round((todayMs - isoToUtcMs(terakhir)) / 86400000));
+  const contoh = belum.slice(0, 10).map(fmtDate).join(', ');
+
+  info.style.color = belum.length ? '#b45309' : '#047857';
+  info.innerHTML =
+    `<b>${esc(cur)}</b> · ${total} periode mingguan sejak ${fmtDate(from)} · ` +
+    (belum.length ? `<b>${belum.length} periode belum ada kurs</b>` : '<b>lengkap</b>') +
+    `<br>` +
+    (belum.length
+      ? `Belum ada: ${contoh}${belum.length > 10 ? ` … (+${belum.length - 10} periode lain)` : ''}<br>`
+      : '') +
+    `Kurs terbaru: <b>${fmtDate(terakhir)}</b> (${umur} hari lalu) · ` +
+    (gapPair && gapHari > 8
+      ? `jarak terbesar antar kurs tersimpan ${gapHari} hari ` +
+        `(${fmtDate(gapPair[0])} → ${fmtDate(gapPair[1])})`
+      : 'tidak ada lubang lebih dari 8 hari');
+}
+
+// Hitung ulang info kelengkapan hanya bila panel itu sudah pernah ditampilkan.
+function refreshKursGapInfo() {
+  const info = document.getElementById('kursGapInfo');
+  if (info && info.dataset.shown === '1') checkKursCoverage();
+}
+
+// Contoh format tempel (termasuk baris judul yang harus diabaikan parser).
+function fillKursExample() {
+  const ta = document.getElementById('kursPaste');
+  if (!ta) return;
+  if (ta.value.trim() && !confirm('Ganti isi kotak tempel dengan contoh format?')) return;
+  ta.value = [
+    'Tanggal;Kurs USD',
+    '2026-11-19;16600',
+    '19/11/2026;16.600',
+    '19-11-2026\t16.600,00'
+  ].join('\n');
+  state.kursParsed = null;
+  previewKursPaste(true);
+  ta.focus();
 }
 
 async function removeKursRow(rateDate) {
@@ -1644,6 +1758,10 @@ function bindEvents() {
   document.getElementById('kursSaveBtn').addEventListener('click', saveKursPaste);
   document.getElementById('kursReloadBtn').addEventListener('click', loadKursList);
   document.getElementById('kursCur').addEventListener('change', () => previewKursPaste(true));
+  // v11.15 — cek kelengkapan periode KMK + isi contoh format
+  document.getElementById('kursCheckBtn').addEventListener('click', checkKursCoverage);
+  document.getElementById('kursCheckFrom').addEventListener('change', refreshKursGapInfo);
+  document.getElementById('kursExampleBtn').addEventListener('click', fillKursExample);
   document.getElementById('kursListCur').addEventListener('change', () => {
     document.getElementById('kursCur').value = document.getElementById('kursListCur').value;
     loadKursList();
