@@ -258,6 +258,17 @@
           <b>Buat Jurnal</b> (opsi <i>Kurs Pajak KMK</i>) serta Trial Balance pajak.
           Tanggal yang sudah ada akan <b>ditimpa</b>.
         </p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px;">
+          <a class="btn btn-secondary" href="https://jdih.kemenkeu.go.id/kurs-pajak"
+             target="_blank" rel="noopener" style="text-decoration:none;">Buka Kurs Pajak (JDIH Kemenkeu)</a>
+          <a class="btn btn-secondary" href="https://jdih.kemenkeu.go.id/"
+             target="_blank" rel="noopener" style="text-decoration:none;">Cari dokumen KMK</a>
+          <button type="button" class="btn btn-secondary" id="kursExampleBtn">Isi contoh format</button>
+          <span style="font-size:12px;color:#6b7280;">
+            Di halaman KMK: salin kolom <b>Tanggal</b> + <b>USD</b> (boleh langsung dari Excel),
+            lalu tempel di kotak di bawah.
+          </span>
+        </div>
         <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:8px;">
           <div>
             <label for="kursCur" style="display:block;font-size:12px;color:#6b7280;margin-bottom:4px;">Mata uang</label>
@@ -279,6 +290,19 @@
                   style="width:100%;font-family:ui-monospace,Consolas,monospace;font-size:12px;"
                   placeholder="2026-11-19;16600&#10;2026-11-12;16550&#10;19/11/2026;16.600"></textarea>
         <div id="kursPreview" style="margin-top:10px;font-size:12px;"></div>
+        <div style="margin-top:10px;padding-top:10px;border-top:1px dashed #e5e7eb;">
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;">
+            <div>
+              <label for="kursCheckFrom" style="display:block;font-size:12px;color:#6b7280;margin-bottom:4px;">Cek kelengkapan sejak</label>
+              <input type="date" id="kursCheckFrom" class="input" value="2021-01-01" style="min-width:150px;">
+            </div>
+            <button type="button" class="btn btn-secondary" id="kursCheckBtn">Cek kelengkapan</button>
+            <span style="font-size:11px;color:#6b7280;">
+              Menandai periode mingguan (Selasa) yang belum punya kurs pada daftar tersimpan di bawah.
+            </span>
+          </div>
+          <div id="kursGapInfo" style="margin-top:8px;font-size:12px;"></div>
+        </div>
       </div>
 
       <div class="card">
@@ -423,6 +447,6 @@
 
   <div class="toast" id="toast"></div>
 
-  <script type="module" src="./js/bank-recon-page.js?v=11.14"></script>
+  <script type="module" src="./js/bank-recon-page.js?v=11.15"></script>
 </body>
 </html>
