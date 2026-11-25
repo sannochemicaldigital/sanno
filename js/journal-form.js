@@ -127,6 +127,11 @@ function currencyOptions(selected = BASE_CURRENCY) {
   }
 
   await renderJournals();
+
+  // v11.12 — tautan langsung dari halaman lain: journal.html?id=<id>
+  // (dipakai tombol "Edit Jurnal" di Rekonsiliasi Bank). Hanya bila punya hak edit.
+  const deepId = Number(new URLSearchParams(location.search).get('id') || 0);
+  if (deepId > 0 && state.perms.edit) await loadEdit(deepId);
 })();
 
 async function loadMaster() {

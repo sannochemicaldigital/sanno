@@ -7,6 +7,10 @@ import { requireAuth, logout } from './auth.js';
 import { renderNav, requirePageAccess } from './access.js';
 import { hasPermission, preloadPermissions } from './permissions.js';
 import { parseBankStatementCsv, summarizeStatement } from './bank-recon-csv.js';
+import { createJournal } from './journals.js';
+import { listAccounts } from './accounts.js';
+import { listPartners } from './partners.js';
+import { getValasBookRate } from './bank-accounts.js';
 
 // ============================================================
 // UTIL
@@ -81,6 +85,8 @@ const state = {
   canView: false,
   canImport: false,
   canRecon: false,
+  canJournal: false,
+  canJournalEdit: false,
   imports: [],
   lines: [],
   lineTotal: 0,
@@ -88,7 +94,14 @@ const state = {
   filters: { import_id: '', status: '', search: '', from: '', to: '' },
   preview: null,
   candidateLine: null,
-  candidates: []
+  candidates: [],
+  // v11.12 — buat jurnal dari baris koran
+  genLine: null,
+  genBankAcc: null,
+  genRateTouched: false,
+  genRateReq: 0,
+  accounts: null,
+  partners: null
 };
 
 // ============================================================
@@ -276,9 +289,15 @@ function renderLines() {
       if (state.canRecon) {
         if (l.match_status === 'unmatched' || l.match_status === 'ignored') {
           acts.push(`<button type="button" class="btn btn-secondary" data-act="link" data-id="${l.id}" style="padding:3px 8px;font-size:11px;">Tautkan</button>`);
+          if (state.canJournal) {
+            acts.push(`<button type="button" class="btn btn-primary" data-act="gen" data-id="${l.id}" title="Buat jurnal baru dari baris koran ini (mis. pembayaran bunga pinjaman → Beban Bunga), lalu tautkan otomatis" style="padding:3px 8px;font-size:11px;">Buat Jurnal</button>`);
+          }
         }
         if (l.match_status === 'auto' || l.match_status === 'manual') {
           acts.push(`<button type="button" class="btn btn-secondary" data-act="unlink" data-id="${l.id}" style="padding:3px 8px;font-size:11px;">Lepas</button>`);
+          if (state.canJournalEdit && l.journal_id) {
+            acts.push(`<a class="btn btn-secondary" href="./journal.html?id=${l.journal_id}" title="Buka jurnal ${esc(l.journal_no || '')} di halaman Jurnal untuk diperbaiki (ganti akun, reversal, dll)" style="padding:3px 8px;font-size:11px;text-decoration:none;display:inline-block;">Edit Jurnal</a>`);
+          }
         }
         if (l.match_status === 'ignored') {
           acts.push(`<button type="button" class="btn btn-secondary" data-act="unignore" data-id="${l.id}" title="Batalkan abaikan — baris kembali ke Belum cocok" style="padding:3px 8px;font-size:11px;">Batal</button>`);
@@ -364,6 +383,12 @@ async function autoMatch(importId = null) {
   await Promise.all([loadLines(), loadImports()]);
 }
 
+// Jalan pintas "buat jurnal" di dalam modal Tautkan / pesan kosong (v11.12).
+function genShortcutHtml(lineId, label = 'Buat jurnal dari baris ini') {
+  return `<br><button type="button" class="btn btn-primary" data-gen="${esc(lineId)}"` +
+    ` style="margin-top:8px;padding:4px 10px;font-size:12px;">${esc(label)}</button>`;
+}
+
 async function openLinkModal(lineId) {
   const line = state.lines.find(l => String(l.id) === String(lineId));
   if (!line) return;
@@ -394,17 +419,41 @@ async function openLinkModal(lineId) {
   const amountCol = arah === 'IN'
     ? (isIdr ? 'credit_base' : 'credit')
     : (isIdr ? 'debit_base' : 'debit');
-  const { data: jls, error: jlErr } = await supabase
+  const CAND_SELECT = 'id, journal_id, memo, debit, credit, debit_base, credit_base';
+  let { data: jls, error: jlErr } = await supabase
     .from('journal_lines')
-    .select('id, journal_id, memo, debit, credit, debit_base, credit_base')
+    .select(CAND_SELECT)
     .eq('account_id', acc.id)
     .eq(amountCol, amount);
+  // v11.12: nominal persis tidak ada -> ulangi dengan toleransi kecil
+  // (IDR ±Rp1, valas ±0,01) supaya beda pembulatan tetap bisa ditautkan.
+  let near = false;
+  if (!jlErr && (!jls || !jls.length)) {
+    const tol = isIdr ? 1 : 0.01;
+    const retry = await supabase
+      .from('journal_lines')
+      .select(CAND_SELECT)
+      .eq('account_id', acc.id)
+      .gte(amountCol, amount - tol)
+      .lte(amountCol, amount + tol);
+    if (!retry.error) {
+      jls = retry.data || [];
+      near = jls.length > 0;
+    }
+  }
   if (jlErr) {
     tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:#dc2626;padding:16px;">${esc(jlErr.message)}</td></tr>`;
     return;
   }
+  if (near) {
+    document.getElementById('linkHeader').innerHTML +=
+      ` · <span style="color:#b45309;">menampilkan nominal beda ≤ ${isIdr ? 'Rp 1' : '0,01 ' + esc(cur)}</span>`;
+  }
   if (!jls || !jls.length) {
-    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:#9ca3af;padding:16px;">Tidak ada baris jurnal dengan nominal tersebut pada akun ini.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:#9ca3af;padding:16px;">' +
+      'Tidak ada baris jurnal dengan nominal tersebut pada akun ini.' +
+      genShortcutHtml(line.id, 'Buat jurnal baru dari baris ini') +
+      '</td></tr>';
     return;
   }
 
@@ -447,7 +496,9 @@ async function openLinkModal(lineId) {
   const currencyRows = isIdr ? rows : rows.filter(r => r.currency_code === cur);
   if (!currencyRows.length) {
     tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:#9ca3af;padding:16px;">` +
-      `Nominal sama ada, tetapi mata uang jurnalnya bukan ${esc(cur)}.</td></tr>`;
+      `Nominal sama ada, tetapi mata uang jurnalnya bukan ${esc(cur)}.` +
+      genShortcutHtml(line.id, 'Buat jurnal baru dari baris ini') +
+      `</td></tr>`;
     return;
   }
   rows = currencyRows.filter(r => r.diff === null || Math.abs(r.diff) <= 90);
@@ -455,7 +506,10 @@ async function openLinkModal(lineId) {
   state.candidates = rows;
 
   if (!rows.length) {
-    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:#9ca3af;padding:16px;">Kandidat nominal sama ada, tetapi tanggalnya di luar ±90 hari.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:#9ca3af;padding:16px;">' +
+      'Kandidat nominal sama ada, tetapi tanggalnya di luar ±90 hari.' +
+      genShortcutHtml(line.id, 'Buat jurnal baru dari baris ini') +
+      '</td></tr>';
     return;
   }
   tbody.innerHTML = rows.map(r => {
@@ -492,6 +546,282 @@ function closeLinkModal() {
   document.getElementById('linkModal').style.display = 'none';
   state.candidateLine = null;
   state.candidates = [];
+}
+
+// ============================================================
+// BUAT JURNAL DARI BARIS KORAN (v11.12)
+// ------------------------------------------------------------
+// Kasus: transaksi bank belum pernah dijurnal (bunga pinjaman, biaya admin,
+// transfer antar bank, dll). Jurnal yang dibuat 2 baris:
+//   uang MASUK  bank -> Debit Bank    ... Kredit akun lawan
+//   uang KELUAR bank -> Debit akun lawan ... Kredit Bank
+// Setelah jurnal dibuat, baris koran langsung ditautkan (match_status manual).
+// ============================================================
+function genAmounts() {
+  const line = state.genLine;
+  if (!line) return null;
+  const cur = normCurrency(line.currency_code);
+  const amount = Math.abs(Number(
+    line.amount || (Number(line.masuk || 0) || Number(line.keluar || 0))
+  ));
+  const rate = cur === 'IDR'
+    ? 1
+    : Number(document.getElementById('genRate').value || 0);
+  return { line, cur, amount, rate, isIn: line.arah === 'IN' };
+}
+
+function genMoney(n, cur) {
+  return cur === 'IDR' ? fmt(n) : `${cur} ${fmt(n)}`;
+}
+
+function renderGenPreview() {
+  const el = document.getElementById('genPreview');
+  if (!el) return;
+  const g = genAmounts();
+  const bankAcc = state.genBankAcc;
+  if (!g || !bankAcc) { el.innerHTML = ''; return; }
+
+  const counterId = document.getElementById('genCounter').value;
+  const counter = (state.accounts || []).find(a => String(a.id) === String(counterId));
+  const bankName = `${esc(bankAcc.code)} — ${esc(bankAcc.name)}`;
+  const counterName = counter
+    ? `${esc(counter.code)} — ${esc(counter.name)}`
+    : '<i style="color:#b45309;">belum dipilih</i>';
+  const sameAsBank = counter && String(counter.id) === String(bankAcc.id);
+  const baseNote = (g.cur === 'IDR' || !(g.rate > 0))
+    ? ''
+    : ` <span style="color:#6b7280;">(Rp ${fmt(g.amount * g.rate)})</span>`;
+  const money = genMoney(g.amount, g.cur) + baseNote;
+
+  const rows = [
+    { acc: g.isIn ? bankName : counterName, debit: money, credit: '' },
+    { acc: g.isIn ? counterName : bankName, debit: '', credit: money }
+  ];
+
+  el.innerHTML =
+    `<div style="font-weight:600;margin-bottom:6px;">Pratinjau jurnal</div>` +
+    `<table style="width:100%;border-collapse:collapse;"><thead><tr>` +
+    `<th style="text-align:left;font-weight:500;color:#6b7280;padding:2px 4px;">Akun</th>` +
+    `<th style="text-align:right;font-weight:500;color:#6b7280;padding:2px 4px;">Debit</th>` +
+    `<th style="text-align:right;font-weight:500;color:#6b7280;padding:2px 4px;">Kredit</th>` +
+    `</tr></thead><tbody>` +
+    rows.map(r => `<tr>` +
+      `<td style="padding:2px 4px;">${r.acc}</td>` +
+      `<td style="padding:2px 4px;text-align:right;">${r.debit || '—'}</td>` +
+      `<td style="padding:2px 4px;text-align:right;">${r.credit || '—'}</td>` +
+      `</tr>`).join('') +
+    `</tbody></table>` +
+    (g.cur === 'IDR'
+      ? ''
+      : `<div style="margin-top:6px;color:#6b7280;">Kurs ${esc(g.cur)} ` +
+        `${g.rate > 0 ? fmt(g.rate) : '—'} · kedua baris memakai mata uang &amp; kurs yang sama.</div>`) +
+    (sameAsBank
+      ? `<div style="margin-top:6px;color:#dc2626;">Akun lawan tidak boleh sama dengan akun bank.</div>`
+      : '');
+}
+
+async function refreshGenRate() {
+  const g = genAmounts();
+  if (!g || g.cur === 'IDR') return;
+  if (state.genRateTouched) return;
+  const token = ++state.genRateReq;
+  const hint = document.getElementById('genRateHint');
+  hint.style.color = '#6b7280';
+  hint.textContent = 'Menghitung kurs buku...';
+  const asOf = document.getElementById('genDate').value || g.line.line_date;
+  try {
+    const r = await getValasBookRate(g.line.coa_code, g.cur, asOf);
+    if (token !== state.genRateReq) return;
+    if (r.rate) {
+      document.getElementById('genRate').value = String(Math.round(r.rate * 10000) / 10000);
+      hint.innerHTML = `Kurs buku rata-rata <b>${esc(g.line.coa_code)}</b>: ${fmt(r.rate)} — ` +
+        `saldo ${esc(g.cur)} ${fmt(r.saldo_valas)} = Rp ${fmt(r.saldo_idr)}. Boleh diubah.`;
+    } else {
+      document.getElementById('genRate').value = '';
+      hint.style.color = '#b45309';
+      hint.textContent = `Saldo ${g.cur} di akun ${g.line.coa_code} 0 — isi kurs manual.`;
+    }
+  } catch (e) {
+    if (token !== state.genRateReq) return;
+    hint.style.color = '#dc2626';
+    hint.textContent = 'Gagal mengambil kurs buku: ' + (e.message || e) + ' — isi kurs manual.';
+  }
+  renderGenPreview();
+}
+
+async function ensureGenLists() {
+  const cSel = document.getElementById('genCounter');
+  if (!state.accounts) state.accounts = await listAccounts();
+  if (!cSel.dataset.loaded) {
+    cSel.innerHTML = '<option value="">— pilih akun lawan —</option>' +
+      state.accounts.map(a => `<option value="${a.id}">${esc(a.code)} — ${esc(a.name)}</option>`).join('');
+    cSel.dataset.loaded = '1';
+  }
+
+  const pSel = document.getElementById('genPartner');
+  if (!state.partners) {
+    try { state.partners = await listPartners(); } catch (e) { state.partners = []; }
+  }
+  if (!pSel.dataset.loaded) {
+    pSel.innerHTML = '<option value="">— tanpa partner —</option>' +
+      state.partners.map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join('');
+    pSel.dataset.loaded = '1';
+  }
+}
+
+async function openGenModal(lineId) {
+  const line = state.lines.find(l => String(l.id) === String(lineId));
+  if (!line) return;
+  if (!state.canRecon) { toast('Tidak ada akses rekonsiliasi bank', true); return; }
+  if (!state.canJournal) {
+    toast('Tidak ada akses membuat jurnal (finance.journal.create)', true);
+    return;
+  }
+  if (line.match_status === 'auto' || line.match_status === 'manual') {
+    toast('Baris ini sudah tertaut ke jurnal. Klik "Lepas" dulu bila ingin membuat jurnal baru.', true);
+    return;
+  }
+
+  state.genLine = line;
+  state.genBankAcc = null;
+  state.genRateTouched = false;
+
+  const cur = normCurrency(line.currency_code);
+  const amount = Math.abs(Number(
+    line.amount || (Number(line.masuk || 0) || Number(line.keluar || 0))
+  ));
+  const hari = String(line.line_date || '').slice(0, 10);
+
+  document.getElementById('genHeader').innerHTML =
+    `Baris #${line.line_no} · ${fmtDate(line.line_date)} · ${esc(line.description || '')}<br>` +
+    `${line.arah === 'IN' ? 'Uang <b>masuk</b>' : 'Uang <b>keluar</b>'} ` +
+    `<b>${genMoney(amount, cur)}</b> · akun bank ${esc(line.coa_code)}` +
+    (cur === 'IDR' ? '' : ` · <b>${esc(cur)}</b>`);
+  document.getElementById('genDate').value = hari;
+  document.getElementById('genDesc').value = line.description || '';
+  document.getElementById('genMemo').value = '';
+  document.getElementById('genCounter').value = '';
+  document.getElementById('genPartner').value = '';
+  document.getElementById('genRateWrap').style.display = cur === 'IDR' ? 'none' : '';
+  document.getElementById('genRateCur').textContent = cur;
+  document.getElementById('genRate').value = '';
+  document.getElementById('genRateHint').textContent = cur === 'IDR' ? '' : 'Menghitung kurs buku...';
+  document.getElementById('genPreview').innerHTML = '';
+  document.getElementById('genModal').style.display = 'flex';
+
+  const { data: bankAcc, error: baErr } = await supabase
+    .from('accounts').select('id, code, name').eq('code', line.coa_code).maybeSingle();
+  if (baErr || !bankAcc) {
+    toast('Akun bank ' + line.coa_code + ' tidak ditemukan di COA.', true);
+    closeGenModal();
+    return;
+  }
+  state.genBankAcc = bankAcc;
+
+  try {
+    await ensureGenLists();
+  } catch (e) {
+    toast('Gagal memuat daftar akun/partner: ' + (e.message || e), true);
+  }
+  await refreshGenRate();
+  renderGenPreview();
+}
+
+function closeGenModal() {
+  const modal = document.getElementById('genModal');
+  if (modal) modal.style.display = 'none';
+  state.genLine = null;
+  state.genBankAcc = null;
+  state.genRateTouched = false;
+}
+
+async function saveGen() {
+  const g = genAmounts();
+  const bankAcc = state.genBankAcc;
+  if (!g || !bankAcc) return;
+
+  const { line, cur, amount, rate, isIn } = g;
+  const counterId = Number(document.getElementById('genCounter').value || 0);
+  if (!counterId) { toast('Pilih akun lawan (COA) dulu.', true); return; }
+  if (String(counterId) === String(bankAcc.id)) {
+    toast('Akun lawan tidak boleh sama dengan akun bank.', true);
+    return;
+  }
+  if (!(amount > 0)) { toast('Nominal baris 0 — tidak bisa dibuat jurnal.', true); return; }
+  if (cur !== 'IDR' && !(rate > 0)) { toast(`Kurs ${cur} wajib diisi (> 0).`, true); return; }
+
+  const journalDate = document.getElementById('genDate').value;
+  if (!journalDate) { toast('Tanggal jurnal wajib diisi.', true); return; }
+  const desc = document.getElementById('genDesc').value.trim()
+    || line.description
+    || 'Jurnal dari rekening koran';
+  const memo = document.getElementById('genMemo').value.trim() || null;
+  const partnerId = Number(document.getElementById('genPartner').value || 0) || null;
+  const lineRate = cur === 'IDR' ? 1 : rate;
+
+  const bankLine = {
+    account_id: bankAcc.id,
+    partner_id: null,
+    debit: isIn ? amount : 0,
+    credit: isIn ? 0 : amount,
+    currency_code: cur,
+    exchange_rate: lineRate,
+    memo: memo || desc
+  };
+  const counterLine = {
+    account_id: counterId,
+    partner_id: partnerId,
+    debit: isIn ? 0 : amount,
+    credit: isIn ? amount : 0,
+    currency_code: cur,
+    exchange_rate: lineRate,
+    memo: memo
+  };
+
+  const btn = document.getElementById('genSaveBtn');
+  const oldLabel = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Menyimpan...';
+  try {
+    const created = await createJournal({
+      journal_date: journalDate,
+      description: desc,
+      ref_no: `KORAN-${line.import_id}-${line.line_no}`,
+      currency_code: cur,
+      exchange_rate: lineRate,
+      lines: [bankLine, counterLine]
+    });
+
+    // Cari baris jurnal milik akun bank untuk ditautkan ke baris koran.
+    const { data: jls, error: jlErr } = await supabase
+      .from('journal_lines')
+      .select('id, debit, credit')
+      .eq('journal_id', created.id)
+      .eq('account_id', bankAcc.id);
+    if (jlErr) throw jlErr;
+    const target = (jls || []).find(r => Number(isIn ? r.credit : r.debit) > 0) || (jls || [])[0];
+    if (!target) {
+      toast(`Jurnal ${created.journal_no} terbuat, tetapi baris bank tidak ditemukan. Tautkan manual.`, true);
+    } else {
+      const ok = await updateLine(line.id, {
+        matched_journal_line_id: target.id,
+        match_status: 'manual',
+        matched_at: new Date().toISOString()
+      });
+      if (ok) {
+        toast(`Jurnal ${created.journal_no} dibuat & ditautkan ke baris #${line.line_no}.`);
+      } else {
+        toast(`Jurnal ${created.journal_no} terbuat, tetapi penautan gagal. Buka tab Baris lalu Tautkan.`, true);
+      }
+    }
+    closeGenModal();
+    await Promise.all([loadLines(), loadImports()]);
+  } catch (e) {
+    toast(e.message || String(e), true);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = oldLabel;
+  }
 }
 
 // ============================================================
@@ -800,6 +1130,7 @@ function bindEvents() {
     else if (act === 'unlink') unlinkLine(id);
     else if (act === 'ignore') ignoreLine(id, true);
     else if (act === 'unignore') ignoreLine(id, false);
+    else if (act === 'gen') openGenModal(id);
   });
 
   document.getElementById('impCoa').addEventListener('change', e => suggestCurrencyForAccount(e.target.value));
@@ -817,8 +1148,32 @@ function bindEvents() {
     if (e.target.id === 'linkModal') closeLinkModal();
   });
   document.getElementById('tbody-candidates').addEventListener('click', e => {
-    const btn = e.target.closest('button[data-jlid]');
-    if (btn) linkTo(btn.dataset.jlid);
+    const linkBtn = e.target.closest('button[data-jlid]');
+    if (linkBtn) { linkTo(linkBtn.dataset.jlid); return; }
+    // Jalan pintas: tidak ada kandidat -> buat jurnal baru dari baris ini.
+    const genBtn = e.target.closest('button[data-gen]');
+    if (genBtn) {
+      const id = genBtn.dataset.gen;
+      closeLinkModal();
+      openGenModal(id);
+    }
+  });
+
+  // Modal buat jurnal (v11.12)
+  document.getElementById('genCloseBtn').addEventListener('click', closeGenModal);
+  document.getElementById('genCancelBtn').addEventListener('click', closeGenModal);
+  document.getElementById('genModal').addEventListener('click', e => {
+    if (e.target.id === 'genModal') closeGenModal();
+  });
+  document.getElementById('genSaveBtn').addEventListener('click', saveGen);
+  document.getElementById('genCounter').addEventListener('change', renderGenPreview);
+  document.getElementById('genPartner').addEventListener('change', renderGenPreview);
+  document.getElementById('genDate').addEventListener('change', () => {
+    if (!state.genRateTouched) refreshGenRate();
+  });
+  document.getElementById('genRate').addEventListener('input', () => {
+    state.genRateTouched = true;
+    renderGenPreview();
   });
 }
 
@@ -841,6 +1196,8 @@ function bindEvents() {
   state.canView = await hasPermission('finance.bank.view');
   state.canImport = await hasPermission('finance.bank.import');
   state.canRecon = await hasPermission('finance.bank.recon');
+  state.canJournal = await hasPermission('finance.journal.create');
+  state.canJournalEdit = await hasPermission('finance.journal.edit');
 
   if (!state.canView) {
     document.body.innerHTML = '<div style="padding:40px;text-align:center;color:#dc2626;">Anda tidak punya akses ke halaman ini.</div>';
