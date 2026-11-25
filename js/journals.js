@@ -190,23 +190,20 @@ export async function getJournal(journalId) {
 }
 
 // ============================================================
-// UPDATE JURNAL (guard periode di client)
+// UPDATE JURNAL (via RPC: atomik, guard periode & balance di server)
 // ============================================================
+// Sejak v11.18 SEMUA tulisan saat edit lewat RPC update_journal_with_lock
+// (SECURITY DEFINER). JANGAN kembali ke DML langsung
+// (UPDATE journals + DELETE/INSERT journal_lines): jalur itu ditolak 403 oleh
+// RLS/GRANT di production dan tidak atomik — kalau INSERT gagal, jurnal
+// tertinggal tanpa baris.
 export async function updateJournal(journalId, {
   journal_date, description, ref_no = null,
   currency_code = 'IDR', exchange_rate = null, lines
 }) {
+  if (!journalId) throw new Error('ID jurnal tidak valid');
   if (!lines || lines.length === 0) {
     throw new Error('Jurnal harus punya minimal 1 baris');
-  }
-
-  // Ambil header lama untuk cek periode
-  const old = await getJournal(journalId);
-  if (await isPeriodLocked(old.journal_date)) {
-    throw new Error(`Periode ${old.journal_date.slice(0,7)} sudah dikunci. Tidak bisa edit.`);
-  }
-  if (await isPeriodLocked(journal_date)) {
-    throw new Error(`Periode ${journal_date.slice(0,7)} sudah dikunci. Tidak bisa edit ke periode ini.`);
   }
 
   const header = pickHeaderCurrency(lines, currency_code, exchange_rate ?? 1);
@@ -214,29 +211,23 @@ export async function updateJournal(journalId, {
     ? 1
     : (Number(exchange_rate) || await getRate(header.currency_code, journal_date));
 
+  // Validasi balance + hitung *_base & mata uang per baris (error cepat di client)
   const { prepared } = await prepareJournalLines(lines, {
     headerCurrency: header.currency_code,
     headerRate,
     journalDate: journal_date
   });
 
-  const { error: hErr } = await supabase
-    .from('journals')
-    .update({
-      journal_date, description, ref_no,
-      currency_code: header.currency_code, exchange_rate: headerRate,
-      updated_at: new Date().toISOString()
-    })
-    .eq('id', journalId);
-  if (hErr) throw hErr;
-
-  const { error: dErr } = await supabase
-    .from('journal_lines').delete().eq('journal_id', journalId);
-  if (dErr) throw dErr;
-
-  const rows = prepared.map(p => ({ ...p, journal_id: journalId }));
-  const { error: lErr } = await supabase.from('journal_lines').insert(rows);
-  if (lErr) throw lErr;
+  const { error } = await supabase.rpc('update_journal_with_lock', {
+    p_journal_id:    journalId,
+    p_journal_date:  journal_date,
+    p_description:   description,
+    p_ref_no:        ref_no,
+    p_currency_code: header.currency_code,
+    p_exchange_rate: headerRate,
+    p_lines:         prepared
+  });
+  if (error) throw error;
 
   return { id: journalId };
 }
