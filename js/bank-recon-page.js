@@ -106,6 +106,8 @@ const state = {
   genRateSource: '',
   kursRows: [],
   kursParsed: null,
+  kursPending: [],
+  kursPendingCur: 'USD',
   accounts: null,
   partners: null
 };
@@ -1343,24 +1345,24 @@ function parseKmkPaste(text, currency) {
 
 function previewKursPaste(notify = false) {
   const el = document.getElementById('kursPreview');
-  const hint = document.getElementById('kursSaveHint');
+  const addBtn = document.getElementById('kursAddPasteBtn');
   if (!el) return null;
   const cur = normCurrency(document.getElementById('kursCur').value);
   const parsed = parseKmkPaste(document.getElementById('kursPaste').value, cur);
   state.kursParsed = parsed;
+  if (addBtn) addBtn.disabled = !parsed.rows.length;
 
   if (!parsed.rows.length && !parsed.errors.length) {
     el.innerHTML = '<span style="color:#6b7280;">Belum ada baris untuk dipratinjau.</span>';
-    if (hint) hint.textContent = '';
     return parsed;
   }
 
   el.innerHTML =
-    `<div style="margin-bottom:6px;">${parsed.rows.length} baris siap disimpan` +
+    `<div style="margin-bottom:6px;">${parsed.rows.length} baris terbaca` +
     (parsed.errors.length
       ? `, <span style="color:#b45309;">${parsed.errors.length} baris diabaikan</span>`
       : '') +
-    ` · mata uang <b>${esc(cur)}</b></div>` +
+    ` · mata uang <b>${esc(cur)}</b> — klik <b>Tambah ke daftar</b> untuk dimasukkan ke antrian simpan.</div>` +
     (parsed.rows.length
       ? `<div class="table-wrap"><table><thead><tr><th>Tanggal</th>` +
         `<th class="num">Kurs (Rp)</th></tr></thead><tbody>` +
@@ -1376,37 +1378,158 @@ function previewKursPaste(notify = false) {
       ? `<div style="margin-top:6px;color:#b45309;">${parsed.errors.slice(0, 8).map(esc).join('<br>')}</div>`
       : '');
 
-  if (hint) hint.textContent = `${parsed.rows.length} baris siap disimpan.`;
-  if (notify) toast(`${parsed.rows.length} baris valid, ${parsed.errors.length} diabaikan.`);
+  if (notify) toast(`${parsed.rows.length} baris terbaca, ${parsed.errors.length} diabaikan.`);
   return parsed;
 }
 
-async function saveKursPaste() {
+// v11.16 — ANTRIAN SIMPAN. Form "Tambah satu periode" dan hasil tempel
+// masuk ke daftar yang sama; penyimpanan hanya lewat satu tombol.
+function kursPendingCurrency() {
+  const sel = document.getElementById('kursCur');
+  return normCurrency(sel ? sel.value : 'USD');
+}
+
+function mergeKursPending(rows, currency) {
+  const cur = normCurrency(currency);
+  if (state.kursPending.length && state.kursPendingCur !== cur) {
+    state.kursPending = [];
+  }
+  state.kursPendingCur = cur;
+  let baru = 0;
+  let timpa = 0;
+  (rows || []).forEach(r => {
+    if (!r || !r.rate_date) return;
+    const ada = state.kursPending.find(x => x.rate_date === r.rate_date);
+    if (ada) { ada.rate_to_idr = r.rate_to_idr; timpa++; }
+    else { state.kursPending.push({ rate_date: r.rate_date, rate_to_idr: r.rate_to_idr }); baru++; }
+  });
+  state.kursPending.sort((a, b) => (a.rate_date < b.rate_date ? 1 : a.rate_date > b.rate_date ? -1 : 0));
+  renderKursPending();
+  return { baru, timpa };
+}
+
+function renderKursPending() {
+  const wrap = document.getElementById('kursPendingWrap');
+  const tbody = document.getElementById('tbody-kurs-pending');
+  const cnt = document.getElementById('kursPendingCount');
+  const info = document.getElementById('kursPendingInfo');
+  if (!wrap || !tbody) return;
+  const rows = state.kursPending || [];
+  wrap.style.display = rows.length ? '' : 'none';
+  if (cnt) cnt.textContent = String(rows.length);
+  tbody.innerHTML = rows.map(r =>
+    `<tr><td>${fmtDate(r.rate_date)}</td>` +
+    `<td class="num">${fmt(r.rate_to_idr)}</td>` +
+    `<td><button type="button" class="btn btn-secondary" data-kurs-drop="${esc(r.rate_date)}" ` +
+    `style="padding:2px 8px;font-size:11px;">Hapus</button></td></tr>`).join('');
+  if (info) {
+    info.textContent = rows.length
+      ? `Mata uang ${state.kursPendingCur} · ${rows.length} baris belum disimpan. ` +
+        `Tanggal yang sudah ada di database akan ditimpa saat disimpan.`
+      : '';
+  }
+}
+
+// Tambah satu periode dari form (tanggal + kurs).
+function addKursSingle() {
   if (!state.canRecon) { toast('Tidak ada akses mengubah kurs pajak (finance.bank.recon)', true); return; }
-  const cur = normCurrency(document.getElementById('kursCur').value);
+  const dateEl = document.getElementById('kursDate');
+  const valEl = document.getElementById('kursValue');
+  const iso = dateEl ? String(dateEl.value || '').slice(0, 10) : '';
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) {
+    toast('Isi tanggal mulai berlaku KMK (format YYYY-MM-DD).', true);
+    if (dateEl) dateEl.focus();
+    return;
+  }
+  // Ketik/tempel apa adanya ("18.263,00", "18263", "114,6486") — parser yang merapikan.
+  const nilai = parseKmkNumber(valEl ? valEl.value : '');
+  if (!Number.isFinite(nilai) || nilai < 10) {
+    toast('Kurs belum diisi atau tidak wajar (minimal 10).', true);
+    if (valEl) valEl.focus();
+    return;
+  }
+  const cur = kursPendingCurrency();
+  const res = mergeKursPending([{ rate_date: iso, rate_to_idr: nilai }], cur);
+  if (valEl) { valEl.value = ''; valEl.focus(); }
+  toast(`Kurs ${cur} ${fmtDate(iso)} ${res.baru ? 'ditambahkan' : 'diperbarui'} — ` +
+    `${state.kursPending.length} baris menunggu disimpan.`);
+}
+
+// Pindahkan hasil pratinjau tempel ke antrian simpan.
+function queueKursPaste() {
+  if (!state.canRecon) { toast('Tidak ada akses mengubah kurs pajak (finance.bank.recon)', true); return; }
+  const cur = kursPendingCurrency();
   const parsed = (state.kursParsed && state.kursParsed.currency === cur)
     ? state.kursParsed
     : previewKursPaste(false);
-  if (!parsed || !parsed.rows.length) { toast('Tidak ada baris valid untuk disimpan.', true); return; }
+  if (!parsed || !parsed.rows.length) { toast('Belum ada baris valid — klik Pratinjau dulu.', true); return; }
+  const res = mergeKursPending(parsed.rows, cur);
+  toast(`${res.baru} baris ditambahkan, ${res.timpa} menimpa — ` +
+    `${state.kursPending.length} baris menunggu disimpan.`);
+}
+
+// Simpan seluruh antrian ke tabel tax_exchange_rates (satu RPC).
+async function saveKursPending() {
+  if (!state.canRecon) { toast('Tidak ada akses mengubah kurs pajak (finance.bank.recon)', true); return; }
+  const rows = (state.kursPending || []).slice();
+  if (!rows.length) { toast('Daftar belum ada isinya — tambahkan minimal satu periode.', true); return; }
+  const cur = state.kursPendingCur;
 
   const btn = document.getElementById('kursSaveBtn');
-  btn.disabled = true;
-  btn.textContent = 'Menyimpan…';
+  const label = btn ? btn.textContent : 'Simpan ke Database';
+  if (btn) { btn.disabled = true; btn.textContent = 'Menyimpan…'; }
   try {
-    const res = await upsertTaxRates(cur, parsed.rows);
-    toast(`${res.saved || parsed.rows.length} kurs ${cur} disimpan.`);
-    document.getElementById('kursPaste').value = '';
+    const res = await upsertTaxRates(cur, rows);
+    toast(`${res.saved || rows.length} kurs ${cur} disimpan.`);
+    state.kursPending = [];
     state.kursParsed = null;
-    document.getElementById('kursPreview').innerHTML = '';
-    document.getElementById('kursSaveHint').textContent = '';
-    document.getElementById('kursListCur').value = cur;
+    renderKursPending();
+    const ta = document.getElementById('kursPaste');
+    if (ta) ta.value = '';
+    const pv = document.getElementById('kursPreview');
+    if (pv) pv.innerHTML = '';
+    const addBtn = document.getElementById('kursAddPasteBtn');
+    if (addBtn) addBtn.disabled = true;
+    const listCur = document.getElementById('kursListCur');
+    if (listCur) listCur.value = cur;
     await loadKursList();
   } catch (e) {
     toast('Gagal menyimpan kurs pajak: ' + (e.message || e), true);
   } finally {
-    btn.disabled = false;
-    btn.textContent = 'Simpan ke Database';
+    if (btn) { btn.disabled = false; btn.textContent = label; }
   }
+}
+
+function clearKursPending() {
+  if (!(state.kursPending || []).length) return;
+  if (!confirm(`Kosongkan ${state.kursPending.length} baris yang belum disimpan?`)) return;
+  state.kursPending = [];
+  renderKursPending();
+}
+
+// Ganti mata uang: pratinjau lama tidak berlaku, antrian harus dikosongkan.
+function handleKursCurrencyChange() {
+  const sel = document.getElementById('kursCur');
+  if (!sel) return;
+  const cur = normCurrency(sel.value);
+  const last = sel.dataset.last || cur;
+  if (state.kursPending.length && state.kursPendingCur !== cur) {
+    if (!confirm(`Daftar belum disimpan berisi kurs ${state.kursPendingCur}. ` +
+                 `Ganti ke ${cur} dan kosongkan daftar?`)) {
+      sel.value = last;
+      return;
+    }
+    state.kursPending = [];
+    renderKursPending();
+  }
+  sel.dataset.last = cur;
+  state.kursParsed = null;
+  const pv = document.getElementById('kursPreview');
+  if (pv) pv.innerHTML = '';
+  const addBtn = document.getElementById('kursAddPasteBtn');
+  if (addBtn) addBtn.disabled = true;
+  const listCur = document.getElementById('kursListCur');
+  if (listCur) listCur.value = cur;
 }
 
 // Geser tanggal ISO (YYYY-MM-DD) sejumlah hari, tanpa pengaruh zona waktu.
@@ -1467,9 +1590,9 @@ async function loadKursList() {
 
 // ------------------------------------------------------------------
 // v11.15 — CEK KELENGKAPAN daftar kurs pajak (tanpa server).
-// KMK terbit mingguan (mulai Selasa). Aplikasi memakai "kurs terakhir
-// <= tanggal", jadi periode yang kosong tetap memakai kurs periode
-// sebelumnya (boleh, tapi kurang akurat untuk Trial Balance pajak).
+// KMK terbit mingguan dan berlaku RABU–SELASA (FAQ fiskal.kemenkeu.go.id).
+// Aplikasi memakai "kurs terakhir <= tanggal", jadi periode kosong tetap
+// memakai kurs periode sebelumnya (kurang akurat untuk Trial Balance pajak).
 // ------------------------------------------------------------------
 function isoToUtcMs(iso) {
   const [y, m, d] = String(iso).slice(0, 10).split('-').map(Number);
@@ -1497,17 +1620,18 @@ function checkKursCoverage() {
   if (!dates.length) {
     info.style.color = '#b45309';
     info.innerHTML = `Belum ada kurs <b>${esc(cur)}</b> tersimpan sejak ${fmtDate(from)}. ` +
-      `Tempel daftar KMK di kotak atas lalu klik <b>Simpan ke Database</b>.`;
+      `Tambahkan periode lewat form <b>Tambah satu periode</b> (atau tempel daftar), ` +
+      `lalu klik <b>Simpan ke Database</b>.`;
     return;
   }
 
   const now = new Date();
   const todayMs = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
 
-  // Periode KMK dihitung mulai hari Selasa (dow = 2).
+  // Periode KMK berlaku Rabu–Selasa → titik awal minggu = hari Rabu (dow = 3).
   let t = isoToUtcMs(from);
   const dow = new Date(t).getUTCDay();
-  t += ((2 - dow + 7) % 7) * 86400000;
+  t += ((3 - dow + 7) % 7) * 86400000;
 
   const set = new Set(dates);
   const belum = [];
@@ -1560,9 +1684,9 @@ function fillKursExample() {
   if (ta.value.trim() && !confirm('Ganti isi kotak tempel dengan contoh format?')) return;
   ta.value = [
     'Tanggal;Kurs USD',
-    '2026-11-19;16600',
-    '19/11/2026;16.600',
-    '19-11-2026\t16.600,00'
+    '2026-11-25;18263',
+    '18/11/2026;18.155',
+    '11-11-2026\t18.155,00'
   ].join('\n');
   state.kursParsed = null;
   previewKursPaste(true);
@@ -1752,12 +1876,27 @@ function bindEvents() {
     refreshGenRate();
   });
 
-  // Tab Kurs Pajak (KMK) — v11.14
+  // Tab Kurs Pajak (KMK) — v11.16
   document.getElementById('kursPreviewBtn').addEventListener('click', () => previewKursPaste(true));
-  document.getElementById('kursPaste').addEventListener('input', () => { state.kursParsed = null; });
-  document.getElementById('kursSaveBtn').addEventListener('click', saveKursPaste);
+  document.getElementById('kursPaste').addEventListener('input', () => {
+    state.kursParsed = null;
+    const addBtn = document.getElementById('kursAddPasteBtn');
+    if (addBtn) addBtn.disabled = true;
+  });
+  document.getElementById('kursAddPasteBtn').addEventListener('click', queueKursPaste);
+  document.getElementById('kursAddBtn').addEventListener('click', addKursSingle);
+  document.getElementById('kursDate').addEventListener('keydown', e => { if (e.key === 'Enter') addKursSingle(); });
+  document.getElementById('kursValue').addEventListener('keydown', e => { if (e.key === 'Enter') addKursSingle(); });
+  document.getElementById('kursSaveBtn').addEventListener('click', saveKursPending);
+  document.getElementById('kursClearPendingBtn').addEventListener('click', clearKursPending);
+  document.getElementById('tbody-kurs-pending').addEventListener('click', e => {
+    const btn = e.target.closest('button[data-kurs-drop]');
+    if (!btn) return;
+    state.kursPending = state.kursPending.filter(x => x.rate_date !== btn.dataset.kursDrop);
+    renderKursPending();
+  });
   document.getElementById('kursReloadBtn').addEventListener('click', loadKursList);
-  document.getElementById('kursCur').addEventListener('change', () => previewKursPaste(true));
+  document.getElementById('kursCur').addEventListener('change', handleKursCurrencyChange);
   // v11.15 — cek kelengkapan periode KMK + isi contoh format
   document.getElementById('kursCheckBtn').addEventListener('click', checkKursCoverage);
   document.getElementById('kursCheckFrom').addEventListener('change', refreshKursGapInfo);
@@ -1766,6 +1905,15 @@ function bindEvents() {
     document.getElementById('kursCur').value = document.getElementById('kursListCur').value;
     loadKursList();
   });
+  // v11.16 — nilai awal form tambah periode
+  const kursCurSel = document.getElementById('kursCur');
+  kursCurSel.dataset.last = kursCurSel.value;
+  const kursDateEl = document.getElementById('kursDate');
+  const nowD = new Date();
+  if (kursDateEl && !kursDateEl.value) {
+    kursDateEl.value = `${nowD.getFullYear()}-${String(nowD.getMonth() + 1).padStart(2, '0')}-` +
+      `${String(nowD.getDate()).padStart(2, '0')}`;
+  }
   document.getElementById('tbody-kurs').addEventListener('click', e => {
     const btn = e.target.closest('button[data-kurs-del]');
     if (btn) removeKursRow(btn.dataset.kursDel);
@@ -1802,11 +1950,14 @@ function bindEvents() {
   const importTabBtn = document.querySelector('.tabs button[data-tab="import"]');
   if (!state.canImport) importTabBtn.style.display = 'none';
   if (!state.canRecon) document.getElementById('autoMatchBtn').style.display = 'none';
-  // v11.14 — kurs pajak: semua boleh melihat, hanya finance.bank.recon boleh menulis
+  // v11.14/v11.16 — kurs pajak: semua boleh melihat, hanya finance.bank.recon boleh menulis
   if (!state.canRecon) {
-    document.getElementById('kursSaveBtn').style.display = 'none';
-    document.getElementById('kursSaveHint').textContent =
-      'Hanya pengguna dengan izin rekonsiliasi bank yang bisa mengubah kurs pajak.';
+    ['kursAddBtn', 'kursSaveBtn', 'kursClearPendingBtn', 'kursAddPasteBtn'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.style.display = 'none';
+    });
+    const note = document.getElementById('kursReadonlyNote');
+    if (note) note.style.display = '';
   }
 
   bindEvents();
