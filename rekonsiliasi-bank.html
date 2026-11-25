@@ -251,10 +251,11 @@
       <div class="card">
         <h3 style="margin:0 0 4px;font-size:16px;">Tambah / Perbarui Kurs Pajak (KMK)</h3>
         <p style="margin:0 0 10px;font-size:12px;color:#6b7280;">
-          Kurs pajak (KMK) terbit <b>mingguan dan berlaku Rabu–Selasa</b>. Aplikasi memakai
-          KMK terakhir yang tanggalnya <b>≤ tanggal transaksi</b>, jadi cukup satu baris per
-          periode. Data dipakai modal <b>Buat Jurnal</b> (opsi <i>Kurs Pajak KMK</i>) dan
-          Trial Balance pajak. Tanggal yang sudah ada akan <b>ditimpa</b>.
+          Kurs pajak (KMK) terbit <b>mingguan dan berlaku tepat 1 pekan, Rabu–Selasa</b>
+          (kecuali Idul Fitri bisa 2 pekan). Aplikasi memakai KMK terakhir yang tanggalnya
+          <b>≤ tanggal transaksi</b>, jadi cukup satu baris per pekan dan tanggal yang sudah ada
+          akan <b>ditimpa</b>. Isi <b>tanggal mulai berlaku</b> (hari Rabu) lalu klik
+          <b>Buka KMK tanggal di form</b> untuk melihat KMK pekan itu di situs resmi.
         </p>
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px;">
           <a class="btn btn-secondary" href="https://fiskal.kemenkeu.go.id/informasi-publik/kurs-pajak"
@@ -263,6 +264,10 @@
              target="_blank" rel="noopener" style="text-decoration:none;">Arsip KMK</a>
           <a class="btn btn-secondary" href="https://jdih.kemenkeu.go.id/kurs-pajak"
              target="_blank" rel="noopener" style="text-decoration:none;">JDIH Kemenkeu</a>
+          <button type="button" class="btn btn-secondary" id="kursOpenFiskalBtn"
+                  title="Buka fiskal.kemenkeu.go.id untuk pekan KMK sesuai tanggal di form">
+            Buka KMK tanggal di form
+          </button>
         </div>
 
         <div id="kursReadonlyNote" style="display:none;margin-bottom:10px;padding:6px 10px;font-size:12px;
@@ -374,9 +379,11 @@
             <input type="date" id="kursCheckFrom" class="input" value="2021-01-01" style="min-width:165px;">
           </div>
           <button type="button" class="btn btn-secondary" id="kursCheckBtn">Periksa kelengkapan</button>
-          <span style="font-size:11px;color:#6b7280;max-width:460px;">
-            Dicek per periode mingguan <b>Rabu–Selasa</b> untuk mata uang yang dipilih di kanan atas.
-            Periode tanpa kurs = transaksi pada periode itu akan memakai kurs KMK yang lebih lama.
+          <span style="font-size:11px;color:#6b7280;max-width:520px;">
+            Dicek per pekan <b>Rabu–Selasa</b> untuk mata uang yang dipilih di kanan atas.
+            Pekan tanpa kurs dibiarkan <b>kosong</b> (tidak ditutupi kurs lama): transaksi pada
+            pekan itu akan memakai KMK pekan sebelumnya. Pengecualian wajar: <b>6 pekan Idul Fitri</b>
+            yang KMK-nya berlaku 2 pekan.
           </span>
         </div>
         <div id="kursGapInfo" style="margin-bottom:8px;font-size:12px;"></div>
@@ -507,6 +514,6 @@
 
   <div class="toast" id="toast"></div>
 
-  <script type="module" src="./js/bank-recon-page.js?v=11.16"></script>
+  <script type="module" src="./js/bank-recon-page.js?v=11.17"></script>
 </body>
 </html>
