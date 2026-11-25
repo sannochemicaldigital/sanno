@@ -251,58 +251,101 @@
       <div class="card">
         <h3 style="margin:0 0 4px;font-size:16px;">Tambah / Perbarui Kurs Pajak (KMK)</h3>
         <p style="margin:0 0 10px;font-size:12px;color:#6b7280;">
-          Tempel daftar kurs dari KMK, satu baris = satu tanggal. Format yang diterima:
-          <code>2026-11-19;16600</code>, <code>19/11/2026;16.600</code>, atau
-          <code>19-11-2026&nbsp;&nbsp;16.600,00</code> (pemisah <code>;</code>, tab, spasi, atau koma).
-          Nilai disimpan ke tabel <code>tax_exchange_rates</code> dan dipakai modal
-          <b>Buat Jurnal</b> (opsi <i>Kurs Pajak KMK</i>) serta Trial Balance pajak.
-          Tanggal yang sudah ada akan <b>ditimpa</b>.
+          Kurs pajak (KMK) terbit <b>mingguan dan berlaku Rabu–Selasa</b>. Aplikasi memakai
+          KMK terakhir yang tanggalnya <b>≤ tanggal transaksi</b>, jadi cukup satu baris per
+          periode. Data dipakai modal <b>Buat Jurnal</b> (opsi <i>Kurs Pajak KMK</i>) dan
+          Trial Balance pajak. Tanggal yang sudah ada akan <b>ditimpa</b>.
         </p>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px;">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px;">
+          <a class="btn btn-secondary" href="https://fiskal.kemenkeu.go.id/informasi-publik/kurs-pajak"
+             target="_blank" rel="noopener" style="text-decoration:none;">Kurs Pajak Mingguan (fiskal.kemenkeu.go.id)</a>
+          <a class="btn btn-secondary" href="https://fiskal.kemenkeu.go.id/peraturan/kmk-kurs-pajak"
+             target="_blank" rel="noopener" style="text-decoration:none;">Arsip KMK</a>
           <a class="btn btn-secondary" href="https://jdih.kemenkeu.go.id/kurs-pajak"
-             target="_blank" rel="noopener" style="text-decoration:none;">Buka Kurs Pajak (JDIH Kemenkeu)</a>
-          <a class="btn btn-secondary" href="https://jdih.kemenkeu.go.id/"
-             target="_blank" rel="noopener" style="text-decoration:none;">Cari dokumen KMK</a>
-          <button type="button" class="btn btn-secondary" id="kursExampleBtn">Isi contoh format</button>
-          <span style="font-size:12px;color:#6b7280;">
-            Di halaman KMK: salin kolom <b>Tanggal</b> + <b>USD</b> (boleh langsung dari Excel),
-            lalu tempel di kotak di bawah.
-          </span>
+             target="_blank" rel="noopener" style="text-decoration:none;">JDIH Kemenkeu</a>
         </div>
-        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:8px;">
-          <div>
-            <label for="kursCur" style="display:block;font-size:12px;color:#6b7280;margin-bottom:4px;">Mata uang</label>
-            <select id="kursCur" class="input" style="min-width:110px;">
-              <option value="USD">USD</option>
-              <option value="SGD">SGD</option>
-              <option value="EUR">EUR</option>
-              <option value="JPY">JPY</option>
-              <option value="CNY">CNY</option>
-              <option value="AUD">AUD</option>
-              <option value="GBP">GBP</option>
-            </select>
-          </div>
-          <button type="button" class="btn btn-secondary" id="kursPreviewBtn">Pratinjau</button>
-          <button type="button" class="btn btn-primary" id="kursSaveBtn">Simpan ke Database</button>
-          <span id="kursSaveHint" style="font-size:12px;color:#6b7280;"></span>
+
+        <div id="kursReadonlyNote" style="display:none;margin-bottom:10px;padding:6px 10px;font-size:12px;
+                    color:#b45309;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;">
+          Hanya pengguna dengan izin rekonsiliasi bank (<code>finance.bank.recon</code>)
+          yang bisa menambah atau mengubah kurs pajak. Anda hanya dapat melihat daftar.
         </div>
-        <textarea id="kursPaste" class="input" rows="6"
-                  style="width:100%;font-family:ui-monospace,Consolas,monospace;font-size:12px;"
-                  placeholder="2026-11-19;16600&#10;2026-11-12;16550&#10;19/11/2026;16.600"></textarea>
-        <div id="kursPreview" style="margin-top:10px;font-size:12px;"></div>
-        <div style="margin-top:10px;padding-top:10px;border-top:1px dashed #e5e7eb;">
-          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;">
+
+        <div style="border:1px solid #e5e7eb;border-radius:8px;padding:10px;background:#f9fafb;">
+          <div style="font-size:13px;font-weight:600;margin-bottom:8px;">Tambah satu periode</div>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;">
             <div>
-              <label for="kursCheckFrom" style="display:block;font-size:12px;color:#6b7280;margin-bottom:4px;">Cek kelengkapan sejak</label>
-              <input type="date" id="kursCheckFrom" class="input" value="2021-01-01" style="min-width:150px;">
+              <label for="kursCur" style="display:block;font-size:12px;color:#6b7280;margin-bottom:4px;">Mata uang *</label>
+              <select id="kursCur" class="input" style="min-width:110px;">
+                <option value="USD">USD</option>
+                <option value="SGD">SGD</option>
+                <option value="EUR">EUR</option>
+                <option value="JPY">JPY</option>
+                <option value="CNY">CNY</option>
+                <option value="AUD">AUD</option>
+                <option value="GBP">GBP</option>
+              </select>
             </div>
-            <button type="button" class="btn btn-secondary" id="kursCheckBtn">Cek kelengkapan</button>
-            <span style="font-size:11px;color:#6b7280;">
-              Menandai periode mingguan (Selasa) yang belum punya kurs pada daftar tersimpan di bawah.
-            </span>
+            <div>
+              <label for="kursDate" style="display:block;font-size:12px;color:#6b7280;margin-bottom:4px;">Tanggal mulai berlaku (KMK) *</label>
+              <input type="date" id="kursDate" class="input" style="min-width:165px;">
+            </div>
+            <div>
+              <label for="kursValue" style="display:block;font-size:12px;color:#6b7280;margin-bottom:4px;">Kurs Rp per 1 unit *</label>
+              <input type="text" id="kursValue" class="input" inputmode="decimal" autocomplete="off"
+                     placeholder="18.263,00" style="min-width:150px;">
+            </div>
+            <button type="button" class="btn btn-primary" id="kursAddBtn">Tambah ke daftar</button>
           </div>
-          <div id="kursGapInfo" style="margin-top:8px;font-size:12px;"></div>
+          <div style="font-size:11px;color:#6b7280;margin-top:6px;">
+            Contoh KMK 56/MK/EF.2/2026 → tanggal <b>2026-11-25</b>, USD <b>18.263,00</b>
+            (boleh ditempel apa adanya, titik ribuan &amp; koma desimal otomatis dirapikan).
+            Tabel KMK memakai nilai per <b>100 unit</b> untuk JPY &amp; KRW → isi nilai ÷ 100
+            (JPY 11.464,86 → <b>114,6486</b>).
+          </div>
         </div>
+
+        <div id="kursPendingWrap" style="margin-top:12px;display:none;">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px;">
+            <div style="font-size:13px;font-weight:600;">Belum disimpan (<span id="kursPendingCount">0</span> baris)</div>
+            <div style="display:flex;gap:8px;">
+              <button type="button" class="btn btn-secondary" id="kursClearPendingBtn"
+                      style="padding:6px 12px;font-size:12px;">Kosongkan</button>
+              <button type="button" class="btn btn-primary" id="kursSaveBtn"
+                      style="padding:6px 12px;font-size:12px;">Simpan ke Database</button>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>Tanggal berlaku</th><th class="num">Kurs (Rp)</th><th style="width:70px;"></th></tr>
+              </thead>
+              <tbody id="tbody-kurs-pending"></tbody>
+            </table>
+          </div>
+          <div id="kursPendingInfo" style="margin-top:6px;font-size:12px;color:#6b7280;"></div>
+        </div>
+        <details style="margin-top:12px;">
+          <summary style="cursor:pointer;font-size:12px;color:#2563eb;">
+            Tempel banyak baris sekaligus (opsional — salin dari Excel / halaman KMK)
+          </summary>
+          <div style="margin-top:8px;">
+            <textarea id="kursPaste" class="input" rows="6"
+                      style="width:100%;font-family:ui-monospace,Consolas,monospace;font-size:12px;"
+                      placeholder="2026-11-25&#9;18263&#10;2026-11-18&#9;18155&#10;18/11/2026;18.155"></textarea>
+            <div style="display:flex;gap:8px;align-items:center;margin-top:6px;flex-wrap:wrap;">
+              <button type="button" class="btn btn-secondary" id="kursPreviewBtn">Pratinjau</button>
+              <button type="button" class="btn btn-primary" id="kursAddPasteBtn" disabled>Tambah ke daftar</button>
+              <button type="button" class="btn btn-secondary" id="kursExampleBtn">Isi contoh</button>
+              <span style="font-size:11px;color:#6b7280;">
+                Satu baris = satu tanggal. Pemisah <code>;</code> / tab / spasi, tanggal
+                <code>YYYY-MM-DD</code> atau <code>dd/mm/yyyy</code>, desimal koma atau titik.
+                Baris judul dan baris tanpa angka otomatis diabaikan.
+              </span>
+            </div>
+            <div id="kursPreview" style="margin-top:8px;font-size:12px;"></div>
+          </div>
+        </details>
       </div>
 
       <div class="card">
@@ -321,6 +364,23 @@
             <button type="button" class="btn btn-secondary" id="kursReloadBtn" style="padding:6px 12px;font-size:12px;">Muat ulang</button>
           </div>
         </div>
+
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;padding:8px;margin-bottom:8px;
+                    border:1px solid #e5e7eb;border-radius:8px;background:#f9fafb;">
+          <div>
+            <label for="kursCheckFrom" style="display:block;font-size:12px;color:#6b7280;margin-bottom:4px;">
+              Periksa periode kosong mulai tanggal
+            </label>
+            <input type="date" id="kursCheckFrom" class="input" value="2021-01-01" style="min-width:165px;">
+          </div>
+          <button type="button" class="btn btn-secondary" id="kursCheckBtn">Periksa kelengkapan</button>
+          <span style="font-size:11px;color:#6b7280;max-width:460px;">
+            Dicek per periode mingguan <b>Rabu–Selasa</b> untuk mata uang yang dipilih di kanan atas.
+            Periode tanpa kurs = transaksi pada periode itu akan memakai kurs KMK yang lebih lama.
+          </span>
+        </div>
+        <div id="kursGapInfo" style="margin-bottom:8px;font-size:12px;"></div>
+
         <div class="table-wrap">
           <table>
             <thead>
@@ -447,6 +507,6 @@
 
   <div class="toast" id="toast"></div>
 
-  <script type="module" src="./js/bank-recon-page.js?v=11.15"></script>
+  <script type="module" src="./js/bank-recon-page.js?v=11.16"></script>
 </body>
 </html>
