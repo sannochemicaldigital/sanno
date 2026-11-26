@@ -81,6 +81,27 @@ tbody tr:hover { background: #f9fafb; }
 .row-clickable:hover { background: #eff6ff !important; }
 .row-clickable:focus { outline: 2px solid #93c5fd; outline-offset: -2px; }
 
+/* ---------------------------------------------------------------
+   Kartu Stok (modal inventory.html)
+   Header tabel di-freeze supaya nama kolom (Saldo/Harga/Total/…)
+   tetap terlihat saat isi kartu di-scroll ke bawah.
+   Catatan: sticky hanya berlaku di desktop; pada layar <=640px
+   tabel berubah jadi kartu (thead disembunyikan).
+   --------------------------------------------------------------- */
+#itemCardModal .card-table-wrap {
+  max-height: 56vh;
+  overflow: auto;
+  border: 1px solid #eef0f3;
+  border-radius: 8px;
+}
+#itemCardModal thead th {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background: #f3f4f6;
+  box-shadow: inset 0 -1px 0 #e5e7eb;
+}
+
 /* Tabs */
 .tabs { display: flex; gap: 4px; margin-bottom: 16px; border-bottom: 2px solid #e5e7eb; flex-wrap: wrap; }
 .tabs button {
