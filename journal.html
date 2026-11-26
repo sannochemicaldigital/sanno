@@ -65,13 +65,29 @@
     </div>
 
     <div class="card">
-      <h3 style="margin-top:0;font-size:16px;">Jurnal Terakhir</h3>
+      <h3 style="margin-top:0;font-size:16px;" id="journalListTitle">Jurnal Terakhir</h3>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:10px;">
+        <div class="form-row" style="margin:0;min-width:220px;flex:1 1 220px;">
+          <label for="journalSearch">Cari Jurnal</label>
+          <input id="journalSearch" placeholder="No. jurnal / keterangan, mis. KASADJ atau KAS-202611">
+        </div>
+        <div class="form-row" style="margin:0;">
+          <label for="journalFrom">Dari Tanggal</label>
+          <input type="date" id="journalFrom">
+        </div>
+        <div class="form-row" style="margin:0;">
+          <label for="journalTo">Sampai Tanggal</label>
+          <input type="date" id="journalTo">
+        </div>
+        <button type="button" class="btn btn-primary" id="journalSearchBtn">Cari</button>
+        <button type="button" class="btn btn-secondary" id="journalResetBtn">Reset</button>
+      </div>
       <div id="journalList"></div>
     </div>
   </div>
 
   <div class="toast" id="toast"></div>
 
-  <script type="module" src="./js/journal-form.js?v=11.18"></script>
+  <script type="module" src="./js/journal-form.js?v=11.33"></script>
 </body>
 </html>
