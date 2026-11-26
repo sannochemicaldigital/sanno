@@ -93,6 +93,7 @@ export async function renderNav(navEl, activePage = null) {
     { page: 'master',      href: './master.html',      label: 'Master',       perm: 'master.accounts.view' },
     { page: 'journal',     href: './journal.html',     label: 'Jurnal',       perm: 'finance.journal.view' },
     { page: 'rekonsiliasi-bank', href: './rekonsiliasi-bank.html', label: 'Rekonsiliasi Bank', perm: 'finance.bank.view' },
+    { page: 'cash-opname', href: './cash-opname.html', label: 'Opname Kas & Bank', perm: 'finance.cash_opname.view' },
     { page: 'reports',     href: './reports.html',     label: 'Laporan',      perm: 'reports.view' },
     { page: 'settings',    href: './settings.html',    label: 'Pengaturan',   perm: 'admin.settings.view' }
   ];
