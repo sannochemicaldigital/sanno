@@ -9,7 +9,7 @@ import { listUnits, createUnit, updateUnit, deleteUnit, reactivateUnit } from '.
 
 // Penanda build — dipakai untuk memastikan browser sudah memuat versi terbaru
 // (naikkan angka ini + query string di inventory.html setiap kali file diubah).
-const BUILD = 'v11.24.2';
+const BUILD = 'v11.24.3';
 document.body.dataset.build = BUILD;
 console.log('[inventory-page] build', BUILD);
 
