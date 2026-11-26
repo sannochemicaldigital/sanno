@@ -9,7 +9,7 @@ import { listUnits, createUnit, updateUnit, deleteUnit, reactivateUnit } from '.
 
 // Penanda build — dipakai untuk memastikan browser sudah memuat versi terbaru
 // (naikkan angka ini + query string di inventory.html setiap kali file diubah).
-const BUILD = 'v11.24.3';
+const BUILD = 'v11.24.5';
 document.body.dataset.build = BUILD;
 console.log('[inventory-page] build', BUILD);
 
@@ -52,7 +52,7 @@ let allItems = [];
 let inventoryRows = [];
 let allUnits = [];
 // State kartu stok (dideklarasikan di atas agar aman dari TDZ saat init)
-const cardState = { item: null, rows: [], journalMap: {}, truncated: false };
+const cardState = { item: null, rows: [], journalMap: {}, truncated: false, unitMode: 'base' };
 
 const perms = {
   create: false, stockIn: false, viewPrice: false, viewMovement: false,
@@ -404,6 +404,97 @@ function cardChip(label, valueHtml, color) {
     </div>`;
 }
 
+// ---------- satuan kartu stok: dasar (kg/ltr) <-> drum ----------
+function cardUnitInfo() {
+  const item = cardState.item || {};
+  const rawUnit = String(item.unit || '').toLowerCase();
+  const isLtr = rawUnit === 'ltr';
+  // Satuan dasar: ikuti kolom items.unit (kg/ltr/pcs/...), default kg
+  const baseLabel = rawUnit || 'kg';
+  const isi = Number(isLtr ? item.packaging_isi_ltr : item.packaging_isi_kg) || 0;
+  const drumLabel = String(item.packaging_nama || 'drum').toLowerCase();
+  return { isLtr, baseLabel, isi, drumLabel };
+}
+
+// true bila mode drum aktif DAN item punya isi kemasan
+function cardIsDrum() {
+  const { isi } = cardUnitInfo();
+  return cardState.unitMode === 'drum' && isi > 0;
+}
+
+// Angka qty (absolut) sesuai mode satuan
+function cardFmtQty(value) {
+  const { isi } = cardUnitInfo();
+  const n = Math.abs(Number(value) || 0);
+  if (cardIsDrum()) {
+    return (n / isi).toLocaleString('id-ID', { minimumFractionDigits: 1, maximumFractionDigits: 2 });
+  }
+  return fmt(n);
+}
+
+// Nilai string + satuan, mis. "1.000 kg" / "5 drum"
+function cardQtyWithUnit(value) {
+  const { baseLabel, drumLabel } = cardUnitInfo();
+  return `${cardFmtQty(value)} ${cardIsDrum() ? drumLabel : baseLabel}`;
+}
+
+// Satuan "lain" (untuk baris kecil di bawah angka)
+function cardAltQtyWithUnit(value) {
+  const { baseLabel, drumLabel, isi } = cardUnitInfo();
+  const n = Math.abs(Number(value) || 0);
+  if (!(isi > 0)) return '';
+  if (cardIsDrum()) return `${fmt(n)} ${baseLabel}`;
+  return `${(n / isi).toLocaleString('id-ID', { maximumFractionDigits: 2 })} ${drumLabel}`;
+}
+
+// Label satuan untuk header kolom
+function cardQtyUnitLabel() {
+  const { baseLabel, drumLabel } = cardUnitInfo();
+  return cardIsDrum() ? drumLabel : baseLabel;
+}
+
+// Sinkronkan tombol toggle + judul kolom tabel
+function paintCardUnitUi() {
+  const { baseLabel, drumLabel, isi } = cardUnitInfo();
+  const items = [['cardUnitBase', baseLabel], ['cardUnitDrum', drumLabel]];
+  items.forEach(([id, label]) => {
+    const btn = document.getElementById(id);
+    if (!btn) return;
+    btn.textContent = label;
+    const aktif = (id === 'cardUnitDrum') === cardIsDrum();
+    btn.classList.toggle('active', aktif);
+    if (id === 'cardUnitDrum') {
+      btn.disabled = !(isi > 0);
+      btn.title = isi > 0
+        ? `1 ${drumLabel} = ${fmt(isi)} ${baseLabel}`
+        : `Isi kemasan item belum diisi (packaging_isi_kg / packaging_isi_ltr)`;
+    }
+  });
+
+  const unit = cardQtyUnitLabel();
+  const map = {
+    'th-card-in': `Masuk (${unit})`,
+    'th-card-out': `Keluar (${unit})`,
+    'th-card-saldo': `Saldo (${unit})`,
+    'th-card-price': `Harga / ${baseLabel}`
+  };
+  Object.entries(map).forEach(([id, text]) => {
+    const th = document.getElementById(id);
+    if (th) th.textContent = text;
+  });
+}
+
+function setCardUnitMode(mode) {
+  if (mode === 'drum') {
+    const { isi } = cardUnitInfo();
+    if (!(isi > 0)) { toast('Item ini belum punya isi kemasan (drum)', true); return; }
+  }
+  cardState.unitMode = mode === 'drum' ? 'drum' : 'base';
+  try { localStorage.setItem('sanno.cardUnitMode', cardState.unitMode); } catch { /* ignorir */ }
+  paintCardUnitUi();
+  renderItemCard();
+}
+
 function closeItemCard() {
   const modal = document.getElementById('itemCardModal');
   if (modal) modal.style.display = 'none';
@@ -437,7 +528,7 @@ async function openItemCard(sku) {
   try {
     const { data: item, error: e1 } = await supabase
       .from('items')
-      .select('id, sku, name, unit, stock_qty, min_stock, avg_cost, is_active')
+      .select('id, sku, name, unit, stock_qty, min_stock, avg_cost, is_active, packaging_nama, packaging_isi_kg, packaging_isi_ltr')
       .eq('sku', sku)
       .single();
     if (e1) throw e1;
@@ -513,38 +604,50 @@ function renderItemCardHeader() {
   const stock = Number(item.stock_qty) || 0;
   const reserved = inv ? Number(inv.reserved_qty) || 0 : null;
   const available = inv ? Number(inv.available_qty) || 0 : null;
-  const isLtr = String(item.unit || '').toLowerCase() === 'ltr';
-  const unitLabel = isLtr ? 'ltr' : 'kg';
-
-  const isi = inv ? (Number(isLtr ? inv.packaging_isi_ltr : inv.packaging_isi_kg) || 0) : 0;
-  const drumTxt = isi > 0
-    ? `${(stock / isi).toLocaleString('id-ID', { maximumFractionDigits: 2 })} ${esc(String(inv.packaging_nama || 'drum').toLowerCase())}`
-    : '';
+  const { isi, baseLabel, drumLabel } = cardUnitInfo();
 
   const subEl = document.getElementById('cardItemSub');
   if (subEl) {
     const bits = [item.name || '', item.unit ? `satuan ${item.unit}` : ''];
     if (!item.is_active) bits.push('NONAKTIF');
-    if (inv && inv.packaging_nama) {
-      bits.push(`${inv.packaging_nama}${isi > 0 ? ' · ' + isi + (isLtr ? ' ltr' : ' kg') : ''}`);
+    if (item.packaging_nama) {
+      bits.push(`${item.packaging_nama}${isi > 0 ? ' · ' + fmt(isi) + ' ' + baseLabel : ''}`);
     }
     subEl.textContent = bits.filter(Boolean).join(' · ');
   }
 
+  // Chip: satuan aktif jadi angka utama, satuan lain jadi baris kecil
+  const chipValue = (qty, color) => {
+    const primary = cardQtyWithUnit(qty);
+    const alt = cardAltQtyWithUnit(qty);
+    return {
+      html: `${esc(primary)}${alt ? `<div style="font-size:11px;font-weight:400;color:#6b7280;">${esc(alt)}</div>` : ''}`,
+      color
+    };
+  };
+
   const stockColor = stock < 0 ? '#b91c1c' : (stock === 0 ? '#6b7280' : '#059669');
-  const chips = [
-    cardChip('Stok',
-      `${fmt(stock)} ${esc(unitLabel)}${drumTxt ? `<div style="font-size:11px;font-weight:400;color:#6b7280;">${drumTxt}</div>` : ''}`,
-      stockColor)
-  ];
-  if (reserved != null) chips.push(cardChip('Reserved', `${fmt(reserved)} ${esc(unitLabel)}`));
-  if (available != null) chips.push(cardChip('Available', `${fmt(available)} ${esc(unitLabel)}`, available <= 0 ? '#b91c1c' : ''));
-  chips.push(cardChip('Min Stok', `${fmt(item.min_stock)} ${esc(unitLabel)}`));
+  const stokChip = chipValue(stock, stockColor);
+  const chips = [cardChip('Stok', stokChip.html, stokChip.color)];
+  if (reserved != null) {
+    const c = chipValue(reserved);
+    chips.push(cardChip('Reserved', c.html, c.color));
+  }
+  if (available != null) {
+    const c = chipValue(available, available <= 0 ? '#b91c1c' : undefined);
+    chips.push(cardChip('Available', c.html, c.color));
+  }
+  const minChip = chipValue(item.min_stock);
+  chips.push(cardChip('Min Stok', minChip.html, minChip.color));
   if (perms.viewPrice) chips.push(cardChip('HPP Rata-rata', fmt(item.avg_cost)));
   chips.push(cardChip('Jumlah Mutasi', fmt(cardState.rows.length)));
 
   const sumEl = document.getElementById('cardSummary');
   if (sumEl) sumEl.innerHTML = chips.join('');
+
+  // Tombol satuan + judul kolom qty
+  if (!(isi > 0) && cardState.unitMode === 'drum') cardState.unitMode = 'base';
+  paintCardUnitUi();
 }
 
 // Isi tabel kartu stok (kronologis + saldo berjalan)
@@ -578,6 +681,7 @@ function renderItemCard() {
     tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;color:#9ca3af;">${
       all.length ? 'Tidak ada mutasi pada rentang tanggal ini' : 'Belum ada mutasi stok untuk item ini'}</td></tr>`;
   } else {
+    const unitLabel = cardQtyUnitLabel();
     tbody.innerHTML = rows.map(m => {
       const typeLabel = m.type === 'in' ? 'Masuk'
                       : m.type === 'out' ? 'Keluar'
@@ -587,13 +691,15 @@ function renderItemCard() {
                       : m.type === 'out' ? '#b91c1c'
                       : (m.signed < 0 ? '#b91c1c' : '#0891b2');
       const jNo = m.ref_journal_id ? (cardState.journalMap[m.ref_journal_id] || '—') : '—';
+      const altSaldo = cardAltQtyWithUnit(m.saldo_after);
       return `
         <tr>
           <td data-label="Tanggal" style="white-space:nowrap;">${fmtDate(m.movement_date)}</td>
           <td data-label="Tipe"><span style="color:${typeColor};font-weight:600;">${esc(typeLabel)}</span></td>
-          <td data-label="Masuk" class="num">${m.signed > 0 ? fmt(m.signed) : ''}</td>
-          <td data-label="Keluar" class="num">${m.signed < 0 ? fmt(Math.abs(m.signed)) : ''}</td>
-          <td data-label="Saldo" class="num${Number(m.saldo_after) < 0 ? ' neg' : ''}">${fmt(m.saldo_after)}</td>
+          <td data-label="Masuk (${esc(unitLabel)})" class="num">${m.signed > 0 ? cardFmtQty(m.signed) : ''}</td>
+          <td data-label="Keluar (${esc(unitLabel)})" class="num">${m.signed < 0 ? cardFmtQty(m.signed) : ''}</td>
+          <td data-label="Saldo (${esc(unitLabel)})" class="num${Number(m.saldo_after) < 0 ? ' neg' : ''}">${cardFmtQty(m.saldo_after)}${
+            altSaldo ? `<div style="font-size:10px;font-weight:400;color:#9ca3af;white-space:nowrap;">${esc(altSaldo)}</div>` : ''}</td>
           <td data-label="Harga" class="num">${perms.viewPrice ? fmt(m.unit_cost) : '—'}</td>
           <td data-label="Total" class="num">${perms.viewPrice ? fmt(m.total_cost) : '—'}</td>
           <td data-label="Jurnal" style="white-space:nowrap;font-size:12px;">${esc(jNo)}</td>
@@ -603,10 +709,12 @@ function renderItemCard() {
   }
 
   if (infoEl) {
-    const unitLabel = String(item.unit || '').toLowerCase() === 'ltr' ? 'ltr' : 'kg';
+    const { baseLabel, drumLabel, isi } = cardUnitInfo();
     const parts = [`${fmt(rows.length)} dari ${fmt(all.length)} mutasi ditampilkan`];
-    if (saldoAwal !== 0) parts.push(`saldo sebelum mutasi pertama ${fmt(saldoAwal)} ${unitLabel}`);
-    parts.push(`saldo akhir ${fmt(item.stock_qty)} ${unitLabel}`);
+    if (saldoAwal !== 0) parts.push(`saldo sebelum mutasi pertama ${cardQtyWithUnit(saldoAwal)}`);
+    parts.push(`saldo akhir ${cardQtyWithUnit(item.stock_qty)}`);
+    if (isi > 0) parts.push(`1 ${drumLabel} = ${fmt(isi)} ${baseLabel}`);
+    if (cardIsDrum()) parts.push('harga & total tetap rupiah per ' + baseLabel);
     if (cardState.truncated) parts.push('hanya 1.000 mutasi terakhir dimuat');
     infoEl.textContent = parts.join(' · ');
   }
@@ -637,7 +745,10 @@ function printItemCard() {
     .map(m => { running += m.signed; return { ...m, saldo_after: running }; })
     .filter(m => (!from || String(m.movement_date) >= from) && (!to || String(m.movement_date) <= to));
 
-  const unitLabel = String(item.unit || '').toLowerCase() === 'ltr' ? 'ltr' : 'kg';
+  const { isi, baseLabel, drumLabel } = cardUnitInfo();
+  const unitLabel = cardQtyUnitLabel();
+  const stokTxt = cardQtyWithUnit(item.stock_qty);
+  const stokAlt = cardAltQtyWithUnit(item.stock_qty);
 
   const rowsHtml = rows.map(m => {
     const typeLabel = m.type === 'in' ? 'Masuk'
@@ -645,19 +756,22 @@ function printItemCard() {
                     : m.type === 'adjust' ? (m.signed < 0 ? 'Koreksi -' : 'Koreksi +')
                     : m.type;
     const jNo = m.ref_journal_id ? (cardState.journalMap[m.ref_journal_id] || '-') : '-';
+    const altSaldo = cardAltQtyWithUnit(m.saldo_after);
     return `
       <tr>
         <td class="c">${fmtDate(m.movement_date)}</td>
         <td class="c">${esc(typeLabel)}</td>
-        <td class="r">${m.signed > 0 ? fmt(m.signed) : ''}</td>
-        <td class="r">${m.signed < 0 ? fmt(Math.abs(m.signed)) : ''}</td>
-        <td class="r${Number(m.saldo_after) < 0 ? ' neg' : ''}">${fmt(m.saldo_after)}</td>
+        <td class="r">${m.signed > 0 ? cardFmtQty(m.signed) : ''}</td>
+        <td class="r">${m.signed < 0 ? cardFmtQty(m.signed) : ''}</td>
+        <td class="r${Number(m.saldo_after) < 0 ? ' neg' : ''}">${cardFmtQty(m.saldo_after)}${
+          altSaldo ? `<div class="alt">${esc(altSaldo)}</div>` : ''}</td>
         <td class="r">${perms.viewPrice ? fmt(m.unit_cost) : '-'}</td>
         <td class="r">${perms.viewPrice ? fmt(m.total_cost) : '-'}</td>
         <td>${esc(jNo)}</td>
         <td class="memo">${esc(m.memo || '')}</td>
       </tr>`;
   }).join('') || '<tr><td colspan="9" class="c">Tidak ada mutasi</td></tr>';
+
 
   const html = `<!DOCTYPE html>
 <html lang="id"><head><meta charset="UTF-8">
@@ -677,6 +791,7 @@ function printItemCard() {
   td.c { text-align: center; } td.r { text-align: right; }
   td.neg { color: #b91c1c; }
   td.memo { font-size: 8px; }
+  .alt { font-size: 7px; color: #555; white-space: nowrap; }
   thead { display: table-header-group; } tr { page-break-inside: avoid; }
   .sign { display: flex; justify-content: space-between; margin-top: 20px; page-break-inside: avoid; }
   .sign div { text-align: center; width: 30%; font-size: 9px; }
@@ -695,14 +810,16 @@ function printItemCard() {
         <div><b>SKU</b> ${esc(item.sku)}</div>
         <div><b>Nama</b> ${esc(item.name)}</div>
         <div><b>Satuan</b> ${esc(item.unit || '')}</div>
+        ${isi > 0 ? `<div><b>Kemasan</b> 1 ${esc(drumLabel)} = ${fmt(isi)} ${esc(baseLabel)}</div>` : ''}
+        <div><b>Tampilan qty</b> ${esc(unitLabel)}</div>
         ${(from || to)
           ? `<div><b>Periode</b> ${from ? fmtDate(from) : 'awal'} s/d ${to ? fmtDate(to) : 'akhir'}</div>`
           : ''}
       </div>
     </div>
     <div class="meta" style="text-align:right;">
-      <div>Stok saat ini: <b>${fmt(item.stock_qty)} ${esc(unitLabel)}</b></div>
-      ${perms.viewPrice ? `<div>HPP rata-rata: <b>${fmt(item.avg_cost)}</b></div>` : ''}
+      <div>Stok saat ini: <b>${esc(stokTxt)}</b>${stokAlt ? ` (${esc(stokAlt)})` : ''}</div>
+      ${perms.viewPrice ? `<div>HPP rata-rata: <b>${fmt(item.avg_cost)}</b> / ${esc(baseLabel)}</div>` : ''}
       <div>Total baris: <b>${fmt(rows.length)}</b></div>
       <div>Dicetak: ${new Date().toLocaleString('id-ID')}</div>
     </div>
@@ -714,8 +831,8 @@ function printItemCard() {
     </colgroup>
     <thead>
       <tr>
-        <th>Tanggal</th><th>Tipe</th><th>Masuk</th><th>Keluar</th>
-        <th>Saldo</th><th>Harga</th><th>Total</th><th>Jurnal</th><th>Memo</th>
+        <th>Tanggal</th><th>Tipe</th><th>Masuk (${esc(unitLabel)})</th><th>Keluar (${esc(unitLabel)})</th>
+        <th>Saldo (${esc(unitLabel)})</th><th>Harga / ${esc(baseLabel)}</th><th>Total</th><th>Jurnal</th><th>Memo</th>
       </tr>
     </thead>
     <tbody>${rowsHtml}</tbody>
@@ -736,6 +853,12 @@ function printItemCard() {
 
 // Pasang event klik baris + kontrol modal kartu stok
 function wireItemCard() {
+  // Pilihan satuan terakhir diingat (operator bisa default ke drum)
+  try {
+    const saved = localStorage.getItem('sanno.cardUnitMode');
+    if (saved === 'drum' || saved === 'base') cardState.unitMode = saved;
+  } catch { /* localStorage diblokir: pakai default */ }
+
   const tbody = document.getElementById('tbody-inventory');
   if (tbody && !tbody.dataset.cardWired) {
     tbody.dataset.cardWired = '1';
@@ -773,6 +896,8 @@ function wireItemCard() {
       renderItemCard();
     });
     document.getElementById('cardPrintBtn')?.addEventListener('click', printItemCard);
+    document.getElementById('cardUnitBase')?.addEventListener('click', () => setCardUnitMode('base'));
+    document.getElementById('cardUnitDrum')?.addEventListener('click', () => setCardUnitMode('drum'));
     document.getElementById('cardDateFrom')?.addEventListener('change', renderItemCard);
     document.getElementById('cardDateTo')?.addEventListener('change', renderItemCard);
     modal.addEventListener('click', (e) => { if (e.target === modal) closeItemCard(); });
