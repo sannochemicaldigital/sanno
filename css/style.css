@@ -102,6 +102,31 @@ tbody tr:hover { background: #f9fafb; }
   box-shadow: inset 0 -1px 0 #e5e7eb;
 }
 
+/* Toggle satuan qty kartu stok (kg/ltr <-> drum) */
+.card-unit-toggle {
+  display: inline-flex;
+  border: 1px solid #d0d5dd;
+  border-radius: 6px;
+  overflow: hidden;
+}
+.card-unit-btn {
+  background: #fff;
+  border: 0;
+  border-right: 1px solid #d0d5dd;
+  padding: 6px 14px;
+  font-size: 13px;
+  color: #374151;
+  cursor: pointer;
+}
+.card-unit-btn:last-child { border-right: 0; }
+.card-unit-btn:hover:not(:disabled) { background: #f3f4f6; }
+.card-unit-btn.active {
+  background: #2563eb;
+  color: #fff;
+  font-weight: 600;
+}
+.card-unit-btn:disabled { color: #b0b6bf; cursor: not-allowed; background: #f9fafb; }
+
 /* Tabs */
 .tabs { display: flex; gap: 4px; margin-bottom: 16px; border-bottom: 2px solid #e5e7eb; flex-wrap: wrap; }
 .tabs button {
