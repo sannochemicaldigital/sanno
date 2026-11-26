@@ -1,5 +1,6 @@
 // js/reports.js
 import { supabase } from './supabase-client.js';
+import { listBankCoaAccounts } from './bank-accounts.js';
 
 // ============================================================
 // DASHBOARD BALANCES
@@ -76,15 +77,8 @@ export async function plafonRkHutang() {
 }
 
 export async function bankBalanceSummary() {
-  const { data: coa, error: coaErr } = await supabase
-    .from('accounts')
-    .select('id, code, name')
-    .like('code', '1-11%')
-    .eq('is_active', true)
-    .order('code');
-  if (coaErr) throw coaErr;
-
-  const accounts = coa || [];
+  // Akun bank = 1-11xx + 1-1010 (BCA-N), lihat EXTRA_BANK_COA_CODES.
+  const accounts = await listBankCoaAccounts({ activeOnly: true });
   if (!accounts.length) return { total: 0, items: [] };
 
   const codes = accounts.map(a => a.code);

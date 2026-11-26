@@ -10,7 +10,7 @@ import { parseBankStatementCsv, summarizeStatement } from './bank-recon-csv.js';
 import { createJournal } from './journals.js';
 import { listAccounts } from './accounts.js';
 import { listPartners } from './partners.js';
-import { getValasBookRate, getValasBookRateAcrossAccounts } from './bank-accounts.js';
+import { getValasBookRate, getValasBookRateAcrossAccounts, listBankCoaAccounts } from './bank-accounts.js';
 import { getTaxRate, listTaxRates, upsertTaxRates, deleteTaxRate } from './tax-rates.js';
 
 // ============================================================
@@ -208,13 +208,17 @@ async function loadBankAccounts() {
   const sel = document.getElementById('impCoa');
   if (!sel) return;
   sel.dataset.loaded = '1';
-  const { data, error } = await supabase
-    .from('accounts')
-    .select('code, name')
-    .like('code', '1-11%')
-    .order('code');
-  if (error) { sel.innerHTML = '<option value="">(gagal memuat akun)</option>'; return; }
-  sel.innerHTML = (data || []).map(a => `<option value="${esc(a.code)}">${esc(a.code)} — ${esc(a.name)}</option>`).join('');
+  let accounts;
+  try {
+    // aktif + nonaktif: file lama boleh tetap diimpor ke rekening nonaktif
+    accounts = await listBankCoaAccounts({ activeOnly: false });
+  } catch (err) {
+    sel.innerHTML = '<option value="">(gagal memuat akun)</option>';
+    return;
+  }
+  sel.innerHTML = accounts
+    .map(a => `<option value="${esc(a.code)}">${esc(a.code)} — ${esc(a.name)}</option>`)
+    .join('');
   await suggestCurrencyForAccount(sel.value);
 }
 

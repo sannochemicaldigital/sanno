@@ -2,6 +2,15 @@
 import { supabase } from './supabase-client.js';
 
 // ============================================================
+// KODE COA REKENING BANK DI LUAR KELOMPOK 1-11xx
+// ------------------------------------------------------------
+// Rekening 1-1010 (BCA-N) sengaja dibuat di luar kelompok 1-11xx, tetapi tetap
+// rekening bank: harus muncul di Pengaturan > Bank, dropdown impor rekonsiliasi,
+// dan kartu "Saldo Bank" dashboard. Tambahkan kode lain di sini bila ada.
+// ============================================================
+export const EXTRA_BANK_COA_CODES = ['1-1010'];
+
+// ============================================================
 // LIST SEMUA REKENING (aktif & nonaktif)
 // ============================================================
 export async function listBankAccounts({ activeOnly = false } = {}) {
@@ -99,17 +108,32 @@ export async function deleteBankAccount(id) {
 }
 
 // ============================================================
-// LIST AKUN COA BANK (untuk dropdown account_id)
+// LIST AKUN COA BANK (dropdown account_id, filter rekonsiliasi, laporan)
+// ------------------------------------------------------------
+// = akun berawalan 1-11 + EXTRA_BANK_COA_CODES.
+// Dua query lalu digabung: tidak memakai .or() PostgREST supaya tidak
+// bergantung pada sintaks wildcard (%, *) yang mudah salah.
 // ============================================================
-export async function listBankCoaAccounts() {
-  const { data, error } = await supabase
-    .from('accounts')
-    .select('id, code, name')
-    .like('code', '1-11%')
-    .eq('is_active', true)
-    .order('code');
+export async function listBankCoaAccounts({ activeOnly = true } = {}) {
+  const COLS = 'id, code, name';
+  let q = supabase.from('accounts').select(COLS).like('code', '1-11%');
+  if (activeOnly) q = q.eq('is_active', true);
+  const { data, error } = await q.order('code');
   if (error) throw error;
-  return data || [];
+
+  const rows = [...(data || [])];
+  if (EXTRA_BANK_COA_CODES.length) {
+    let qx = supabase.from('accounts').select(COLS).in('code', EXTRA_BANK_COA_CODES);
+    if (activeOnly) qx = qx.eq('is_active', true);
+    const { data: extra, error: extraErr } = await qx;
+    if (extraErr) throw extraErr;
+    rows.push(...(extra || []));
+  }
+
+  const seen = new Set();
+  return rows
+    .filter(r => (seen.has(r.code) ? false : seen.add(r.code)))
+    .sort((a, b) => String(a.code).localeCompare(String(b.code)));
 }
 
 // ============================================================
