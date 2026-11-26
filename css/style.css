@@ -103,6 +103,9 @@ tbody tr:hover { background: #f9fafb; }
   tr { background: #fff; margin-bottom: 10px; border-radius: 10px; box-shadow: 0 1px 4px rgba(0,0,0,0.05); padding: 12px; }
   td { border: none; padding: 6px 0; display: flex; justify-content: space-between; gap: 12px; }
   td::before { content: attr(data-label); font-weight: 600; color: #6b7280; font-size: 12px; }
+  /* Sel yang isinya field (mis. tabel alokasi hutang): field mengisi sisa lebar
+     supaya tidak gepeng di samping label. */
+  td > input, td > select { flex: 1; min-width: 0; }
 }
 
 /* ==== Form Jurnal ==== */
