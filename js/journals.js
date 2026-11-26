@@ -161,15 +161,28 @@ export async function createJournal({
 // ============================================================
 // DAFTAR JURNAL
 // ============================================================
-export async function listJournals({ from = null, to = null, limit = 100 } = {}) {
-  let q = supabase.from('journals')
+// v11.33 — tambah pencarian teks (journal_no / description / ref_no) + rentang
+// tanggal. Sebelumnya halaman Jurnal hanya menampilkan N jurnal terbaru tanpa
+// pencarian, sehingga jurnal impor kas lama (KAS-YYYYMM-NNNN / KASADJ-...)
+// bertanggal 2020-2025 tidak mungkin ditemukan dari UI.
+export async function listJournals({ from = null, to = null, q = null, limit = 100 } = {}) {
+  let query = supabase.from('journals')
     .select('*')
     .order('journal_date', { ascending: false })
     .order('id', { ascending: false })
     .limit(limit);
-  if (from) q = q.gte('journal_date', from);
-  if (to)   q = q.lte('journal_date', to);
-  const { data, error } = await q;
+  if (from) query = query.gte('journal_date', from);
+  if (to)   query = query.lte('journal_date', to);
+
+  // Karakter , ( ) * dan % bermakna khusus di filter PostgREST -> dibuang.
+  const term = String(q || '').trim().replace(/[,()%*]/g, ' ').replace(/\s+/g, ' ').trim();
+  if (term) {
+    query = query.or(
+      `journal_no.ilike.%${term}%,description.ilike.%${term}%,ref_no.ilike.%${term}%`
+    );
+  }
+
+  const { data, error } = await query;
   if (error) throw error;
   return data;
 }

@@ -9,7 +9,7 @@ import {
   createJournal, listJournals, getRate,
   getJournal, updateJournal, reverseJournal, deleteJournal,
   pickHeaderCurrency
-} from './journals.js';
+} from './journals.js?v=11.33';
 import { getProfileDirectory } from './users.js';
 import { supabase } from './supabase-client.js';
 
@@ -37,6 +37,10 @@ const state = {
   userMap: new Map(),
   lineCount: 0,
   editingId: null,
+  // v11.33 — filter daftar jurnal
+  journalQ: '',
+  journalFrom: '',
+  journalTo: '',
   perms: {
     create: false, edit: false, reversal: false, delete: false
   }
@@ -125,6 +129,21 @@ function currencyOptions(selected = BASE_CURRENCY) {
     addLine();
     addLine();
   }
+
+  // v11.33 — pencarian jurnal (No. jurnal / keterangan / rentang tanggal).
+  // Daftar default hanya N jurnal terbaru, jadi jurnal lama (KAS-*, KASADJ-*)
+  // hanya bisa ditemukan lewat pencarian ini atau tautan journal.html?q=KASADJ.
+  const qParam = new URLSearchParams(location.search).get('q') || '';
+  const searchEl = document.getElementById('journalSearch');
+  if (qParam) searchEl.value = qParam;
+  document.getElementById('journalSearchBtn').addEventListener('click', onJournalSearch);
+  document.getElementById('journalResetBtn').addEventListener('click', onJournalSearchReset);
+  searchEl.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); onJournalSearch(); }
+  });
+  ['journalFrom', 'journalTo'].forEach(id => {
+    document.getElementById(id).addEventListener('change', onJournalSearch);
+  });
 
   await renderJournals();
 
@@ -584,12 +603,43 @@ async function onSubmit(e) {
   }
 }
 
+// v11.33 — daftar jurnal + pencarian.
+// Sebelumnya fungsi ini selalu memuat 20 jurnal terbaru tanpa cara mencari,
+// sehingga jurnal bertanggal lama (impor kas KAS-*/KASADJ-*) tidak bisa dibuka.
+function onJournalSearch() {
+  state.journalQ    = (document.getElementById('journalSearch').value || '').trim();
+  state.journalFrom = document.getElementById('journalFrom').value || '';
+  state.journalTo   = document.getElementById('journalTo').value || '';
+  renderJournals();
+}
+
+function onJournalSearchReset() {
+  document.getElementById('journalSearch').value = '';
+  document.getElementById('journalFrom').value = '';
+  document.getElementById('journalTo').value = '';
+  state.journalQ = '';
+  state.journalFrom = '';
+  state.journalTo = '';
+  renderJournals();
+}
+
 async function renderJournals() {
   const wrap = document.getElementById('journalList');
+  const titleEl = document.getElementById('journalListTitle');
+  const isSearch = !!(state.journalQ || state.journalFrom || state.journalTo);
+  const limit = isSearch ? 100 : 20;
+  if (titleEl) titleEl.textContent = isSearch ? 'Hasil Pencarian Jurnal' : 'Jurnal Terakhir';
   try {
-    const list = await listJournals({ limit: 20 });
+    const list = await listJournals({
+      q: state.journalQ || null,
+      from: state.journalFrom || null,
+      to: state.journalTo || null,
+      limit
+    });
     if (!list.length) {
-      wrap.innerHTML = '<div style="color:#9ca3af;font-size:14px;">Belum ada jurnal.</div>';
+      wrap.innerHTML = isSearch
+        ? '<div style="color:#9ca3af;font-size:14px;">Tidak ada jurnal yang cocok. Coba kata kunci lain (mis. <b>KASADJ</b> atau <b>KAS-202611</b>) atau longgarkan rentang tanggal.</div>'
+        : '<div style="color:#9ca3af;font-size:14px;">Belum ada jurnal.</div>';
       return;
     }
 
@@ -649,7 +699,12 @@ async function renderJournals() {
           <div class="meta">${j.journal_date}${cur} · Debit ${fmt(s.d)} · Kredit ${fmt(s.c)} · Input: ${creator}</div>
           ${buttonsHtml}
         </div>`;
-    }).join('');
+    }).join('') +
+      `<div style="color:#6b7280;font-size:12px;margin-top:8px;">
+        Menampilkan ${list.length} jurnal${isSearch ? ' hasil pencarian' : ' terbaru'}${list.length >= limit
+          ? ` (batas ${limit} — persempit kata kunci atau rentang tanggal untuk melihat sisanya)`
+          : ''}.
+      </div>`;
 
     wrap.querySelectorAll('[data-edit]').forEach(btn => {
       btn.addEventListener('click', () => loadEdit(Number(btn.dataset.edit)));
