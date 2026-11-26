@@ -4,7 +4,7 @@ import { requireAuth, logout, getCurrentRole } from './auth.js';
 import { renderNav, requirePageAccess } from './access.js';
 import { SETTING_DEFS, getAllSettings, updateSetting } from './settings.js';
 import { listUsers, createUser, updateUser, deleteUser, AVAILABLE_ROLES } from './users.js';
-import { initPermissionsTab } from './permissions-page.js';
+import { initPermissionsTab } from './permissions-page.js?v=11.28.0';
 import { listLockedPeriods, lockPeriod, unlockPeriod, checkPeriodLocked } from './periods.js';
 import { getCompanyProfile, updateCompanyProfile } from './company.js';
 import {
