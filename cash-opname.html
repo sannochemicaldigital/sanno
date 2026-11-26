@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Opname Kas &amp; Bank — Sanno Accounting</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>🏦</text></svg>">
+  <link rel="stylesheet" href="./css/style.css">
+</head>
+<body>
+  <div class="container">
+    <div class="topbar">
+      <h1>Opname Kas &amp; Bank</h1>
+      <button class="btn btn-danger" id="logoutBtn">Keluar</button>
+    </div>
+
+    <nav class="nav" id="mainNav"></nav>
+
+    <!-- ==================== RINGKASAN AKUN SELISIH ==================== -->
+    <div class="card" id="selisihCard">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;">
+        <div>
+          <h3 style="margin:0;font-size:16px;">Akun Selisih Sementara</h3>
+          <p style="font-size:13px;color:#6b7280;margin:4px 0 0;">
+            Semua selisih opname dibukukan ke akun <b>1-1900</b>
+            (Selisih Sementara Kas &amp; Bank). Saldo akun ini harus kembali
+            <b>0</b> setelah transaksi yang belum tercatat selesai diinput.
+          </p>
+        </div>
+        <div style="text-align:right;">
+          <div style="font-size:12px;color:#6b7280;">Saldo akun 1-1900</div>
+          <div id="selisihBalance" style="font-size:22px;font-weight:700;">—</div>
+          <div id="selisihHint" style="font-size:12px;color:#6b7280;"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== DAFTAR OPNAME ==================== -->
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
+        <div>
+          <h3 style="margin:0;font-size:16px;">Daftar Opname</h3>
+          <p style="font-size:13px;color:#6b7280;margin:4px 0 0;">
+            Klik satu baris untuk membuka detail, mengisi saldo fisik, lalu submit
+            dan eksekusi (membuat jurnal <b>OPK-YYYYMM-NNNN</b>).
+          </p>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button type="button" class="btn btn-primary" id="btnNew" style="display:none;">
+            + Opname Baru
+          </button>
+          <button type="button" class="btn btn-secondary" id="btnReloadTop"
+                  style="padding:8px 14px;font-size:13px;">Muat ulang</button>
+        </div>
+      </div>
+
+      <!-- FORM OPNAME BARU -->
+      <div id="newCard" style="display:none;margin-top:16px;padding:12px;background:#f9fafb;border-radius:8px;">
+        <form id="form-new">
+          <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(160px,1fr));">
+            <div class="form-row">
+              <label>Tanggal Opname <span style="color:#dc2626;">*</span></label>
+              <input type="date" name="opname_date" id="newDate" required>
+            </div>
+            <div class="form-row" style="grid-column: span 2;">
+              <label>Catatan (opsional)</label>
+              <input name="notes" id="newNotes" maxlength="500"
+                     placeholder="mis. Opname saldo kas &amp; bank per akhir bulan">
+            </div>
+          </div>
+
+          <div style="margin:4px 0 12px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
+              <label style="font-size:13px;font-weight:600;color:#374151;">Akun yang diopname</label>
+              <div style="display:flex;gap:8px;">
+                <button type="button" class="btn btn-secondary" id="btnPickAll"
+                        style="padding:4px 10px;font-size:12px;">Pilih semua</button>
+                <button type="button" class="btn btn-secondary" id="btnPickNone"
+                        style="padding:4px 10px;font-size:12px;">Kosongkan</button>
+              </div>
+            </div>
+            <div id="accountPicker"
+                 style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:4px 12px;margin-top:8px;">
+              <span style="font-size:13px;color:#9ca3af;">Memuat akun…</span>
+            </div>
+            <p style="font-size:12px;color:#6b7280;margin:6px 0 0;">
+              Hanya akun kas/bank aktif (kode 1-10xx / 1-11xx) yang bisa dipilih.
+              Bila semua dipilih, opname mencakup seluruh akun kas &amp; bank.
+            </p>
+          </div>
+
+          <div class="form-actions">
+            <button type="submit" class="btn btn-primary" id="btnCreate">Buat Opname</button>
+            <button type="button" class="btn btn-secondary" id="btnCancelNew">Batal</button>
+          </div>
+        </form>
+      </div>
+
+      <!-- FILTER & TABEL RIWAYAT -->
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:16px 0 12px;">
+        <input type="date" id="histFrom" title="Dari tanggal"
+               style="padding:8px;border:1px solid #d0d5dd;border-radius:6px;">
+        <input type="date" id="histTo" title="Sampai tanggal"
+               style="padding:8px;border:1px solid #d0d5dd;border-radius:6px;">
+        <select id="histStatus" style="padding:8px;border:1px solid #d0d5dd;border-radius:6px;">
+          <option value="">Semua status</option>
+          <option value="draft">Draft</option>
+          <option value="submitted">Submitted</option>
+          <option value="executed">Executed</option>
+          <option value="cancelled">Cancelled</option>
+        </select>
+        <button type="button" class="btn btn-secondary" id="btnReload"
+                style="padding:8px 14px;font-size:13px;">Terapkan</button>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>No. Opname</th>
+              <th>Tanggal</th>
+              <th>Status</th>
+              <th class="num">Akun</th>
+              <th class="num">Disesuaikan</th>
+              <th class="num">Total Selisih (Rp)</th>
+              <th>Jurnal</th>
+              <th>Aksi</th>
+            </tr>
+          </thead>
+          <tbody id="tbodyHist"></tbody>
+        </table>
+      </div>
+      <div style="margin-top:12px;text-align:center;">
+        <button type="button" class="btn btn-secondary" id="btnMore"
+                style="display:none;padding:8px 16px;font-size:13px;">Muat lebih banyak</button>
+        <div id="histInfo" style="font-size:12px;color:#6b7280;margin-top:8px;"></div>
+      </div>
+    </div>
+
+    <!-- ==================== DETAIL OPNAME ==================== -->
+    <div class="card" id="detailCard" style="display:none;">
+      <div id="detailHeader" style="margin-bottom:12px;"></div>
+      <div id="actionBar" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;"></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px;">
+        <input type="text" id="lineSearch"
+               placeholder="Cari kode / nama akun..."
+               style="flex:1;min-width:180px;padding:8px;border:1px solid #d0d5dd;border-radius:6px;">
+        <label style="display:flex;align-items:center;gap:4px;font-size:13px;">
+          <input type="checkbox" id="onlyDelta">
+          Hanya akun dengan selisih
+        </label>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Kode</th>
+              <th>Akun</th>
+              <th>Cur</th>
+              <th class="num">Saldo Buku (Valas)</th>
+              <th class="num">Saldo Buku (Rp)</th>
+              <th class="num">Saldo Fisik</th>
+              <th class="num">Selisih</th>
+              <th class="num">Kurs</th>
+              <th class="num">Selisih (Rp)</th>
+              <th>Memo</th>
+            </tr>
+          </thead>
+          <tbody id="tbodyLines"></tbody>
+          <tfoot id="tfootLines"></tfoot>
+        </table>
+      </div>
+      <p id="detailNote" style="font-size:12px;color:#6b7280;margin:10px 0 0;"></p>
+    </div>
+
+    <!-- ==================== PREVIEW EKSEKUSI (DRY RUN) ==================== -->
+    <div class="card" id="previewCard" style="display:none;border-left:4px solid #f59e0b;">
+      <h3 style="margin:0;font-size:16px;">Pratinjau Jurnal (Dry Run)</h3>
+      <p style="font-size:13px;color:#6b7280;margin:4px 0 12px;">
+        Belum ada yang diposting. Periksa baris jurnal di bawah, lalu klik
+        <b>Posting Sekarang</b> untuk membuat jurnal <b>OPK-</b>.
+      </p>
+      <div id="previewMeta" style="font-size:13px;margin-bottom:10px;"></div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Akun</th>
+              <th>Keterangan</th>
+              <th class="num">Debit</th>
+              <th class="num">Kredit</th>
+              <th class="num">Debit (Rp)</th>
+              <th class="num">Kredit (Rp)</th>
+            </tr>
+          </thead>
+          <tbody id="tbodyPreview"></tbody>
+        </table>
+      </div>
+      <div class="form-actions" style="margin-top:12px;">
+        <button type="button" class="btn btn-primary" id="btnConfirmExecute">Posting Sekarang</button>
+        <button type="button" class="btn btn-secondary" id="btnCancelPreview">Batal</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script type="module" src="./js/cash-opname-page.js?v=11.27.0"></script>
+</body>
+</html>
