@@ -7,7 +7,7 @@ import { agingPiutang } from './reports.js';
 
 // Penanda build: muncul di console + atribut <body data-build>.
 // Dipakai untuk memastikan browser TIDAK memuat versi lama dari cache.
-const BUILD = 'v10.2.0';
+const BUILD = 'v10.2.2';
 document.body.dataset.build = BUILD;
 console.info('[piutang-page] build ' + BUILD +
   ' — Simpan: add_sales_receipt · Hapus: delete_sales_receipt');
@@ -219,16 +219,16 @@ function renderTable(rows) {
   }
   tbody.innerHTML = rows.map(r => `
     <tr data-id="${r.id}" style="cursor:pointer;">
-      <td style="font-family:monospace;font-size:12px;">${esc(r.invoice_no)}</td>
-      <td>${esc(r.partner?.name || '—')}</td>
-      <td>${esc(r.sales_rep?.code || '—')}</td>
-      <td>${fmtDate(r.dev_date)}</td>
-      <td>${fmtDate(r.due_date)}</td>
-      <td>${esc(r.currency)}</td>
-      <td class="num">${fmt(r.subtotal)}</td>
-      <td class="num">${fmt(r.ppn_amount_idr)}</td>
-      <td class="num" style="font-weight:600;">${fmt(r.total_idr)}</td>
-      <td>${statusBadge(r.status)}</td>
+      <td data-label="Invoice No" style="font-family:monospace;font-size:12px;">${esc(r.invoice_no)}</td>
+      <td data-label="Partner">${esc(r.partner?.name || '—')}</td>
+      <td data-label="Sales">${esc(r.sales_rep?.code || '—')}</td>
+      <td data-label="Dev Date">${fmtDate(r.dev_date)}</td>
+      <td data-label="Due Date">${fmtDate(r.due_date)}</td>
+      <td data-label="Curr">${esc(r.currency)}</td>
+      <td data-label="Subtotal" class="num">${fmt(r.subtotal)}</td>
+      <td data-label="PPN (IDR)" class="num">${fmt(r.ppn_amount_idr)}</td>
+      <td data-label="Total IDR" class="num" style="font-weight:600;">${fmt(r.total_idr)}</td>
+      <td data-label="Status">${statusBadge(r.status)}</td>
     </tr>
   `).join('');
   tbody.querySelectorAll('tr[data-id]').forEach(tr => {
@@ -377,15 +377,15 @@ async function openDetail(invoiceId) {
         : (l.packaging_isi_ltr ? fmt(l.packaging_isi_ltr) + ' ltr' : '—');
       return `
         <tr>
-          <td>${l.line_no}</td>
-          <td style="font-family:monospace;font-size:12px;">${esc(l.item?.sku || '—')}</td>
-          <td>${esc(l.display_name || l.item?.name || '—')}</td>
-          <td class="num">${fmtInt(l.qty)}</td>
-          <td class="num">${isi}</td>
-          <td class="num">${fmt(l.unit_price)}</td>
-          <td class="num">${fmt(l.line_total)}</td>
-          <td class="num">${fmt(l.ppn_amount_idr)}</td>
-          <td style="font-size:12px;color:#6b7280;">${esc(l.remark || '')}</td>
+          <td data-label="Line">${l.line_no}</td>
+          <td data-label="SKU" style="font-family:monospace;font-size:12px;">${esc(l.item?.sku || '—')}</td>
+          <td data-label="Nama">${esc(l.display_name || l.item?.name || '—')}</td>
+          <td data-label="Qty" class="num">${fmtInt(l.qty)}</td>
+          <td data-label="Isi" class="num">${isi}</td>
+          <td data-label="Harga" class="num">${fmt(l.unit_price)}</td>
+          <td data-label="Total" class="num">${fmt(l.line_total)}</td>
+          <td data-label="PPN (IDR)" class="num">${fmt(l.ppn_amount_idr)}</td>
+          <td data-label="Remark" style="font-size:12px;color:#6b7280;">${esc(l.remark || '')}</td>
         </tr>
       `;
     }).join('');
@@ -411,17 +411,17 @@ async function openDetail(invoiceId) {
 
     payBody.innerHTML = pays.map(p => `
       <tr>
-        <td>${fmtDate(p.payment_date)}</td>
-        <td class="num">${
+        <td data-label="Tanggal">${fmtDate(p.payment_date)}</td>
+        <td data-label="Jumlah" class="num">${
           p.amount_usd !== null && p.amount_usd !== undefined
             ? `USD ${fmt(p.amount_usd)}<div style="font-size:11px;color:#6b7280;">Rp ${fmt(p.amount_idr)} @ ${fmt(p.exchange_rate_buy)}</div>`
             : `Rp ${fmt(p.amount_idr)}`
         }</td>
-        <td>${esc(p.method)}</td>
-        <td style="font-size:12px;">${esc(p.account?.code || '')} ${esc(p.account?.name || '')}</td>
-        <td style="font-size:12px;">${esc(p.reference_no || '')}</td>
-        <td style="font-size:12px;">${esc(p.note || '')}</td>
-        <td style="font-size:11px;color:#6b7280;">${p.created_at ? new Date(p.created_at).toLocaleString('id-ID') : '—'}</td>
+        <td data-label="Metode">${esc(p.method)}</td>
+        <td data-label="Rekening" style="font-size:12px;">${esc(p.account?.code || '')} ${esc(p.account?.name || '')}</td>
+        <td data-label="Ref" style="font-size:12px;">${esc(p.reference_no || '')}</td>
+        <td data-label="Catatan" style="font-size:12px;">${esc(p.note || '')}</td>
+        <td data-label="Oleh" style="font-size:11px;color:#6b7280;">${p.created_at ? new Date(p.created_at).toLocaleString('id-ID') : '—'}</td>
       </tr>
     `).join('');
 
@@ -593,7 +593,43 @@ async function loadPayments() {
     tbody.innerHTML = `<tr><td colspan="10" style="text-align:center;color:#dc2626;padding:16px;">Error: ${esc(error.message)}</td></tr>`;
     return;
   }
-  renderPaymentsTable(data || []);
+  const rows = data || [];
+  await attachJournalNos(rows);
+  renderPaymentsTable(rows);
+}
+
+// Lengkapi journal_no tanpa bergantung pada embed FK: supaya tabel menampilkan
+// awalan jurnal ASLI (REC-* = RPC v10.2, JV-* = add_historical_payment lama),
+// bukan badge "JV" statis yang menyesatkan. Query dipecah agar URL tidak kepanjangan.
+async function attachJournalNos(rows) {
+  const ids = [...new Set(rows.map(r => r.journal_id).filter(v => v != null))];
+  if (!ids.length) return;
+  const map = new Map();
+  for (let i = 0; i < ids.length; i += 100) {
+    const chunk = ids.slice(i, i + 100);
+    const { data, error } = await supabase
+      .from('journals')
+      .select('id, journal_no')
+      .in('id', chunk);
+    if (error) return;              // badge tetap tampil sebagai JV#<id>
+    (data || []).forEach(j => map.set(j.id, j.journal_no));
+  }
+  rows.forEach(r => {
+    r.journal_no = r.journal_id != null ? (map.get(r.journal_id) || null) : null;
+  });
+}
+
+function journalBadge(r) {
+  if (r.journal_id == null) return '—';
+  const jn = r.journal_no || '';
+  if (!jn) {
+    return `<span title="journal_id ${esc(r.journal_id)}" style="background:#e5e7eb;color:#374151;padding:2px 6px;border-radius:4px;">JV#${esc(r.journal_id)}</span>`;
+  }
+  const isRec = jn.toUpperCase().startsWith('REC-');
+  const style = isRec
+    ? 'background:#dbeafe;color:#1e40af;'
+    : 'background:#e5e7eb;color:#374151;';
+  return `<span title="${esc(jn)}" style="${style}padding:2px 6px;border-radius:4px;font-family:monospace;">${esc(jn)}</span>`;
 }
 
 function renderPaymentsTable(rows) {
@@ -607,20 +643,20 @@ function renderPaymentsTable(rows) {
 
   tbody.innerHTML = rows.map(r => `
     <tr>
-      <td style="font-family:monospace;font-size:12px;">${esc(r.invoice?.invoice_no || '—')}</td>
-      <td>${esc(r.invoice?.partner?.name || '—')}</td>
-      <td>${fmtDate(r.payment_date)}</td>
-      <td class="num" style="font-weight:600;">${
+      <td data-label="Invoice" style="font-family:monospace;font-size:12px;">${esc(r.invoice?.invoice_no || '—')}</td>
+      <td data-label="Partner">${esc(r.invoice?.partner?.name || '—')}</td>
+      <td data-label="Tanggal">${fmtDate(r.payment_date)}</td>
+      <td data-label="Jumlah" class="num" style="font-weight:600;">${
         r.amount_usd !== null && r.amount_usd !== undefined
           ? `USD ${fmt(r.amount_usd)}<div style="font-size:11px;color:#6b7280;font-weight:400;">Rp ${fmt(r.amount_idr)} @ ${fmt(r.exchange_rate_buy)}</div>`
           : `Rp ${fmt(r.amount_idr)}`
       }</td>
-      <td>${esc(r.method)}</td>
-      <td style="font-size:12px;">${esc(r.account?.code || '')} ${esc(r.account?.name || '')}</td>
-      <td style="font-size:12px;">${esc(r.reference_no || '')}</td>
-      <td style="font-size:11px;color:#6b7280;">${r.created_at ? new Date(r.created_at).toLocaleString('id-ID') : '—'}</td>
-      <td style="font-size:11px;">${r.journal_id ? `<span style="background:#dbeafe;color:#1e40af;padding:2px 6px;border-radius:4px;">JV</span>` : '—'}</td>
-      <td>
+      <td data-label="Metode">${esc(r.method)}</td>
+      <td data-label="Rekening" style="font-size:12px;">${esc(r.account?.code || '')} ${esc(r.account?.name || '')}</td>
+      <td data-label="Ref" style="font-size:12px;">${esc(r.reference_no || '')}</td>
+      <td data-label="Oleh" style="font-size:11px;color:#6b7280;">${r.created_at ? new Date(r.created_at).toLocaleString('id-ID') : '—'}</td>
+      <td data-label="Jurnal" style="font-size:11px;">${journalBadge(r)}</td>
+      <td data-label="Aksi">
         ${state.canDeletePayment
           ? `<button type="button" class="btn btn-danger" data-del-pay="${r.id}" data-del-jv="${r.journal_id || ''}" style="padding:4px 10px;font-size:12px;">Hapus</button>`
           : '—'}
@@ -802,19 +838,19 @@ async function loadAging() {
       t0 += r.b0_30; t31 += r.b31_60; t60 += r.b60p; tAll += r.total;
       return `
         <tr>
-          <td>${esc(r.name)}</td>
-          <td class="num">${fmt(r.b0_30)}</td>
-          <td class="num">${fmt(r.b31_60)}</td>
-          <td class="num">${fmt(r.b60p)}</td>
-          <td class="num" style="font-weight:600;">${fmt(r.total)}</td>
+          <td data-label="Pelanggan">${esc(r.name)}</td>
+          <td data-label="0–30 hari" class="num">${fmt(r.b0_30)}</td>
+          <td data-label="31–60 hari" class="num">${fmt(r.b31_60)}</td>
+          <td data-label="60+ hari" class="num">${fmt(r.b60p)}</td>
+          <td data-label="Total" class="num" style="font-weight:600;">${fmt(r.total)}</td>
         </tr>`;
     }).join('') + `
       <tr style="background:#f9fafb;font-weight:600;">
-        <td>TOTAL</td>
-        <td class="num">${fmt(t0)}</td>
-        <td class="num">${fmt(t31)}</td>
-        <td class="num">${fmt(t60)}</td>
-        <td class="num">${fmt(tAll)}</td>
+        <td data-label="Pelanggan">TOTAL</td>
+        <td data-label="0–30 hari" class="num">${fmt(t0)}</td>
+        <td data-label="31–60 hari" class="num">${fmt(t31)}</td>
+        <td data-label="60+ hari" class="num">${fmt(t60)}</td>
+        <td data-label="Total" class="num">${fmt(tAll)}</td>
       </tr>`;
   } catch (err) {
     tbody.innerHTML = `<tr><td colspan="5" style="color:#dc2626;">${esc(err.message)}</td></tr>`;

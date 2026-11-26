@@ -214,15 +214,15 @@ function renderTable(rows) {
   }
   tbody.innerHTML = rows.map(r => `
     <tr data-id="${r.id}" style="cursor:pointer;">
-      <td style="font-family:monospace;font-size:12px;">${esc(r.invoice_no)}</td>
-      <td>${esc(r.partner?.name || '—')}</td>
-      <td>${fmtDate(r.dev_date)}</td>
-      <td>${fmtDate(r.due_date)}</td>
-      <td>${esc(r.currency)}</td>
-      <td class="num">${fmt(r.subtotal)}</td>
-      <td class="num">${fmt(r.ppn_amount_idr)}</td>
-      <td class="num" style="font-weight:600;">${fmt(r.total_idr)}</td>
-      <td>${statusBadge(r.status)}</td>
+      <td data-label="Invoice No" style="font-family:monospace;font-size:12px;">${esc(r.invoice_no)}</td>
+      <td data-label="Vendor">${esc(r.partner?.name || '—')}</td>
+      <td data-label="Dev Date">${fmtDate(r.dev_date)}</td>
+      <td data-label="Due Date">${fmtDate(r.due_date)}</td>
+      <td data-label="Curr">${esc(r.currency)}</td>
+      <td data-label="Subtotal" class="num">${fmt(r.subtotal)}</td>
+      <td data-label="PPN (IDR)" class="num">${fmt(r.ppn_amount_idr)}</td>
+      <td data-label="Total IDR" class="num" style="font-weight:600;">${fmt(r.total_idr)}</td>
+      <td data-label="Status">${statusBadge(r.status)}</td>
     </tr>
   `).join('');
   tbody.querySelectorAll('tr[data-id]').forEach(tr => {
@@ -355,15 +355,15 @@ async function openDetail(invoiceId) {
   } else {
     linesEl.innerHTML = lines.map(l => `
       <tr>
-        <td>${l.line_no}</td>
-        <td style="font-family:monospace;font-size:12px;">${esc(l.item?.sku || '—')}</td>
-        <td>${esc(l.display_name || l.item?.name || '—')}</td>
-        <td class="num">${fmtInt(l.qty)}</td>
-        <td>${esc(l.qty_unit)}</td>
-        <td class="num">${fmt(l.unit_price)}</td>
-        <td class="num">${fmt(l.line_total)}</td>
-        <td class="num">${fmt(l.ppn_amount_idr)}</td>
-        <td style="font-size:12px;color:#6b7280;">${esc(l.remark || '')}</td>
+        <td data-label="Line">${l.line_no}</td>
+        <td data-label="SKU" style="font-family:monospace;font-size:12px;">${esc(l.item?.sku || '—')}</td>
+        <td data-label="Nama">${esc(l.display_name || l.item?.name || '—')}</td>
+        <td data-label="Qty" class="num">${fmtInt(l.qty)}</td>
+        <td data-label="Satuan">${esc(l.qty_unit)}</td>
+        <td data-label="Harga" class="num">${fmt(l.unit_price)}</td>
+        <td data-label="Total" class="num">${fmt(l.line_total)}</td>
+        <td data-label="PPN (IDR)" class="num">${fmt(l.ppn_amount_idr)}</td>
+        <td data-label="Remark" style="font-size:12px;color:#6b7280;">${esc(l.remark || '')}</td>
       </tr>
     `).join('');
   }
@@ -599,7 +599,7 @@ function addPayAllocRow() {
   const tr = document.createElement('tr');
   tr.dataset.allocId = state.payAllocCount;
   tr.innerHTML = `
-    <td>
+    <td data-label="Invoice">
       <select class="pay-alloc-invoice" required style="width:100%;padding:6px;border:1px solid #d0d5dd;border-radius:6px;">
         <option value="">— pilih invoice —</option>
         ${candidates.map(i =>
@@ -607,8 +607,8 @@ function addPayAllocRow() {
         ).join('')}
       </select>
     </td>
-    <td class="num pay-alloc-sisa" style="color:#6b7280;">—</td>
-    <td class="num">
+    <td data-label="Sisa Hutang" class="num pay-alloc-sisa" style="color:#6b7280;">—</td>
+    <td data-label="Jumlah Bayar" class="num">
       <input type="number" class="pay-alloc-amount" step="0.01" min="0.01" required
              style="width:100%;padding:6px;border:1px solid #d0d5dd;border-radius:6px;text-align:right;">
     </td>
@@ -792,16 +792,16 @@ async function loadPayments() {
 
     return `
       <tr>
-        <td style="font-family:monospace;font-size:12px;">${esc(r.payment_no)}</td>
-        <td>${fmtDate(r.payment_date)}</td>
-        <td>${esc(r.currency)}</td>
-        <td style="font-size:12px;">${esc(r.bank_coa_code)}</td>
-        <td class="num">${fmt(r.total_amount)}</td>
-        <td class="num">${fmt(totalIdrRow)}</td>
-        <td class="num" style="color:${selisihColor};">${selisihLabel}</td>
-        <td style="font-size:12px;">${invNos.length ? invNos.map(esc).join(', ') : '—'}</td>
-        <td style="font-size:12px;color:#6b7280;">${esc(r.note || '')}</td>
-        <td>
+        <td data-label="Payment No" style="font-family:monospace;font-size:12px;">${esc(r.payment_no)}</td>
+        <td data-label="Tanggal">${fmtDate(r.payment_date)}</td>
+        <td data-label="Curr">${esc(r.currency)}</td>
+        <td data-label="Bank" style="font-size:12px;">${esc(r.bank_coa_code)}</td>
+        <td data-label="Total" class="num">${fmt(r.total_amount)}</td>
+        <td data-label="Total IDR" class="num">${fmt(totalIdrRow)}</td>
+        <td data-label="Selisih Kurs" class="num" style="color:${selisihColor};">${selisihLabel}</td>
+        <td data-label="Invoice" style="font-size:12px;">${invNos.length ? invNos.map(esc).join(', ') : '—'}</td>
+        <td data-label="Catatan" style="font-size:12px;color:#6b7280;">${esc(r.note || '')}</td>
+        <td data-label="Aksi">
           ${state.canDeletePayment
             ? `<button class="btn-del-pay" data-id="${r.id}" data-no="${esc(r.payment_no)}"
                        style="background:#fee2e2;color:#991b1b;border:none;border-radius:5px;padding:4px 8px;font-size:12px;cursor:pointer;">
@@ -853,19 +853,19 @@ async function loadAging() {
       t0 += r.b0_30; t31 += r.b31_60; t60 += r.b60p; tAll += r.total;
       return `
         <tr>
-          <td>${esc(r.name)}</td>
-          <td class="num">${fmt(r.b0_30)}</td>
-          <td class="num">${fmt(r.b31_60)}</td>
-          <td class="num">${fmt(r.b60p)}</td>
-          <td class="num" style="font-weight:600;">${fmt(r.total)}</td>
+          <td data-label="Vendor">${esc(r.name)}</td>
+          <td data-label="0–30 hari" class="num">${fmt(r.b0_30)}</td>
+          <td data-label="31–60 hari" class="num">${fmt(r.b31_60)}</td>
+          <td data-label="60+ hari" class="num">${fmt(r.b60p)}</td>
+          <td data-label="Total" class="num" style="font-weight:600;">${fmt(r.total)}</td>
         </tr>`;
     }).join('') + `
       <tr style="background:#f9fafb;font-weight:600;">
-        <td>TOTAL</td>
-        <td class="num">${fmt(t0)}</td>
-        <td class="num">${fmt(t31)}</td>
-        <td class="num">${fmt(t60)}</td>
-        <td class="num">${fmt(tAll)}</td>
+        <td data-label="Vendor">TOTAL</td>
+        <td data-label="0–30 hari" class="num">${fmt(t0)}</td>
+        <td data-label="31–60 hari" class="num">${fmt(t31)}</td>
+        <td data-label="60+ hari" class="num">${fmt(t60)}</td>
+        <td data-label="Total" class="num">${fmt(tAll)}</td>
       </tr>`;
   } catch (err) {
     tbody.innerHTML = `<tr><td colspan="5" style="color:#dc2626;">${esc(err.message)}</td></tr>`;
@@ -926,7 +926,7 @@ function addAllocRow() {
   const invoices = state.clearingInvoices || [];
 
   tr.innerHTML = `
-    <td>
+    <td data-label="Invoice">
       <select class="alloc-invoice" required style="width:100%;padding:6px;border:1px solid #d0d5dd;border-radius:6px;">
         <option value="">— pilih invoice —</option>
         ${invoices.map(i =>
@@ -934,16 +934,16 @@ function addAllocRow() {
         ).join('')}
       </select>
     </td>
-    <td>
+    <td data-label="Line (opsional)">
       <select class="alloc-line" style="width:100%;padding:6px;border:1px solid #d0d5dd;border-radius:6px;">
         <option value="">— (invoice saja) —</option>
       </select>
     </td>
-    <td class="num">
+    <td data-label="Jumlah (IDR)" class="num">
       <input type="number" class="alloc-amount" step="0.01" min="0.01" required
              style="width:100%;padding:6px;border:1px solid #d0d5dd;border-radius:6px;text-align:right;">
     </td>
-    <td>
+    <td data-label="Catatan">
       <input type="text" class="alloc-note" maxlength="200"
              style="width:100%;padding:6px;border:1px solid #d0d5dd;border-radius:6px;">
     </td>
@@ -1087,13 +1087,13 @@ async function loadClearingHistory() {
 
   tbody.innerHTML = data.map(r => `
     <tr>
-      <td>${fmtDate(r.clearing_date)}</td>
-      <td style="font-family:monospace;font-size:12px;">${esc(r.invoice?.invoice_no || '—')}</td>
-      <td>${r.line?.line_no ?? '—'} — ${esc(r.line?.display_name || '—')}</td>
-      <td class="num">${fmt(r.amount_idr)}</td>
-      <td>${esc(r.note || '')}</td>
-      <td>${r.journal_id ? `<span style="background:#dbeafe;color:#1e40af;padding:2px 6px;border-radius:4px;">JV</span>` : '—'}</td>
-      <td>${r.created_at ? new Date(r.created_at).toLocaleString('id-ID') : '—'}</td>
+      <td data-label="Tanggal">${fmtDate(r.clearing_date)}</td>
+      <td data-label="Invoice" style="font-family:monospace;font-size:12px;">${esc(r.invoice?.invoice_no || '—')}</td>
+      <td data-label="Line">${r.line?.line_no ?? '—'} — ${esc(r.line?.display_name || '—')}</td>
+      <td data-label="Jumlah (IDR)" class="num">${fmt(r.amount_idr)}</td>
+      <td data-label="Catatan">${esc(r.note || '')}</td>
+      <td data-label="Jurnal">${r.journal_id ? `<span style="background:#dbeafe;color:#1e40af;padding:2px 6px;border-radius:4px;">JV</span>` : '—'}</td>
+      <td data-label="Oleh">${r.created_at ? new Date(r.created_at).toLocaleString('id-ID') : '—'}</td>
     </tr>
   `).join('');
 }
