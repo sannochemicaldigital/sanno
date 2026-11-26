@@ -7,6 +7,12 @@ import { listItems, createItem } from './items.js';
 import { supabase } from './supabase-client.js';
 import { listUnits, createUnit, updateUnit, deleteUnit, reactivateUnit } from './units.js';
 
+// Penanda build — dipakai untuk memastikan browser sudah memuat versi terbaru
+// (naikkan angka ini + query string di inventory.html setiap kali file diubah).
+const BUILD = 'v11.24.2';
+document.body.dataset.build = BUILD;
+console.log('[inventory-page] build', BUILD);
+
 function toast(msg, isError = false) {
   const el = document.getElementById('toast');
   el.textContent = msg;
@@ -45,9 +51,12 @@ function reasonLabel(r) {
 let allItems = [];
 let inventoryRows = [];
 let allUnits = [];
+// State kartu stok (dideklarasikan di atas agar aman dari TDZ saat init)
+const cardState = { item: null, rows: [], journalMap: {}, truncated: false };
+
 const perms = {
   create: false, stockIn: false, viewPrice: false, viewMovement: false,
-  stockAdjust: false,
+  stockAdjust: false, stockAdjustPost: false,
   opnameView: false, opnameCreate: false, opnameApprove: false,
   priceListView: false, priceListManage: false
 };
@@ -58,13 +67,25 @@ const invFilter = {
 };
 function renderJournalBadge(r) {
   if (!r.needs_journal) {
-    return '<span style="color:#9ca3af;">—</span>';
+    return '<span style="color:#9ca3af;" title="Tidak perlu jurnal (nilai selisih Rp 0)">—</span>';
   }
   if (r.journal_entry_id != null) {
     const tgl = r.journal_posted_at ? new Date(r.journal_posted_at).toLocaleDateString('id-ID') : '';
-    return `<span style="background:#d1fae5;color:#065f46;padding:2px 8px;border-radius:4px;font-weight:600;font-size:12px;">Sudah${tgl ? ' · ' + esc(tgl) : ''}</span>`;
+    const badge = `<span style="background:#d1fae5;color:#065f46;padding:2px 8px;border-radius:4px;font-weight:600;font-size:12px;">Sudah${tgl ? ' · ' + esc(tgl) : ''}</span>`;
+    const batal = perms.stockAdjustPost
+      ? ` <button type="button" class="btn btn-secondary" data-unpost-journal="${r.journal_entry_id}"
+                 style="padding:2px 8px;font-size:11px;"
+                 title="Batalkan posting jurnal ini (stok tidak berubah)">Batal</button>`
+      : '';
+    return badge + batal;
   }
-  return '<span style="background:#fee2e2;color:#991b1b;padding:2px 8px;border-radius:4px;font-weight:600;font-size:12px;">Belum dijurnal</span>';
+  const nilai = Math.abs(Number(r.qty_delta || 0)) * Number(r.avg_cost_snapshot || 0);
+  const tombol = perms.stockAdjustPost
+    ? ` <button type="button" class="btn btn-secondary" data-post-adjust="${r.adjustment_id}"
+               style="padding:2px 8px;font-size:11px;"
+               title="Posting jurnal · nilai selisih Rp ${fmt(nilai)}">Posting</button>`
+    : '';
+  return `<span style="background:#fee2e2;color:#991b1b;padding:2px 8px;border-radius:4px;font-weight:600;font-size:12px;">Belum dijurnal</span>${tombol}`;
 }
 
 // ---------- state tab koreksi stok ----------
@@ -82,8 +103,9 @@ let opnameInitialized = false;
 let currentOpnameId = null;
 let opnameLinesCache = [];
 let currentOpnameStatus = '';
-const opnameFilter = { search: '', onlyDelta: false, lineOffset: 0 };
-const OPNAME_LINE_LIMIT = 200;
+// get_opname() mengembalikan SEMUA line (jsonb) sekaligus, jadi line opname
+// tidak dipecah per halaman.
+const opnameFilter = { search: '', onlyDelta: false };
 let opnameLineReqSeq = 0;
 const opnameHistFilter = { search: '', status: '', from: '', to: '' };
 const OPNAME_HIST_LIMIT = 50;
@@ -120,6 +142,7 @@ let priceListHistReqSeq = 0;
   perms.viewPrice    = await hasPermission('inventory.item.view_price');
   perms.viewMovement = await hasPermission('inventory.movement.view');
   perms.stockAdjust  = await hasPermission('inventory.stock_adjust');
+  perms.stockAdjustPost = await hasPermission('inventory.stock_adjust.post');
   perms.opnameView   = await hasPermission('inventory.opname.view');
   perms.opnameCreate = await hasPermission('inventory.opname.create');
   perms.opnameApprove= await hasPermission('inventory.opname.approve');
@@ -184,6 +207,7 @@ let priceListHistReqSeq = 0;
   bindInventoryFilters();
   await loadUnitsAndFillDropdown();
   wireUnitsModal();
+  wireItemCard();
   await loadAll();
 })();
 
@@ -315,8 +339,8 @@ function renderInventoryTable() {
     const stockColor = stock < 0 ? '#b91c1c' : (stock === 0 ? '#6b7280' : '#1a1a1a');
 
     return `
-      <tr>
-        <td data-label="SKU">${esc(i.sku)}</td>
+      <tr class="row-clickable" data-sku="${esc(i.sku)}" tabindex="0" title="Klik untuk membuka kartu stok & histori mutasi">
+        <td data-label="SKU">${esc(i.sku)} <span style="color:#9ca3af;font-size:11px;">›</span></td>
         <td data-label="Nama">
           <div>${esc(i.name)}</div>
           ${isiLabel ? `<div style="font-size:11px;color:#9ca3af;">${esc(packagingLabel)} · ${esc(isiLabel)}</div>` : ''}
@@ -342,6 +366,420 @@ function renderInventoryTable() {
         <td data-label="Status">${statusHtml}</td>
       </tr>`;
   }).join('');
+}
+
+// ============================================================
+// KARTU STOK PER ITEM — dibuka dengan klik baris di Daftar Stok
+// Menampilkan: ringkasan stok + seluruh riwayat mutasi + saldo berjalan
+// (state `cardState` dideklarasikan di bagian atas file)
+// ============================================================
+
+// Tanggal DB (YYYY-MM-DD) -> tampilan dd/mm/yyyy
+function fmtDate(iso) {
+  if (!iso) return '—';
+  const s = String(iso);
+  return /^\d{4}-\d{2}-\d{2}/.test(s)
+    ? `${s.slice(8, 10)}/${s.slice(5, 7)}/${s.slice(0, 4)}`
+    : esc(s);
+}
+
+// qty di stock_movements selalu positif; arah ditentukan oleh type.
+// Untuk type 'adjust', arah diambil dari stock_adjustments.qty_delta.
+function signedMovementQty(m, adjMap) {
+  const q = Math.abs(Number(m.qty) || 0);
+  if (m.type === 'out') return -q;
+  if (m.type === 'adjust') {
+    const d = adjMap[m.id];
+    if (d != null && Number(d) !== 0) return Number(d);
+    return q;
+  }
+  return q;
+}
+
+function cardChip(label, valueHtml, color) {
+  return `
+    <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:8px 12px;min-width:104px;">
+      <div style="font-size:10px;color:#6b7280;text-transform:uppercase;letter-spacing:.4px;">${esc(label)}</div>
+      <div style="font-size:15px;font-weight:700;color:${color || '#1a1a1a'};">${valueHtml}</div>
+    </div>`;
+}
+
+function closeItemCard() {
+  const modal = document.getElementById('itemCardModal');
+  if (modal) modal.style.display = 'none';
+  cardState.item = null;
+  cardState.rows = [];
+  cardState.journalMap = {};
+  cardState.truncated = false;
+}
+
+async function openItemCard(sku) {
+  const modal = document.getElementById('itemCardModal');
+  if (!modal || !sku) return;
+
+  const tbody   = document.getElementById('tbody-item-card');
+  const titleEl = document.getElementById('cardItemTitle');
+  const subEl   = document.getElementById('cardItemSub');
+  const sumEl   = document.getElementById('cardSummary');
+  const infoEl  = document.getElementById('cardInfo');
+
+  modal.style.display = 'flex';
+  if (titleEl) titleEl.textContent = sku;
+  if (subEl) subEl.textContent = '';
+  if (sumEl) sumEl.innerHTML = '';
+  if (infoEl) infoEl.textContent = 'Memuat mutasi...';
+  if (tbody) tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:#9ca3af;">Memuat...</td></tr>';
+  const fromEl = document.getElementById('cardDateFrom');
+  const toEl   = document.getElementById('cardDateTo');
+  if (fromEl) fromEl.value = '';
+  if (toEl) toEl.value = '';
+
+  try {
+    const { data: item, error: e1 } = await supabase
+      .from('items')
+      .select('id, sku, name, unit, stock_qty, min_stock, avg_cost, is_active')
+      .eq('sku', sku)
+      .single();
+    if (e1) throw e1;
+
+    if (!perms.viewMovement) {
+      cardState.item = item;
+      cardState.rows = [];
+      cardState.journalMap = {};
+      renderItemCardHeader();
+      if (infoEl) infoEl.textContent = '';
+      if (tbody) tbody.innerHTML =
+        '<tr><td colspan="9" style="text-align:center;color:#b45309;">Riwayat mutasi memerlukan akses inventory.movement.view</td></tr>';
+      return;
+    }
+
+    const { data: movs, error: e2 } = await supabase
+      .from('stock_movements')
+      .select('id, movement_date, type, qty, unit_cost, total_cost, memo, ref_journal_id')
+      .eq('item_id', item.id)
+      .order('movement_date', { ascending: false })
+      .order('id', { ascending: false })
+      .limit(1000);
+    if (e2) throw e2;
+
+    // Arah koreksi stok (movement -> stock_adjustments.qty_delta)
+    let adjMap = {};
+    const { data: adjs, error: e3 } = await supabase
+      .from('stock_adjustments')
+      .select('movement_id, qty_delta')
+      .eq('item_id', item.id);
+    if (e3) {
+      console.warn('[kartu stok] gagal memuat stock_adjustments:', e3.message);
+    } else {
+      (adjs || []).forEach(a => {
+        if (a.movement_id != null) adjMap[a.movement_id] = Number(a.qty_delta);
+      });
+    }
+
+    // Nomor jurnal untuk kolom "Jurnal" (dipecah agar URL tidak kepanjangan)
+    let journalMap = {};
+    const jids = [...new Set((movs || []).map(m => m.ref_journal_id).filter(Boolean))];
+    for (let i = 0; i < jids.length; i += 100) {
+      const chunk = jids.slice(i, i + 100);
+      const { data: jrn, error: e4 } = await supabase
+        .from('journals')
+        .select('id, journal_no')
+        .in('id', chunk);
+      if (e4) { console.warn('[kartu stok] gagal memuat nomor jurnal:', e4.message); break; }
+      (jrn || []).forEach(j => { journalMap[j.id] = j.journal_no; });
+    }
+
+    cardState.item = item;
+    cardState.rows = (movs || []).map(m => ({ ...m, signed: signedMovementQty(m, adjMap) }));
+    cardState.journalMap = journalMap;
+    cardState.truncated = (movs || []).length >= 1000;
+
+    renderItemCardHeader();
+    renderItemCard();
+  } catch (err) {
+    console.error('openItemCard:', err);
+    if (infoEl) infoEl.textContent = '';
+    if (tbody) tbody.innerHTML =
+      `<tr><td colspan="9" style="color:#b91c1c;">Gagal memuat kartu stok: ${esc(err.message || err)}</td></tr>`;
+  }
+}
+
+// Ringkasan di kepala kartu stok
+function renderItemCardHeader() {
+  const item = cardState.item;
+  if (!item) return;
+
+  const inv = inventoryRows.find(r => r.sku === item.sku) || null;
+  const stock = Number(item.stock_qty) || 0;
+  const reserved = inv ? Number(inv.reserved_qty) || 0 : null;
+  const available = inv ? Number(inv.available_qty) || 0 : null;
+  const isLtr = String(item.unit || '').toLowerCase() === 'ltr';
+  const unitLabel = isLtr ? 'ltr' : 'kg';
+
+  const isi = inv ? (Number(isLtr ? inv.packaging_isi_ltr : inv.packaging_isi_kg) || 0) : 0;
+  const drumTxt = isi > 0
+    ? `${(stock / isi).toLocaleString('id-ID', { maximumFractionDigits: 2 })} ${esc(String(inv.packaging_nama || 'drum').toLowerCase())}`
+    : '';
+
+  const subEl = document.getElementById('cardItemSub');
+  if (subEl) {
+    const bits = [item.name || '', item.unit ? `satuan ${item.unit}` : ''];
+    if (!item.is_active) bits.push('NONAKTIF');
+    if (inv && inv.packaging_nama) {
+      bits.push(`${inv.packaging_nama}${isi > 0 ? ' · ' + isi + (isLtr ? ' ltr' : ' kg') : ''}`);
+    }
+    subEl.textContent = bits.filter(Boolean).join(' · ');
+  }
+
+  const stockColor = stock < 0 ? '#b91c1c' : (stock === 0 ? '#6b7280' : '#059669');
+  const chips = [
+    cardChip('Stok',
+      `${fmt(stock)} ${esc(unitLabel)}${drumTxt ? `<div style="font-size:11px;font-weight:400;color:#6b7280;">${drumTxt}</div>` : ''}`,
+      stockColor)
+  ];
+  if (reserved != null) chips.push(cardChip('Reserved', `${fmt(reserved)} ${esc(unitLabel)}`));
+  if (available != null) chips.push(cardChip('Available', `${fmt(available)} ${esc(unitLabel)}`, available <= 0 ? '#b91c1c' : ''));
+  chips.push(cardChip('Min Stok', `${fmt(item.min_stock)} ${esc(unitLabel)}`));
+  if (perms.viewPrice) chips.push(cardChip('HPP Rata-rata', fmt(item.avg_cost)));
+  chips.push(cardChip('Jumlah Mutasi', fmt(cardState.rows.length)));
+
+  const sumEl = document.getElementById('cardSummary');
+  if (sumEl) sumEl.innerHTML = chips.join('');
+}
+
+// Isi tabel kartu stok (kronologis + saldo berjalan)
+function renderItemCard() {
+  const tbody = document.getElementById('tbody-item-card');
+  const infoEl = document.getElementById('cardInfo');
+  const item = cardState.item;
+  if (!tbody || !item) return;
+
+  const fromEl = document.getElementById('cardDateFrom');
+  const toEl   = document.getElementById('cardDateTo');
+  const from = fromEl ? fromEl.value : '';
+  const to   = toEl ? toEl.value : '';
+
+  // Urut kronologis naik
+  const all = [...cardState.rows].sort((a, b) => {
+    const d = String(a.movement_date).localeCompare(String(b.movement_date));
+    return d !== 0 ? d : (Number(a.id) - Number(b.id));
+  });
+
+  // Saldo akhir = items.stock_qty, jadi saldo sebelum mutasi bisa diturunkan
+  const totalSigned = all.reduce((s, m) => s + m.signed, 0);
+  const saldoAwal = (Number(item.stock_qty) || 0) - totalSigned;
+  let running = saldoAwal;
+  const withSaldo = all.map(m => { running += m.signed; return { ...m, saldo_after: running }; });
+
+  const rows = withSaldo.filter(m =>
+    (!from || String(m.movement_date) >= from) && (!to || String(m.movement_date) <= to));
+
+  if (!rows.length) {
+    tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;color:#9ca3af;">${
+      all.length ? 'Tidak ada mutasi pada rentang tanggal ini' : 'Belum ada mutasi stok untuk item ini'}</td></tr>`;
+  } else {
+    tbody.innerHTML = rows.map(m => {
+      const typeLabel = m.type === 'in' ? 'Masuk'
+                      : m.type === 'out' ? 'Keluar'
+                      : m.type === 'adjust' ? (m.signed < 0 ? 'Koreksi −' : 'Koreksi +')
+                      : m.type;
+      const typeColor = m.type === 'in' ? '#059669'
+                      : m.type === 'out' ? '#b91c1c'
+                      : (m.signed < 0 ? '#b91c1c' : '#0891b2');
+      const jNo = m.ref_journal_id ? (cardState.journalMap[m.ref_journal_id] || '—') : '—';
+      return `
+        <tr>
+          <td data-label="Tanggal" style="white-space:nowrap;">${fmtDate(m.movement_date)}</td>
+          <td data-label="Tipe"><span style="color:${typeColor};font-weight:600;">${esc(typeLabel)}</span></td>
+          <td data-label="Masuk" class="num">${m.signed > 0 ? fmt(m.signed) : ''}</td>
+          <td data-label="Keluar" class="num">${m.signed < 0 ? fmt(Math.abs(m.signed)) : ''}</td>
+          <td data-label="Saldo" class="num${Number(m.saldo_after) < 0 ? ' neg' : ''}">${fmt(m.saldo_after)}</td>
+          <td data-label="Harga" class="num">${perms.viewPrice ? fmt(m.unit_cost) : '—'}</td>
+          <td data-label="Total" class="num">${perms.viewPrice ? fmt(m.total_cost) : '—'}</td>
+          <td data-label="Jurnal" style="white-space:nowrap;font-size:12px;">${esc(jNo)}</td>
+          <td data-label="Memo" style="font-size:12px;">${esc(m.memo || '—')}</td>
+        </tr>`;
+    }).join('');
+  }
+
+  if (infoEl) {
+    const unitLabel = String(item.unit || '').toLowerCase() === 'ltr' ? 'ltr' : 'kg';
+    const parts = [`${fmt(rows.length)} dari ${fmt(all.length)} mutasi ditampilkan`];
+    if (saldoAwal !== 0) parts.push(`saldo sebelum mutasi pertama ${fmt(saldoAwal)} ${unitLabel}`);
+    parts.push(`saldo akhir ${fmt(item.stock_qty)} ${unitLabel}`);
+    if (cardState.truncated) parts.push('hanya 1.000 mutasi terakhir dimuat');
+    infoEl.textContent = parts.join(' · ');
+  }
+
+  // Gulir ke bawah supaya mutasi terbaru terlihat
+  const wrap = tbody.closest('.table-wrap');
+  if (wrap) wrap.scrollTop = wrap.scrollHeight;
+}
+
+
+// Cetak kartu stok (A4 landscape, hanya baris yang sedang tampil)
+function printItemCard() {
+  const item = cardState.item;
+  if (!item) { toast('Buka kartu stok dulu', true); return; }
+
+  const fromEl = document.getElementById('cardDateFrom');
+  const toEl   = document.getElementById('cardDateTo');
+  const from = fromEl ? fromEl.value : '';
+  const to   = toEl ? toEl.value : '';
+
+  const all = [...cardState.rows].sort((a, b) => {
+    const d = String(a.movement_date).localeCompare(String(b.movement_date));
+    return d !== 0 ? d : (Number(a.id) - Number(b.id));
+  });
+  const totalSigned = all.reduce((s, m) => s + m.signed, 0);
+  let running = (Number(item.stock_qty) || 0) - totalSigned;
+  const rows = all
+    .map(m => { running += m.signed; return { ...m, saldo_after: running }; })
+    .filter(m => (!from || String(m.movement_date) >= from) && (!to || String(m.movement_date) <= to));
+
+  const unitLabel = String(item.unit || '').toLowerCase() === 'ltr' ? 'ltr' : 'kg';
+
+  const rowsHtml = rows.map(m => {
+    const typeLabel = m.type === 'in' ? 'Masuk'
+                    : m.type === 'out' ? 'Keluar'
+                    : m.type === 'adjust' ? (m.signed < 0 ? 'Koreksi -' : 'Koreksi +')
+                    : m.type;
+    const jNo = m.ref_journal_id ? (cardState.journalMap[m.ref_journal_id] || '-') : '-';
+    return `
+      <tr>
+        <td class="c">${fmtDate(m.movement_date)}</td>
+        <td class="c">${esc(typeLabel)}</td>
+        <td class="r">${m.signed > 0 ? fmt(m.signed) : ''}</td>
+        <td class="r">${m.signed < 0 ? fmt(Math.abs(m.signed)) : ''}</td>
+        <td class="r${Number(m.saldo_after) < 0 ? ' neg' : ''}">${fmt(m.saldo_after)}</td>
+        <td class="r">${perms.viewPrice ? fmt(m.unit_cost) : '-'}</td>
+        <td class="r">${perms.viewPrice ? fmt(m.total_cost) : '-'}</td>
+        <td>${esc(jNo)}</td>
+        <td class="memo">${esc(m.memo || '')}</td>
+      </tr>`;
+  }).join('') || '<tr><td colspan="9" class="c">Tidak ada mutasi</td></tr>';
+
+  const html = `<!DOCTYPE html>
+<html lang="id"><head><meta charset="UTF-8">
+<title>Kartu Stok ${esc(item.sku)}</title>
+<style>
+  @page { size: A4 landscape; margin: 10mm 8mm; }
+  html, body { margin: 0; padding: 0; background: #f3f4f6; }
+  * { box-sizing: border-box; }
+  .sheet { width: 297mm; min-height: 210mm; margin: 12px auto; padding: 10mm 8mm; background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,.15); font-family: Arial, Helvetica, sans-serif; font-size: 9px; color: #000; }
+  .head { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 6px; }
+  .head h1 { font-size: 13px; margin: 0 0 3px; letter-spacing: .3px; }
+  .head .meta { font-size: 9px; line-height: 1.4; }
+  .head .meta b { display: inline-block; min-width: 60px; }
+  table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+  th, td { border: 1px solid #000; padding: 2px 3px; vertical-align: top; font-size: 8.5px; }
+  th { background: #eee; font-weight: 700; }
+  td.c { text-align: center; } td.r { text-align: right; }
+  td.neg { color: #b91c1c; }
+  td.memo { font-size: 8px; }
+  thead { display: table-header-group; } tr { page-break-inside: avoid; }
+  .sign { display: flex; justify-content: space-between; margin-top: 20px; page-break-inside: avoid; }
+  .sign div { text-align: center; width: 30%; font-size: 9px; }
+  .sign .line { margin-top: 36px; border-top: 1px solid #000; padding-top: 3px; }
+  .actions { position: fixed; top: 8px; right: 8px; z-index: 10; }
+  .actions button { padding: 6px 12px; font-size: 13px; cursor: pointer; }
+  @media print { html, body { background: #fff; } .sheet { width: auto; min-height: 0; margin: 0; padding: 0; box-shadow: none; } .actions { display: none; } }
+</style></head>
+<body>
+  <div class="actions"><button onclick="window.print()">🖨️ Cetak</button></div>
+  <div class="sheet">
+  <div class="head">
+    <div>
+      <h1>KARTU STOK</h1>
+      <div class="meta">
+        <div><b>SKU</b> ${esc(item.sku)}</div>
+        <div><b>Nama</b> ${esc(item.name)}</div>
+        <div><b>Satuan</b> ${esc(item.unit || '')}</div>
+        ${(from || to)
+          ? `<div><b>Periode</b> ${from ? fmtDate(from) : 'awal'} s/d ${to ? fmtDate(to) : 'akhir'}</div>`
+          : ''}
+      </div>
+    </div>
+    <div class="meta" style="text-align:right;">
+      <div>Stok saat ini: <b>${fmt(item.stock_qty)} ${esc(unitLabel)}</b></div>
+      ${perms.viewPrice ? `<div>HPP rata-rata: <b>${fmt(item.avg_cost)}</b></div>` : ''}
+      <div>Total baris: <b>${fmt(rows.length)}</b></div>
+      <div>Dicetak: ${new Date().toLocaleString('id-ID')}</div>
+    </div>
+  </div>
+  <table>
+    <colgroup>
+      <col style="width:64px;"><col style="width:60px;"><col style="width:64px;"><col style="width:64px;">
+      <col style="width:70px;"><col style="width:64px;"><col style="width:76px;"><col style="width:96px;"><col>
+    </colgroup>
+    <thead>
+      <tr>
+        <th>Tanggal</th><th>Tipe</th><th>Masuk</th><th>Keluar</th>
+        <th>Saldo</th><th>Harga</th><th>Total</th><th>Jurnal</th><th>Memo</th>
+      </tr>
+    </thead>
+    <tbody>${rowsHtml}</tbody>
+  </table>
+  <div class="sign">
+    <div><div>Dibuat oleh</div><div class="line">(____________________)</div></div>
+    <div><div>Diperiksa</div><div class="line">(____________________)</div></div>
+  </div>
+  </div><!-- /.sheet -->
+</body></html>`;
+
+  const w = window.open('', '_blank');
+  if (!w) { toast('Popup diblokir browser. Izinkan popup untuk mencetak.', true); return; }
+  w.document.open();
+  w.document.write(html);
+  w.document.close();
+}
+
+// Pasang event klik baris + kontrol modal kartu stok
+function wireItemCard() {
+  const tbody = document.getElementById('tbody-inventory');
+  if (tbody && !tbody.dataset.cardWired) {
+    tbody.dataset.cardWired = '1';
+    tbody.addEventListener('click', (e) => {
+      const tr = e.target.closest('tr[data-sku]');
+      if (tr) openItemCard(tr.dataset.sku);
+    });
+    tbody.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      const tr = e.target.closest('tr[data-sku]');
+      if (tr) { e.preventDefault(); openItemCard(tr.dataset.sku); }
+    });
+  }
+
+  // Riwayat mutasi global juga bisa diklik -> buka kartu stok item tsb
+  const movTbody = document.getElementById('tbody-movements');
+  if (movTbody && !movTbody.dataset.cardWired) {
+    movTbody.dataset.cardWired = '1';
+    movTbody.addEventListener('click', (e) => {
+      const tr = e.target.closest('tr[data-sku]');
+      if (tr && tr.dataset.sku) openItemCard(tr.dataset.sku);
+    });
+  }
+
+  const modal = document.getElementById('itemCardModal');
+  if (modal && !modal.dataset.cardWired) {
+    modal.dataset.cardWired = '1';
+    document.getElementById('closeItemCardBtn')?.addEventListener('click', closeItemCard);
+    document.getElementById('cardFilterBtn')?.addEventListener('click', renderItemCard);
+    document.getElementById('cardResetBtn')?.addEventListener('click', () => {
+      const f = document.getElementById('cardDateFrom');
+      const t = document.getElementById('cardDateTo');
+      if (f) f.value = '';
+      if (t) t.value = '';
+      renderItemCard();
+    });
+    document.getElementById('cardPrintBtn')?.addEventListener('click', printItemCard);
+    document.getElementById('cardDateFrom')?.addEventListener('change', renderItemCard);
+    document.getElementById('cardDateTo')?.addEventListener('change', renderItemCard);
+    modal.addEventListener('click', (e) => { if (e.target === modal) closeItemCard(); });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && modal.style.display === 'flex') closeItemCard();
+    });
+  }
 }
 
 // ---------- dropdown stok masuk ----------
@@ -398,7 +836,7 @@ async function renderMovements() {
                       : '#6b7280';
 
       return `
-        <tr>
+        <tr class="row-clickable" data-sku="${esc(m.items?.sku || '')}" title="Klik untuk membuka kartu stok">
           <td data-label="Tanggal">${esc(m.movement_date)}</td>
           <td data-label="Item">${esc(m.items?.sku || '')} — ${esc(m.items?.name || '')}</td>
           <td data-label="Tipe"><span style="color:${typeColor};font-weight:600;">${esc(typeLabel)}</span></td>
@@ -595,12 +1033,37 @@ function wireStockAdjustHistory() {
   }
   if (fromEl) fromEl.addEventListener('change', async () => { adjustFilter.from = fromEl.value; await reloadStockAdjust(); });
   if (toEl)   toEl.addEventListener('change',   async () => { adjustFilter.to   = toEl.value;   await reloadStockAdjust(); });
-  if (chkUnjournaled) chkUnjournaled.addEventListener('change', () => {
+  if (chkUnjournaled) chkUnjournaled.addEventListener('change', async () => {
     adjustFilter.onlyUnjournaled = chkUnjournaled.checked;
+    // Filter dijalankan di sisi klien, jadi semua halaman harus termuat dulu.
+    // Kalau tidak, koreksi "belum dijurnal" di halaman berikutnya tidak ikut tampil.
+    if (adjustFilter.onlyUnjournaled) await loadAllStockAdjustPages();
     renderStockAdjustRows(adjustTotalCount);
   });
   if (refreshBtn) refreshBtn.addEventListener('click', () => reloadStockAdjust());
   if (moreBtn)    moreBtn.addEventListener('click', () => loadStockAdjust(true));
+
+  const postAllBtn = document.getElementById('saPostAllBtn');
+  if (postAllBtn) {
+    postAllBtn.style.display = perms.stockAdjustPost ? 'inline-block' : 'none';
+    postAllBtn.addEventListener('click', onPostAllAdjustments);
+  }
+
+  // Tombol "Posting" / "Batal" di kolom Jurnal (delegasi, karena baris dirender ulang).
+  const tbody = document.getElementById('tbody-stock-adjust');
+  if (tbody) {
+    tbody.addEventListener('click', async (e) => {
+      const btnPost = e.target.closest('[data-post-adjust]');
+      if (btnPost) {
+        await postStockAdjustments({ ids: [Number(btnPost.dataset.postAdjust)] });
+        return;
+      }
+      const btnUnpost = e.target.closest('[data-unpost-journal]');
+      if (btnUnpost) {
+        await unpostStockAdjustmentJournal(Number(btnUnpost.dataset.unpostJournal));
+      }
+    });
+  }
 }
 
 async function reloadStockAdjust() {
@@ -613,6 +1076,20 @@ async function reloadStockAdjust() {
   if (info) info.textContent = '';
   adjustRowsCache = [];
   await loadStockAdjust(false);
+  // Filter "hanya belum dijurnal" dijalankan di sisi klien -> muat semua halaman
+  // supaya hasilnya tidak terpotong pada 50 baris pertama.
+  if (adjustFilter.onlyUnjournaled) await loadAllStockAdjustPages();
+}
+
+// Muat sisa halaman koreksi stok satu per satu.
+async function loadAllStockAdjustPages() {
+  let guard = 0;
+  while (adjustOffset < adjustTotalCount && guard < 100) {
+    const before = adjustOffset;
+    await loadStockAdjust(true);
+    if (adjustOffset === before) break; // gagal memuat -> berhenti, jangan loop
+    guard += 1;
+  }
 }
 
 async function loadStockAdjust(append = false) {
@@ -674,7 +1151,7 @@ function renderStockAdjustRows(totalCount) {
           <td data-label="Alasan">${esc(reasonLabel(r.reason))}</td>
           <td data-label="Memo">${esc(r.memo || '—')}</td>
           <td data-label="Oleh">${esc(r.created_by_name || '—')}</td>
-          <td data-label="Jurnal">${journalBadge}</td>
+          <td data-label="Jurnal" style="white-space:nowrap;">${journalBadge}</td>
         </tr>`;
     }).join('');
   }
@@ -686,6 +1163,171 @@ function renderStockAdjustRows(totalCount) {
     info.textContent = adjustFilter.onlyUnjournaled
       ? `Menampilkan ${shown} (belum dijurnal) dari ${adjustRowsCache.length} termuat`
       : `Menampilkan ${Math.min(adjustRowsCache.length, total)} dari ${total}`;
+  }
+
+  // Tombol "Muat lebih banyak" hanya berguna kalau masih ada halaman berikutnya.
+  const moreBtn = document.getElementById('saMoreBtn');
+  if (moreBtn) moreBtn.style.display = adjustOffset < adjustTotalCount ? 'inline-block' : 'none';
+}
+
+// ============================================================
+// POSTING JURNAL KOREKSI STOK (RPC post_stock_adjustment_journal)
+// 1 jurnal ADJ-YYYYMM-NNNN per tanggal:
+//   stok kurang -> Dr 5-2400 Beban Selisih Stok / Cr 1-1300 Persediaan
+//   stok lebih  -> Dr 1-1300 Persediaan / Cr 5-2400 Beban Selisih Stok
+// ============================================================
+// Panggil RPC posting koreksi stok.
+// ids = null -> mode massal di server (memakai p_from / p_to).
+async function rpcPostStockAdjustmentJournal({ ids = null, from = null, to = null, dryRun = false }) {
+  const { data, error } = await supabase.rpc('post_stock_adjustment_journal', {
+    p_ids: ids,
+    p_memo: null,
+    p_from: from,
+    p_to: to,
+    p_dry_run: dryRun
+  });
+  if (error) throw error;
+  return data || {};
+}
+
+async function postStockAdjustments({ ids = null, from = null, to = null, isBulk = false } = {}) {
+  if (!perms.stockAdjustPost) {
+    toast('Tidak ada akses posting jurnal koreksi stok', true);
+    return;
+  }
+  const list = ids
+    ? ids.map(Number).filter(n => Number.isInteger(n) && n > 0)
+    : null;
+  if (ids && !list.length) return;
+
+  const postAllBtn = document.getElementById('saPostAllBtn');
+  if (isBulk && postAllBtn) {
+    postAllBtn.disabled = true;
+    postAllBtn.textContent = 'Memposting...';
+  }
+
+  try {
+    const res = await rpcPostStockAdjustmentJournal({ ids: list, from, to, dryRun: false });
+    const posted = Number(res.posted_count || 0);
+    const zero = Number(res.zero_value_count || 0);
+    const skipped = Number(res.skipped_count || 0);
+    const journals = Array.isArray(res.journals) ? res.journals : [];
+    const nomor = journals.map(j => j.journal_no).filter(Boolean);
+
+    if (posted === 0 && zero === 0) {
+      toast(skipped > 0
+        ? 'Tidak ada yang diposting — semua koreksi sudah dijurnal'
+        : 'Tidak ada yang diposting', true);
+    } else if (posted === 0) {
+      // Semua target bernilai Rp 0: tidak ada jurnal, hanya status yang dirapikan.
+      toast(`${zero} koreksi bernilai Rp 0 ditandai "tidak perlu jurnal"` +
+        (skipped > 0 ? `, ${skipped} dilewati` : ''));
+    } else {
+      let msg = `✓ ${posted} koreksi dijurnal (${journals.length} jurnal)`;
+      if (nomor.length) msg += ': ' + nomor.join(', ');
+      toast(msg);
+    }
+    if (zero > 0 && posted > 0) {
+      setTimeout(() => toast(`${zero} koreksi bernilai Rp 0 ditandai "tidak perlu jurnal"`), 2700);
+    }
+
+    await reloadStockAdjust();
+  } catch (err) {
+    toast('Gagal posting: ' + (err.message || err), true);
+  } finally {
+    if (isBulk && postAllBtn) {
+      postAllBtn.disabled = false;
+      postAllBtn.textContent = 'Posting semua belum dijurnal';
+    }
+  }
+}
+
+async function onPostAllAdjustments() {
+  if (!perms.stockAdjustPost) {
+    toast('Tidak ada akses posting jurnal koreksi stok', true);
+    return;
+  }
+
+  const postAllBtn = document.getElementById('saPostAllBtn');
+  if (postAllBtn) {
+    postAllBtn.disabled = true;
+    postAllBtn.textContent = 'Menghitung...';
+  }
+
+  const from = adjustFilter.from || null;
+  const to = adjustFilter.to || null;
+
+  try {
+    // Pratinjau dari server (tidak menulis) -> konfirmasi dengan angka pasti.
+    const prev = await rpcPostStockAdjustmentJournal({ from, to, dryRun: true });
+    const count = Number(prev.count || 0);
+
+    if (!count) {
+      toast('Tidak ada koreksi yang perlu dijurnal', true);
+      return;
+    }
+
+    const locked = Array.isArray(prev.locked_dates) ? prev.locked_dates : [];
+    if (locked.length) {
+      toast('Tidak bisa posting: periode terkunci (' + locked.join(', ') + ')', true);
+      return;
+    }
+
+    const rincian = (Array.isArray(prev.per_date) ? prev.per_date : [])
+      .map(d => `  • ${d.date}: ${d.items} item — Rp ${fmt(d.value)}`)
+      .join('\n');
+    const rentang = (from || to)
+      ? `\nFilter tanggal: ${from || '…'} s/d ${to || '…'}`
+      : '';
+    const nol = Number(prev.zero_value_count || 0);
+    const pesan =
+      `Posting ${count} koreksi stok ke jurnal?${rentang}\n\n` +
+      `Total nilai selisih: Rp ${fmt(prev.total_value)}\n` +
+      (rincian ? `\nRincian per tanggal:\n${rincian}\n` : '') +
+      `\nDibuat 1 jurnal per tanggal (ADJ-YYYYMM-NNNN).\n` +
+      (nol > 0
+        ? (nol === count
+            ? `⚠️ SEMUA ${count} koreksi bernilai Rp 0 — tidak ada jurnal yang dibuat, ` +
+              `statusnya hanya ditandai "tidak perlu jurnal".\n`
+            : `${nol} koreksi bernilai Rp 0 akan ditandai "tidak perlu jurnal".\n`)
+        : '') +
+      `Stok item TIDAK diubah oleh posting ini.`;
+    if (!confirm(pesan)) return;
+
+    await postStockAdjustments({ from, to, isBulk: true });
+  } catch (err) {
+    toast('Gagal menghitung: ' + (err.message || err), true);
+  } finally {
+    if (postAllBtn) {
+      postAllBtn.disabled = false;
+      postAllBtn.textContent = 'Posting semua belum dijurnal';
+    }
+  }
+}
+
+async function unpostStockAdjustmentJournal(journalId) {
+  if (!perms.stockAdjustPost) {
+    toast('Tidak ada akses membatalkan posting jurnal koreksi stok', true);
+    return;
+  }
+  if (!journalId) return;
+
+  const pesan =
+    `Batalkan posting jurnal koreksi stok?\n\n` +
+    `Jurnal akan DIHAPUS dan seluruh koreksi di dalamnya kembali berstatus ` +
+    `"Belum dijurnal".\nStok item TIDAK berubah.`;
+  if (!confirm(pesan)) return;
+
+  try {
+    const { data, error } = await supabase.rpc('unpost_stock_adjustment_journal', {
+      p_journal_id: Number(journalId)
+    });
+    if (error) throw error;
+    const res = data || {};
+    toast(`✓ Posting dibatalkan (${Number(res.unposted_count || 0)} koreksi, jurnal ${res.journal_no || ''})`);
+    await reloadStockAdjust();
+  } catch (err) {
+    toast('Gagal batalkan posting: ' + (err.message || err), true);
   }
 }
 
@@ -708,8 +1350,6 @@ async function initOpnameTab() {
   });
   const refreshHist = document.getElementById('opnameHistRefreshBtn');
   if (refreshHist) refreshHist.addEventListener('click', () => reloadOpnameHistory());
-  const moreLines = document.getElementById('opnameLinesMoreBtn');
-  if (moreLines) moreLines.style.display = 'none';
 
   wireOpnameHistory();
   await reloadOpnameHistory();
@@ -937,15 +1577,19 @@ function wireOpnameLineInputs() {
   });
 }
 
+// Kirim SEMUA line (bukan hanya yang terisi). Kalau line yang sudah pernah
+// disimpan lalu dikosongkan tidak ikut dikirim, DB tetap menyimpan qty lama
+// sehingga opname bisa mengeksekusi selisih yang sudah dibatalkan user.
+// qty_physical null akan di-set NULL oleh save_opname_lines().
 function collectOpnameLinePayload() {
-  return opnameLinesCache
-    .filter(l => l.qty_physical != null && l.qty_physical !== '')
-    .map(l => ({
-      line_id: l.line_id,
-      qty_physical: Number(l.qty_physical),
-      reason: l.reason || null,
-      memo: l.memo || null
-    }));
+  return opnameLinesCache.map(l => ({
+    line_id: l.line_id,
+    qty_physical: (l.qty_physical == null || l.qty_physical === '')
+      ? null
+      : Number(l.qty_physical),
+    reason: l.reason || null,
+    memo: l.memo || null
+  }));
 }
 
 async function saveOpnameDraft() {
@@ -1550,15 +2194,25 @@ function collectPriceListChanges(itemIdOnly = null) {
 
     const priceRaw = priceEl.value;
     const discRaw  = discEl?.value ?? '0';
-    const price = priceRaw === '' ? 0 : Number(priceRaw);
-    const disc  = discRaw === '' ? 0 : Number(discRaw);
+    const row = priceListRowsCache.find(x => Number(x.item_id) === itemId);
+    const label = row ? `${row.sku} — ${row.item_name}` : `#${itemId}`;
+
+    // Harga kosong TIDAK boleh diam-diam disimpan sebagai 0.
+    // Untuk menghapus harga, pakai tombol "Hapus" di baris tersebut.
+    if (String(priceRaw).trim() === '') {
+      toast(`Harga ${label} masih kosong — isi harga, atau pakai tombol Hapus`, true);
+      return null;
+    }
+
+    const price = Number(priceRaw);
+    const disc  = String(discRaw).trim() === '' ? 0 : Number(discRaw);
 
     if (isNaN(price) || price < 0) {
-      toast(`Harga tidak valid untuk item ${itemId}`, true);
+      toast(`Harga tidak valid untuk ${label}`, true);
       return null;
     }
     if (isNaN(disc) || disc < 0 || disc > 100) {
-      toast(`Diskon harus 0–100 untuk item ${itemId}`, true);
+      toast(`Diskon harus 0–100 untuk ${label}`, true);
       return null;
     }
 
@@ -1570,7 +2224,10 @@ function collectPriceListChanges(itemIdOnly = null) {
 async function savePriceListHandler(mode = 'bulk', itemIdOnly = null) {
   if (!perms.priceListManage) { toast('Tidak ada akses ubah harga', true); return; }
 
-  const lines = collectPriceListChanges(itemIdOnly);
+  // Selalu kirim SEMUA baris yang berubah. Dulu tombol "Simpan" per baris hanya
+  // mengirim baris itu, lalu reload setelah simpan membuang perubahan baris lain
+  // tanpa peringatan (data hilang diam-diam).
+  const lines = collectPriceListChanges(null);
   if (lines === null) return;
   if (!lines.length) { toast('Tidak ada perubahan', true); return; }
 
@@ -1757,10 +2414,33 @@ async function loadPriceListHistory(append = false) {
   }
 }
 
-function printPriceListForm() {
+async function printPriceListForm() {
   if (!priceListRowsCache.length) {
     toast('Tidak ada data untuk dicetak', true);
     return;
+  }
+
+  // Memuat semua halaman = me-render ulang tabel, jadi perubahan yang belum
+  // disimpan akan hilang. Minta simpan dulu.
+  if (priceListDirty.size > 0) {
+    toast('Simpan dulu perubahan harga yang belum tersimpan sebelum mencetak', true);
+    return;
+  }
+
+  // Muat semua halaman dulu. Tanpa ini, cetakan hanya memuat PRICE_LIST_LIMIT
+  // baris pertama dan item sisanya hilang dari form harga resmi.
+  if (priceListOffset < priceListTotalCount) {
+    let guard = 0;
+    while (priceListOffset < priceListTotalCount && guard < 100) {
+      const before = priceListOffset;
+      await loadPriceList(true);
+      if (priceListOffset === before) break; // gagal memuat -> berhenti, jangan loop
+      guard += 1;
+    }
+    if (priceListOffset < priceListTotalCount) {
+      toast(`Gagal memuat semua item (${priceListOffset} dari ${priceListTotalCount}). Cetakan dibatalkan.`, true);
+      return;
+    }
   }
 
   const shortName = (s, max = 40) => {
@@ -1958,21 +2638,21 @@ async function renderUnitsList() {
         <tbody>
           ${rows.map(u => `
             <tr data-unit-id="${u.id}" style="border-bottom:1px solid #f3f4f6;${u.is_active ? '' : 'opacity:.55;'}">
-              <td style="padding:6px 4px;font-family:'Courier New',monospace;font-size:12px;">${esc(u.code)}</td>
-              <td style="padding:6px 4px;">
+              <td data-label="Kode" style="padding:6px 4px;font-family:'Courier New',monospace;font-size:12px;">${esc(u.code)}</td>
+              <td data-label="Nama" style="padding:6px 4px;">
                 <input type="text" class="unit-name-input" value="${esc(u.name)}" maxlength="80"
                        style="width:100%;padding:4px 6px;border:1px solid #d0d5dd;border-radius:5px;font-size:13px;">
               </td>
-              <td style="padding:6px 4px;text-align:right;">
+              <td data-label="Urutan" style="padding:6px 4px;text-align:right;">
                 <input type="number" class="unit-sort-input" value="${u.sort_order || 0}"
                        style="width:70px;padding:4px 6px;border:1px solid #d0d5dd;border-radius:5px;font-size:13px;text-align:right;">
               </td>
-              <td style="padding:6px 4px;text-align:center;font-size:12px;">
+              <td data-label="Status" style="padding:6px 4px;text-align:center;font-size:12px;">
                 ${u.is_active
                   ? '<span style="background:#d1fae5;color:#065f46;padding:2px 6px;border-radius:4px;font-weight:600;">Aktif</span>'
                   : '<span style="background:#e5e7eb;color:#6b7280;padding:2px 6px;border-radius:4px;font-weight:600;">Nonaktif</span>'}
               </td>
-              <td style="padding:6px 4px;text-align:right;white-space:nowrap;">
+              <td data-label="Aksi" style="padding:6px 4px;text-align:right;white-space:nowrap;">
                 <button type="button" class="btn btn-primary unit-save-btn"
                         style="padding:4px 10px;font-size:12px;">Simpan</button>
                 ${u.is_active
