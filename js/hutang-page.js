@@ -140,7 +140,8 @@ const state = {
   canViewPlan: false,
   canManagePlan: false,
   plans: [],
-  plansLoaded: false
+  plansLoaded: false,
+  planInvoiceSearch: ''
 };
 
 // ============================================================
@@ -1044,19 +1045,56 @@ async function fillPlanInvoiceOptions() {
   if (!(state.payInvoicesCache || []).length) {
     await loadPaymentInvoices();
   }
+  renderPlanInvoiceOptions();
+}
 
+// Filter pencarian: setiap kata yang diketik harus cocok dengan nomor invoice
+// ATAU nama vendor (tidak peka huruf besar/kecil).
+function planInvoiceMatches(inv, q) {
+  if (!q) return true;
+  const hay = `${inv.invoice_no || ''} ${inv.partner?.name || ''}`.toLowerCase();
+  return q.split(/\s+/).filter(Boolean).every(tok => hay.includes(tok));
+}
+
+// Render ulang opsi dropdown sesuai kotak pencarian (tanpa query ulang ke DB).
+function renderPlanInvoiceOptions() {
+  const sel = document.getElementById('plInvoice');
+  if (!sel) return;
+
+  const q = (state.planInvoiceSearch || '').trim().toLowerCase();
+  const qRaw = (state.planInvoiceSearch || '').trim();
   const queued = new Set((state.plans || []).map(p => Number(p.invoice_id)));
-  const candidates = (state.payInvoicesCache || []).filter(i =>
+  const available = (state.payInvoicesCache || []).filter(i =>
     Number(i.sisa) > 0.01 && !queued.has(Number(i.id))
   );
-  const prev = sel.value;
+  const matches = available.filter(i => planInvoiceMatches(i, q));
 
-  sel.innerHTML = '<option value="">— pilih invoice —</option>' + candidates.map(i =>
+  const prev = sel.value;
+  const prevItem = prev ? available.find(i => String(i.id) === prev) : null;
+  // Invoice yang sudah terpilih tetap ditampilkan walau tidak cocok pencarian,
+  // supaya mengetik di kotak cari tidak menghapus pilihan secara diam-diam.
+  const list = (prevItem && !matches.includes(prevItem)) ? [prevItem, ...matches] : matches;
+
+  sel.innerHTML = '<option value="">— pilih invoice —</option>' + list.map(i =>
     `<option value="${i.id}" data-curr="${esc(i.currency || 'IDR')}" data-sisa="${Number(i.sisa) || 0}">` +
     `${esc(i.invoice_no)} — ${esc(i.partner?.name || '')} — sisa ${esc(i.currency || 'IDR')} ${fmt(i.sisa)}</option>`
   ).join('');
 
-  if (prev && candidates.some(c => String(c.id) === prev)) sel.value = prev;
+  sel.value = prevItem ? prev : '';
+
+  const countEl = document.getElementById('plInvCount');
+  if (countEl) {
+    if (!available.length) {
+      countEl.textContent = 'Tidak ada invoice bersisa yang belum masuk antrian.';
+    } else if (q) {
+      countEl.textContent = matches.length
+        ? `${matches.length} dari ${available.length} invoice cocok dengan "${qRaw}".`
+        : `Tidak ada invoice cocok dengan "${qRaw}".`;
+    } else {
+      countEl.textContent = `${available.length} invoice siap dipilih — ketik nomor invoice / vendor untuk memfilter.`;
+    }
+  }
+
   onPlanInvoiceChange();
 }
 
@@ -1084,12 +1122,17 @@ function onPlanInvoiceChange() {
 function resetPlanForm() {
   const sel = document.getElementById('plInvoice');
   if (sel) sel.value = '';
+  const searchEl = document.getElementById('plInvSearch');
+  if (searchEl) searchEl.value = '';
+  state.planInvoiceSearch = '';
   const amountEl = document.getElementById('plAmount');
   if (amountEl) amountEl.value = '';
   const noteEl = document.getElementById('plNote');
   if (noteEl) noteEl.value = '';
   const dateEl = document.getElementById('plDate');
   if (dateEl) dateEl.value = new Date().toISOString().slice(0, 10);
+  renderPlanInvoiceOptions();          // tampilkan lagi seluruh opsi
+  void fillPlanInvoiceOptions();       // pastikan cache invoice terisi bila belum
   onPlanInvoiceChange();
 }
 
@@ -1124,6 +1167,7 @@ async function submitPlan() {
     });
     toast(`✓ Invoice masuk antrian rencana bayar (${currency} ${fmt(amount)})`);
     resetPlanForm();
+    document.getElementById('plInvSearch')?.focus();
     await loadPlans();
   } catch (err) {
     toast('Gagal: ' + (err.message || err), true);
@@ -1213,6 +1257,41 @@ function bindPlanTab() {
   document.getElementById('plInvoice')?.addEventListener('change', onPlanInvoiceChange);
   document.getElementById('plSaveBtn')?.addEventListener('click', submitPlan);
   document.getElementById('plResetBtn')?.addEventListener('click', resetPlanForm);
+
+  // Kotak pencarian invoice/vendor: filter opsi dropdown tanpa query ulang.
+  const searchEl = document.getElementById('plInvSearch');
+  if (searchEl) {
+    let tmr = null;
+    const applySearch = () => {
+      state.planInvoiceSearch = searchEl.value || '';
+      renderPlanInvoiceOptions();
+    };
+    searchEl.addEventListener('input', () => {
+      clearTimeout(tmr);
+      tmr = setTimeout(applySearch, 200);
+    });
+    searchEl.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        searchEl.value = '';
+        applySearch();
+        return;
+      }
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        clearTimeout(tmr);
+        applySearch();
+        // Enter = pilih hasil pertama, lalu langsung ke kolom nominal.
+        const sel = document.getElementById('plInvoice');
+        if (sel && sel.options.length > 1) {
+          sel.selectedIndex = 1;
+          onPlanInvoiceChange();
+          document.getElementById('plAmount')?.focus();
+        }
+      }
+    });
+  }
+
   document.getElementById('planRefreshBtn')?.addEventListener('click', async () => {
     state.plansLoaded = false;
     await loadPlans();
