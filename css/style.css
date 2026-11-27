@@ -473,3 +473,63 @@ a.btn { display: inline-block; text-decoration: none; text-align: center; }
   #tab-plan .plan-move, #tab-plan .btn-plan-del, #tab-plan #planFormCard { display: none !important; }
 }
 
+/* ==== Freeze header tabel: Piutang / Hutang / Inventory (v11.35) ====
+   `.table-wrap` hanya punya overflow-x, sehingga judul kolom ikut hilang
+   saat daftar digulir ke bawah. Di sini (khusus halaman ber-body
+   class="freeze-head") wadah tabel diberi tinggi maksimum + overflow:auto
+   supaya <thead> bisa position: sticky — pola sama dengan Buku Besar
+   (.ledger-scroll) dan Kartu Stok (#itemCardModal).
+   CATATAN CAKUPAN:
+     - Selector dibatasi `.tab-panel` + body.freeze-head, jadi halaman lain
+       (master/reports/settings/rekonsiliasi-bank) tidak berubah.
+     - Modal (#detailModal / #itemCardModal / #unitsModal) ada di luar
+       .tab-panel sehingga tidak kena; modal tetap pakai scroll sendiri.
+     - max-height memakai viewport: tabel pendek tidak terpotong (max-height
+       hanya berlaku bila isinya lebih tinggi), dan pada layar <=640px
+       (tabel berubah jadi kartu) aturan ini dimatikan.
+   Tinggi 210px = perkiraan topbar + tabs + judul/filter di atas tabel,
+   supaya seluruh kotak tabel masih muat di layar tanpa harus scroll halaman
+   dulu. */
+body.freeze-head .tab-panel .table-wrap {
+  max-height: calc(100vh - 210px);
+  overflow: auto;
+  border: 1px solid #eef0f3;
+  border-radius: 8px;
+}
+body.freeze-head .tab-panel .table-wrap > table > thead th {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background-color: #f3f4f6;
+  box-shadow: inset 0 -1px 0 #e5e7eb;
+}
+/* Baris TOTAL (mis. <tfoot id="tfoot-plans"> di Hutang → Rencana Bayar)
+   ikut menempel di dasar kotak supaya total tetap terlihat. */
+body.freeze-head .tab-panel .table-wrap > table > tfoot td {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  background-color: #f9fafb;
+  box-shadow: inset 0 1px 0 #d0d5dd;
+}
+@media (max-width: 640px) {
+  /* <=640px tabel berubah jadi kartu (thead disembunyikan) -> jangan dipotong */
+  body.freeze-head .tab-panel .table-wrap {
+    max-height: none;
+    border: 0;
+    overflow-x: auto;
+  }
+}
+@media print {
+  body.freeze-head .tab-panel .table-wrap {
+    max-height: none !important;
+    overflow: visible !important;
+    border: 0;
+  }
+  body.freeze-head .tab-panel .table-wrap > table > thead th,
+  body.freeze-head .tab-panel .table-wrap > table > tfoot td {
+    position: static;
+    box-shadow: none;
+  }
+}
+
