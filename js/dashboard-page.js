@@ -3,7 +3,7 @@ import './input-clear.js';
 import { requireAuth, logout } from './auth.js';
 import { renderNav, requirePageAccess } from './access.js';
 import { preloadPermissions, hasPermission } from './permissions.js';
-import { dashboardBalances, bankBalanceSummary, plafonRkHutang, kasBalanceSummary } from './reports.js?v=11.36';
+import { dashboardBalances, bankBalanceSummary, plafonRkHutang, kasBalanceSummary } from './reports.js?v=11.37';
 import { supabase } from './supabase-client.js';
 
 // ============================================================
@@ -24,6 +24,20 @@ const kurRata = (rupiah, nominal) => {
   if (!n) return '—';
   return Number(Number(rupiah || 0) / n).toLocaleString('id-ID', { maximumFractionDigits: 2 });
 };
+// Nominal plafon RK: rupiah tanpa desimal, valas 2 desimal.
+const fmtPlafon = (cur, n) => String(cur || 'IDR').toUpperCase() === 'IDR'
+  ? fmtShort(n)
+  : fmtValuta(cur, n);
+// Status pemakaian plafon RK (level dari plafonUsage() di bank-accounts.js).
+// ok < 80% · warn >= 80% · crit >= 95% · over >= 100%
+const PLAFON_STYLE = {
+  ok:   { color: '#059669', label: 'aman' },
+  warn: { color: '#b45309', label: 'mendekati plafon' },
+  crit: { color: '#b91c1c', label: 'plafon hampir penuh' },
+  over: { color: '#7f1d1d', label: 'MELEBIHI PLAFON' }
+};
+const plafonSt = info => PLAFON_STYLE[info?.level] || PLAFON_STYLE.ok;
+
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({
   '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
 }[c]));
@@ -344,6 +358,50 @@ async function renderHutangCard() {
 }
 
 // ============================================================
+// KETERANGAN + PERINGATAN PLAFON RK
+// ------------------------------------------------------------
+// Nilai plafon per akun berasal dari DB (accounts.plafon_rk) dan bisa
+// diubah di Pengaturan > Bank. Dipakai kartu Saldo Bank & Hutang Bank.
+// ============================================================
+function plafonKetHtml(i) {
+  if (!i.plafon) return '';
+  const info = i.plafon_info;
+  if (!info) {
+    return '<span style="color:#9ca3af;">Plafon RK · nilai belum diisi</span>';
+  }
+  const st = plafonSt(info);
+  const tebal = info.level === 'ok' ? 500 : 700;
+  const sisa = info.sisa < 0
+    ? `kelebihan ${fmtPlafon(info.currency, Math.abs(info.sisa))}`
+    : `sisa ${fmtPlafon(info.currency, info.sisa)}`;
+  const tanda = info.level === 'ok' ? '' : ` · ⚠ ${st.label}`;
+  return `<span style="color:${st.color};font-weight:${tebal};"
+      title="Plafon RK ${esc(info.currency)} — terpakai ${info.pct_label}">
+      Plafon ${fmtPlafon(info.currency, info.amount)} · terpakai ${info.pct_label}${tanda}
+    </span>
+    <div style="font-size:10px;color:${st.color};">${sisa}</div>`;
+}
+
+// Banner peringatan otomatis bila ada rekening plafon RK >= 80% (warn),
+// >= 95% (crit) atau melebihi plafon (over).
+function plafonAlertHtml(items) {
+  const kena = (items || []).filter(i => i.plafon_info && i.plafon_info.level !== 'ok');
+  if (!kena.length) return '';
+  const berat = kena.some(i => ['crit', 'over'].includes(i.plafon_info.level));
+  const bg = berat ? '#fee2e2' : '#fef3c7';
+  const fg = berat ? '#991b1b' : '#92400e';
+  const isi = kena.map(i => {
+    const info = i.plafon_info;
+    return `<span style="white-space:nowrap;">${esc(i.bank_name || i.name)} `
+      + `${fmtPlafon(info.currency, info.pakai)} / ${fmtPlafon(info.currency, info.amount)} `
+      + `(${info.pct_label}) — ${plafonSt(info).label}</span>`;
+  }).join(' · ');
+  return `<div style="margin-top:10px;padding:8px 10px;border-radius:8px;`
+    + `background:${bg};color:${fg};font-size:12px;font-weight:600;line-height:1.6;">`
+    + `⚠ Plafon RK: ${isi}</div>`;
+}
+
+// ============================================================
 // SALDO BANK CARD — SATU kotak untuk SEMUA rekening bank (COA 1-11xx)
 // ------------------------------------------------------------
 // Sebelumnya dashboard hanya menampilkan 1 akun (dashboard_mapping 'bank'
@@ -396,11 +454,9 @@ async function renderBankCard() {
           : `<span style="color:#6b7280;">stok ${esc(i.currency)} · rata-rata ${kurRata(i.balance, nominalAsli)}</span>`)
       : '';
     const warnaSaldo = i.balance < 0 ? '#b91c1c' : '#111827';
-    const ket = i.plafon
-      ? (i.hutang > 0
-          ? `<span style="color:#b91c1c;font-weight:600;">Plafon RK · hutang</span>`
-          : '<span style="color:#6b7280;">Plafon RK</span>')
-      : '';
+    // Keterangan Plafon RK: nilai plafon + % terpakai + sisa (berwarna).
+    const ket = plafonKetHtml(i);
+
     // Rekening valas: STOK VALUTA jadi angka utama, rupiah jadi angka pendamping
     // (rupiah buku besar memakai kurs historis per baris jurnal).
     const saldoSel = (i.currency !== 'IDR' && nominalAsli !== null)
@@ -434,6 +490,7 @@ async function renderBankCard() {
         ${hutangRk > 0 ? `<br><span style="color:#b91c1c;font-weight:600;">Hutang bank — plafon RK: ${fmtShort(hutangRk)}</span>` : ''}
       </div>
     </div>
+    ${plafonAlertHtml(items)}
     <div class="table-wrap" style="margin-top:10px;">
       <table>
         <thead>
@@ -456,9 +513,10 @@ async function renderBankCard() {
         </tfoot>
       </table>
     </div>
-    ${hutangRk > 0 ? `<div style="font-size:11px;color:#6b7280;margin-top:8px;line-height:1.5;">
+    ${items.some(i => i.plafon) ? `<div style="font-size:11px;color:#6b7280;margin-top:8px;line-height:1.5;">
       Saldo minus akun plafon rekening koran (${esc(kodePlafon)}) disajikan sebagai
       <strong style="color:#b91c1c;">Hutang Bank</strong> di kartu Hutang Bank — bukan aset bank.
+      Nilai plafon diatur di <strong>Pengaturan &gt; Bank</strong> (kartu "Plafon Rekening Koran").
     </div>` : ''}`);
 }
 
@@ -535,6 +593,11 @@ async function renderKasCards(saldoMapping) {
 // 1-1110 (CIMB IDR), 1-1120 (CIMB USD), 1-1130 (OCBC) adalah fasilitas
 // plafon rekening koran. Saldo minus pada akun-akun itu = hutang ke bank,
 // sehingga ditampilkan di sini (bukan sebagai aset di kartu Saldo Bank).
+//
+// Setiap akun plafon ditampilkan "hutang / plafon (x%)" berwarna:
+// hijau < 80%, kuning >= 80%, merah >= 95%, merah tua >= 100%.
+// Nilai plafon dari DB (accounts.plafon_rk) -> bisa diubah di
+// Pengaturan > Bank tanpa deploy ulang.
 // ============================================================
 async function renderHutangBankCard(saldoHutangBank) {
   const akunHutang = Number(saldoHutangBank || 0);
@@ -546,26 +609,48 @@ async function renderHutangBankCard(saldoHutangBank) {
     console.warn('[dashboard] plafonRkHutang:', err.message || err);
   }
 
-  const hutangRk  = Number(rk.total || 0);
-  const total     = akunHutang + hutangRk;
-  const rincianRk = (rk.items || [])
-    .filter(i => i.hutang > 0)
-    .map(i => `${esc(i.name)} ${fmtShort(i.hutang)}`)
-    .join(' · ');
+  const items    = rk.items || [];
+  const hutangRk = Number(rk.total || 0);
+  const total    = akunHutang + hutangRk;
 
-  const info = [`Akun 2-1000: ${fmtShort(akunHutang)}`];
-  if (hutangRk > 0) {
-    info.push(`Plafon rekening koran: <strong style="color:#b91c1c;">${fmtShort(hutangRk)}</strong>`);
-    if (rincianRk) info.push(`<span style="color:#9ca3af;">${rincianRk}</span>`);
-    info.push('<span style="color:#9ca3af;">berasal dari saldo minus akun plafon RK</span>');
-  }
+  // Peringatan otomatis per akun (level dari plafonUsage()).
+  const kena  = items.filter(i => i.plafon_info && i.plafon_info.level !== 'ok');
+  const berat = kena.some(i => ['crit', 'over'].includes(i.plafon_info.level));
+  const border = berat ? '#b91c1c' : (kena.length ? '#d97706' : '#dc2626');
+
+  const rincian = items.map(i => {
+    const info = i.plafon_info;
+    if (!info) {
+      const belum = i.hutang > 0 ? ` · hutang ${fmtShort(i.hutang)}` : '';
+      return `<div style="color:#9ca3af;">${esc(i.name)} · plafon belum diisi${belum}</div>`;
+    }
+    const st     = plafonSt(info);
+    const tebal  = info.level === 'ok' ? 500 : 700;
+    const tanda  = info.level === 'ok' ? '' : ` · ⚠ ${st.label}`;
+    const sisa   = info.sisa < 0
+      ? ` · kelebihan ${fmtPlafon(info.currency, Math.abs(info.sisa))}`
+      : ` · sisa ${fmtPlafon(info.currency, info.sisa)}`;
+    return `<div style="color:${st.color};font-weight:${tebal};">
+      ${esc(i.name)} · ${fmtPlafon(info.currency, info.pakai)} / ${fmtPlafon(info.currency, info.amount)}
+      (${info.pct_label})${tanda}${sisa}
+    </div>`;
+  }).join('');
 
   return `
-    <div class="card" style="border-left:4px solid #dc2626;">
+    <div class="card" style="border-left:4px solid ${border};">
       <div style="font-size:12px;color:#666;margin-bottom:6px;">Hutang Bank</div>
       <div style="font-size:22px;font-weight:700;color:#dc2626;">${fmtShort(total)}</div>
       <div style="font-size:11px;color:#6b7280;margin-top:6px;line-height:1.5;">
-        ${info.join('<br>')}
+        Akun 2-1000: ${fmtShort(akunHutang)}
+        ${hutangRk > 0 ? `<br>Plafon rekening koran: <strong style="color:#b91c1c;">${fmtShort(hutangRk)}</strong>
+          <span style="color:#9ca3af;">(saldo minus akun plafon RK)</span>` : ''}
+        ${rincian ? `<div style="margin-top:8px;padding-top:6px;border-top:1px dashed #e5e7eb;">
+          <div style="font-size:10px;color:#6b7280;text-transform:uppercase;letter-spacing:.4px;margin-bottom:3px;">Pemakaian plafon RK</div>
+          ${rincian}
+        </div>` : ''}
+        ${kena.length ? `<div style="margin-top:6px;color:${berat ? '#b91c1c' : '#b45309'};font-weight:700;">
+          ⚠ ${kena.length} rekening ${berat ? 'hampir penuh / melebihi' : 'mendekati'} plafon
+        </div>` : ''}
       </div>
     </div>`;
 }

@@ -11,6 +11,71 @@ import { supabase } from './supabase-client.js';
 export const EXTRA_BANK_COA_CODES = ['1-1010'];
 
 // ============================================================
+// PLAFON REKENING KORAN (OVERDRAFT) PER AKUN
+// ------------------------------------------------------------
+// Akun di bawah ini BUKAN rekening simpanan biasa: fasilitas plafon
+// rekening koran (overdraft). Saldo MINUS pada akun ini = HUTANG BANK.
+//
+// Nilai plafon TIDAK di-hardcode: disimpan di
+//   accounts.plafon_rk          (numeric, NULL = belum diisi)
+//   accounts.plafon_rk_currency (IDR / USD)
+// lewat SQL/SQL-v11.35-plafon-rk-per-akun.sql, dan bisa diubah kapan saja
+// di Pengaturan > Bank (kartu "Plafon Rekening Koran").
+//
+// 1-1110 = Bank CIMB Niaga IDR, 1-1120 = Bank CIMB Niaga USD,
+// 1-1130 = Bank OCBC NISP IDR.
+// ============================================================
+export const PLAFON_RK_CODES = ['1-1110', '1-1120', '1-1130'];
+const PLAFON_RK_SET = new Set(PLAFON_RK_CODES);
+export function isPlafonRk(code) { return PLAFON_RK_SET.has(code); }
+
+// Ambang peringatan pemakaian plafon (persen).
+export const PLAFON_WARN_PCT = 80;    // kuning : mendekati plafon
+export const PLAFON_CRIT_PCT = 95;    // merah  : plafon hampir penuh
+export const PLAFON_OVER_PCT = 100;   // tebal  : melebihi plafon
+
+// ============================================================
+// HITUNG PEMAKAIAN PLAFON SATU AKUN
+// ------------------------------------------------------------
+// plafonAmount   : nilai plafon (accounts.plafon_rk)
+// plafonCurrency : mata uang plafon (IDR/USD)
+// hutangIdr      : hutang menurut buku besar dalam RUPIAH (positif)
+// hutangNative   : hutang dalam MATA UANG PLAFON (positif) — wajib untuk
+//                  plafon non-IDR; plafon USD TIDAK boleh dibandingkan
+//                  dengan rupiah buku besar (kurs historis per baris).
+//
+// Hasil null bila plafon belum diisi / 0 (tidak ada pembanding).
+// level: 'ok' | 'warn' | 'crit' | 'over'
+// ============================================================
+export function plafonUsage({
+  plafonAmount, plafonCurrency, hutangIdr = 0, hutangNative = null
+}) {
+  const amount = Number(plafonAmount || 0);
+  if (!Number.isFinite(amount) || amount <= 0) return null;
+
+  const currency = String(plafonCurrency || 'IDR').trim().toUpperCase();
+  const pakai = currency === 'IDR'
+    ? Math.max(0, Number(hutangIdr || 0))
+    : Math.max(0, Number(hutangNative || 0));
+
+  const pct = (pakai / amount) * 100;
+  const level = pct >= PLAFON_OVER_PCT ? 'over'
+    : pct >= PLAFON_CRIT_PCT ? 'crit'
+      : pct >= PLAFON_WARN_PCT ? 'warn'
+        : 'ok';
+
+  return {
+    currency,
+    amount,                                              // nilai plafon
+    pakai,                                               // terpakai (valuta plafon)
+    sisa: amount - pakai,                                // negatif = kelebihan
+    pct,
+    pct_label: pct.toLocaleString('id-ID', { maximumFractionDigits: 1 }) + '%',
+    level
+  };
+}
+
+// ============================================================
 // LIST SEMUA REKENING (aktif & nonaktif)
 // ============================================================
 export async function listBankAccounts({ activeOnly = false } = {}) {
@@ -111,30 +176,135 @@ export async function deleteBankAccount(id) {
 // LIST AKUN COA BANK (dropdown account_id, filter rekonsiliasi, laporan)
 // ------------------------------------------------------------
 // = akun berawalan 1-11 + EXTRA_BANK_COA_CODES.
-// Dua query lalu digabung: tidak memakai .or() PostgREST supaya tidak
-// bergantung pada sintaks wildcard (%, *) yang mudah salah.
 // ============================================================
 export async function listBankCoaAccounts({ activeOnly = true } = {}) {
-  const COLS = 'id, code, name';
-  let q = supabase.from('accounts').select(COLS).like('code', '1-11%');
-  if (activeOnly) q = q.eq('is_active', true);
-  const { data, error } = await q.order('code');
-  if (error) throw error;
+  const COLS_BASE   = 'id, code, name';
+  const COLS_PLAFON = 'id, code, name, plafon_rk, plafon_rk_currency';
 
-  const rows = [...(data || [])];
-  if (EXTRA_BANK_COA_CODES.length) {
-    let qx = supabase.from('accounts').select(COLS).in('code', EXTRA_BANK_COA_CODES);
-    if (activeOnly) qx = qx.eq('is_active', true);
-    const { data: extra, error: extraErr } = await qx;
-    if (extraErr) throw extraErr;
-    rows.push(...(extra || []));
+  // Dua query lalu digabung: tidak memakai .or() PostgREST supaya tidak
+  // bergantung pada sintaks wildcard (%, *) yang mudah salah.
+  async function ambil(selectCols) {
+    let q = supabase.from('accounts').select(selectCols).like('code', '1-11%');
+    if (activeOnly) q = q.eq('is_active', true);
+    const { data, error } = await q.order('code');
+    if (error) return { error };
+
+    const rows = [...(data || [])];
+    if (EXTRA_BANK_COA_CODES.length) {
+      let qx = supabase.from('accounts').select(selectCols).in('code', EXTRA_BANK_COA_CODES);
+      if (activeOnly) qx = qx.eq('is_active', true);
+      const { data: extra, error: extraErr } = await qx;
+      if (extraErr) return { error: extraErr };
+      rows.push(...(extra || []));
+    }
+    return { rows };
+  }
+
+  let res = await ambil(COLS_PLAFON);
+  if (res.error) {
+    // Kolom plafon baru ada setelah SQL-v11.35 dieksekusi. Selama migrasi
+    // belum dijalankan, ulangi tanpa kolom plafon supaya halaman tetap
+    // dapat saldo bank (plafon dianggap belum diisi).
+    console.warn('[listBankCoaAccounts] kolom plafon tidak terbaca, fallback:',
+      res.error.message || res.error);
+    res = await ambil(COLS_BASE);
+    if (res.error) throw res.error;
   }
 
   const seen = new Set();
-  return rows
+  return (res.rows || [])
     .filter(r => (seen.has(r.code) ? false : seen.add(r.code)))
     .sort((a, b) => String(a.code).localeCompare(String(b.code)));
 }
+
+// ============================================================
+// DAFTAR AKUN PLAFON RK + NILAI PLAFONNYA (Pengaturan > Bank)
+// ------------------------------------------------------------
+// Selalu mengembalikan 3 baris sesuai PLAFON_RK_CODES, termasuk akun yang
+// belum ada di COA (id null) supaya kelihatan harus dibuat dulu.
+// plafon_tersedia=false -> SQL-v11.35 belum dieksekusi (kolom belum ada),
+// nilai plafon tidak bisa dibaca/disimpan.
+// ============================================================
+export async function listPlafonRkAccounts() {
+  const COLS_BASE   = 'id, code, name, is_active';
+  const COLS_PLAFON = 'id, code, name, is_active, plafon_rk, plafon_rk_currency';
+
+  const ambil = cols => supabase
+    .from('accounts')
+    .select(cols)
+    .in('code', PLAFON_RK_CODES)
+    .order('code');
+
+  let tersedia = true;
+  let res = await ambil(COLS_PLAFON);
+  if (res.error) {
+    tersedia = false;
+    console.warn('[listPlafonRkAccounts] kolom plafon belum ada:', res.error.message || res.error);
+    res = await ambil(COLS_BASE);
+    if (res.error) throw res.error;
+  }
+
+  const byCode = new Map((res.data || []).map(a => [a.code, a]));
+  return PLAFON_RK_CODES.map(code => {
+    const a = byCode.get(code);
+    if (!a) {
+      return {
+        id: null,
+        code,
+        name: '(akun belum ada di COA)',
+        is_active: null,
+        plafon_rk: null,
+        plafon_rk_currency: 'IDR',
+        plafon_tersedia: tersedia
+      };
+    }
+    return {
+      ...a,
+      plafon_rk: a.plafon_rk ?? null,
+      plafon_rk_currency: String(a.plafon_rk_currency || 'IDR').toUpperCase(),
+      plafon_tersedia: tersedia
+    };
+  });
+}
+
+// ============================================================
+// SIMPAN NILAI PLAFON RK SATU AKUN
+// ------------------------------------------------------------
+// amount null / '' -> plafon dikosongkan (dianggap tidak ada plafon).
+// currency IDR/USD (dipaksa huruf besar).
+// ============================================================
+export async function updateAccountPlafon(code, { amount = null, currency = 'IDR' } = {}) {
+  const kode = String(code || '').trim();
+  if (!kode) throw new Error('Kode akun wajib diisi');
+
+  const cur = String(currency || 'IDR').trim().toUpperCase();
+  if (!/^[A-Z]{3}$/.test(cur)) throw new Error('Mata uang plafon harus 3 huruf (mis. IDR / USD)');
+
+  const nilai = (amount === null || amount === undefined || amount === '')
+    ? null
+    : Number(amount);
+  if (nilai !== null && (!Number.isFinite(nilai) || nilai < 0)) {
+    throw new Error('Nilai plafon tidak valid');
+  }
+
+  const { data, error } = await supabase
+    .from('accounts')
+    .update({ plafon_rk: nilai, plafon_rk_currency: cur })
+    .eq('code', kode)
+    .select('id, code, name, plafon_rk, plafon_rk_currency');
+
+  if (error) {
+    const pesan = String(error.message || '');
+    if (String(error.code) === '42703' || /column .* does not exist/i.test(pesan)) {
+      throw new Error('Kolom plafon belum ada di database. Jalankan '
+        + 'SQL/SQL-v11.35-plafon-rk-per-akun.sql dulu.');
+    }
+    throw error;
+  }
+  if (!data || !data.length) throw new Error(`Akun ${kode} tidak ditemukan`);
+  return data[0];
+}
+
 
 // ============================================================
 // KURS BUKU RATA-RATA STOK VALAS DI SATU AKUN

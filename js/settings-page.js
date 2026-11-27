@@ -9,7 +9,8 @@ import { listLockedPeriods, lockPeriod, unlockPeriod, checkPeriodLocked } from '
 import { getCompanyProfile, updateCompanyProfile } from './company.js';
 import {
   listBankAccounts, createBankAccount, updateBankAccount,
-  deleteBankAccount, listBankCoaAccounts, getBankAccount
+  deleteBankAccount, listBankCoaAccounts, getBankAccount,
+  listPlafonRkAccounts, updateAccountPlafon
 } from './bank-accounts.js';
 import { hasPermission } from './permissions.js';
 import { supabase } from './supabase-client.js';
@@ -662,6 +663,107 @@ async function renderBank() {
   }
 
   await renderBankList();
+  await renderPlafonList();
+}
+
+// ============================================================
+// PLAFON REKENING KORAN (overdraft) PER AKUN
+// ------------------------------------------------------------
+// Nilai disimpan di accounts.plafon_rk + accounts.plafon_rk_currency
+// (SQL-v11.35). Bisa diubah kapan saja tanpa deploy — dashboard langsung
+// memakai nilai terbaru untuk peringatan pemakaian plafon.
+// ============================================================
+async function renderPlafonList() {
+  const wrap = document.getElementById('plafonList');
+  if (!wrap) return;
+  wrap.innerHTML = '<div style="color:#9ca3af;font-size:13px;">Memuat...</div>';
+
+  try {
+    const list = await listPlafonRkAccounts();
+    const bisa = !!bankPerms.manage;
+    const belumMigrasi = list.some(a => a.plafon_tersedia === false);
+
+    wrap.innerHTML = `
+      ${belumMigrasi ? `<div style="margin-bottom:10px;padding:8px 10px;border-radius:8px;
+          background:#fef3c7;color:#92400e;font-size:12px;font-weight:600;">
+        Kolom plafon belum ada di database. Jalankan
+        <code>SQL/SQL-v11.35-plafon-rk-per-akun.sql</code> di Supabase SQL Editor dulu.
+      </div>` : ''}
+      <table style="width:100%;border-collapse:collapse;font-size:13px;">
+        <thead>
+          <tr style="background:#f9fafb;">
+            <th style="padding:8px;text-align:left;">Akun</th>
+            <th style="padding:8px;text-align:right;">Nilai Plafon</th>
+            <th style="padding:8px;text-align:left;">Mata Uang</th>
+            <th style="padding:8px;text-align:center;">Aksi</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${list.map(a => `
+            <tr style="border-bottom:1px solid #eef0f3;">
+              <td style="padding:8px;">
+                <span style="font-family:monospace;color:#6b7280;">${esc(a.code)}</span>
+                ${esc(a.name)}
+                ${a.is_active === false ? '<span style="color:#9ca3af;font-size:11px;"> (nonaktif)</span>' : ''}
+              </td>
+              <td style="padding:8px;text-align:right;">
+                <input type="number" min="0" step="0.01" inputmode="decimal"
+                       data-plafon-amount="${esc(a.code)}"
+                       value="${a.plafon_rk === null || a.plafon_rk === undefined ? '' : Number(a.plafon_rk)}"
+                       placeholder="0" ${bisa && a.id ? '' : 'disabled'}
+                       style="width:180px;padding:6px 8px;text-align:right;">
+              </td>
+              <td style="padding:8px;">
+                <select data-plafon-currency="${esc(a.code)}" ${bisa && a.id ? '' : 'disabled'}
+                        style="padding:6px 8px;">
+                  ${['IDR', 'USD'].map(c => `
+                    <option value="${c}" ${String(a.plafon_rk_currency || 'IDR').toUpperCase() === c ? 'selected' : ''}>${c}</option>
+                  `).join('')}
+                </select>
+              </td>
+              <td style="padding:8px;text-align:center;">
+                ${bisa && a.id ? `
+                  <button class="btn btn-primary" style="padding:4px 10px;font-size:12px;"
+                          data-save-plafon="${esc(a.code)}">Simpan</button>
+                ` : '<span style="color:#9ca3af;font-size:12px;">—</span>'}
+              </td>
+            </tr>`).join('')}
+        </tbody>
+      </table>
+      <div style="font-size:11px;color:#6b7280;margin-top:8px;line-height:1.5;">
+        Saldo minus akun ini dibaca dashboard sebagai hutang bank.
+        Plafon valas (USD) dibandingkan dengan hutang valas, bukan rupiah buku besar.
+      </div>`;
+
+    if (!bisa) return;
+
+    wrap.querySelectorAll('[data-save-plafon]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const code = btn.dataset.savePlafon;
+        const amountEl = wrap.querySelector(`[data-plafon-amount="${code}"]`);
+        const curEl = wrap.querySelector(`[data-plafon-currency="${code}"]`);
+        if (!amountEl || !curEl) return;
+
+        const raw = String(amountEl.value || '').trim();
+        btn.disabled = true;
+        btn.textContent = 'Menyimpan...';
+        try {
+          await updateAccountPlafon(code, {
+            amount: raw === '' ? null : Number(raw),
+            currency: curEl.value
+          });
+          toast(`✓ Plafon ${code} tersimpan`);
+        } catch (err) {
+          toast('Gagal: ' + (err.message || err), true);
+        } finally {
+          btn.disabled = false;
+          btn.textContent = 'Simpan';
+        }
+      });
+    });
+  } catch (err) {
+    wrap.innerHTML = `<div style="color:#b91c1c;font-size:13px;">${esc(err.message)}</div>`;
+  }
 }
 
 async function renderBankList() {

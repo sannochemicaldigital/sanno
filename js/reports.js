@@ -1,6 +1,8 @@
 // js/reports.js
 import { supabase } from './supabase-client.js';
-import { listBankCoaAccounts } from './bank-accounts.js';
+import {
+  listBankCoaAccounts, PLAFON_RK_CODES, isPlafonRk, plafonUsage
+} from './bank-accounts.js';
 
 // ============================================================
 // DASHBOARD BALANCES
@@ -43,43 +45,133 @@ export async function dashboardBalances() {
 // journal_lines.debit/credit per BARIS (currency_code baris, mata uang asli,
 // bukan _base) sehingga jurnal campuran USD+IDR tetap benar (v11.7).
 // ============================================================
-// PLAFON REKENING KORAN (overdraft)
-// ------------------------------------------------------------
-// Akun-akun berikut BUKAN simpanan biasa: ketiganya fasilitas plafon
-// rekening koran (overdraft). Saldo MINUS pada akun ini secara ekonomi
-// adalah HUTANG BANK, bukan saldo bank. Karena v_account_balance memberi
-// tanda sesuai normal_balance ('D' = debit - kredit), saldo minus di sini
-// berarti akun bersaldo kredit.
 // ============================================================
-export const PLAFON_RK_CODES = ['1-1110', '1-1120', '1-1130'];
-const PLAFON_RK_SET = new Set(PLAFON_RK_CODES);
-export function isPlafonRk(code) { return PLAFON_RK_SET.has(code); }
+// PLAFON REKENING KORAN (overdraft) — nilai per akun dari DB
+// ------------------------------------------------------------
+// Definisi akun, ambang peringatan (80% / 95% / 100%) dan rumus pemakaian
+// ada di bank-accounts.js supaya dipakai bersama halaman Pengaturan.
+// Nilai plafon disimpan di accounts.plafon_rk + accounts.plafon_rk_currency
+// (SQL-v11.35) sehingga bisa diubah dari Pengaturan > Bank tanpa deploy.
+// Re-export supaya pemakai lama tidak perlu mengubah import-nya.
+// ============================================================
+export {
+  PLAFON_RK_CODES, isPlafonRk, plafonUsage,
+  PLAFON_WARN_PCT, PLAFON_CRIT_PCT, PLAFON_OVER_PCT
+} from './bank-accounts.js';
+
+// ============================================================
+// NOMINAL ASLI (STOK VALAS) PER AKUN PER VALUTA
+// ------------------------------------------------------------
+// Dipakai bankBalanceSummary() dan plafonRkHutang(). Diambil dari
+// currency_code BARIS jurnal (fallback header jurnal), hanya baris NON-IDR —
+// nominal IDR sudah sama dengan rupiah buku besar. Diambil bertahap karena
+// PostgREST membatasi 1000 baris per permintaan.
+// Hasil: Map(account_id -> Map(valuta -> nominal))
+// ============================================================
+const PAGE_LINES = 1000;
+
+async function nativeNominalByAccount(accountIds) {
+  const nominal = new Map();      // account_id -> Map(valuta -> nominal)
+  const ids = (accountIds || []).filter(Boolean);
+  if (!ids.length) return nominal;
+
+  for (let from = 0; ; from += PAGE_LINES) {
+    const { data, error } = await supabase
+      .from('journal_lines')
+      .select('id, account_id, debit, credit, currency_code, journals!inner(currency_code)')
+      .in('account_id', ids)
+      .or('currency_code.is.null,currency_code.neq.IDR')
+      .order('id', { ascending: true })
+      .range(from, from + PAGE_LINES - 1);
+    if (error) {
+      console.warn('[nativeNominalByAccount] nominal valas:', error.message);
+      break;
+    }
+    for (const l of (data || [])) {
+      const cur = String(l.currency_code || l.journals?.currency_code || 'IDR')
+        .trim().toUpperCase() || 'IDR';
+      if (cur === 'IDR') continue;                            // nominal IDR = rupiah
+      const per = nominal.get(l.account_id) || new Map();
+      per.set(cur, (per.get(cur) || 0) + Number(l.debit || 0) - Number(l.credit || 0));
+      nominal.set(l.account_id, per);
+    }
+    if (!data || data.length < PAGE_LINES) break;
+  }
+  return nominal;
+}
 
 // Saldo minus akun plafon RK -> hutang bank (nilai positif).
 // Dipakai kartu "Hutang Bank" di dashboard.
+// Setiap item membawa plafon_amount / plafon_currency dan plafon_info
+// (pemakaian). Plafon valas (USD) dibandingkan dengan HUTANG VALAS, bukan
+// rupiah buku besar (kurs historis per baris jurnal).
 export async function plafonRkHutang() {
+  // 1. Plafon per akun. Fallback tanpa kolom plafon bila SQL-v11.35 belum
+  //    dieksekusi supaya kartu hutang bank tetap tampil.
+  let accRes = await supabase
+    .from('accounts')
+    .select('id, code, name, plafon_rk, plafon_rk_currency')
+    .in('code', PLAFON_RK_CODES);
+  if (accRes.error) {
+    console.warn('[plafonRkHutang] kolom plafon belum ada:', accRes.error.message || accRes.error);
+    accRes = await supabase
+      .from('accounts')
+      .select('id, code, name')
+      .in('code', PLAFON_RK_CODES);
+    if (accRes.error) throw accRes.error;
+  }
+  const accs = accRes.data || [];
+  const accByCode = new Map(accs.map(a => [a.code, a]));
+
+  // 2. Saldo buku besar (selalu rupiah)
   const { data, error } = await supabase
     .from('v_account_balance')
     .select('code, name, balance')
     .in('code', PLAFON_RK_CODES);
   if (error) throw error;
 
+  // 3. Hutang valas untuk akun yang plafonnya bukan IDR
+  const valasIds = accs
+    .filter(a => String(a.plafon_rk_currency || 'IDR').trim().toUpperCase() !== 'IDR')
+    .map(a => a.id);
+  const nominal = await nativeNominalByAccount(valasIds);
+
   const items = (data || []).map(r => {
     const saldo = Number(r.balance || 0);
+    const hutang = saldo < 0 ? -saldo : 0;
+
+    const acc = accByCode.get(r.code) || null;
+    const plafonAmount = Number(acc?.plafon_rk || 0);
+    const plafonCurrency = String(acc?.plafon_rk_currency || 'IDR').trim().toUpperCase();
+
+    // Nominal valas akun kredit (negatif) = hutang valas
+    const per = acc ? nominal.get(acc.id) : null;
+    const hutangNative = (per && per.has(plafonCurrency))
+      ? -Number(per.get(plafonCurrency) || 0)
+      : null;
+
     return {
       code: r.code,
       name: r.name,
       balance: saldo,
-      hutang: saldo < 0 ? -saldo : 0
+      hutang,                                               // rupiah (buku besar)
+      hutang_native: hutangNative,                          // valuta plafon
+      plafon_amount: plafonAmount || null,
+      plafon_currency: plafonCurrency,
+      plafon_info: plafonUsage({ plafonAmount, plafonCurrency, hutangIdr: hutang, hutangNative })
     };
   });
+
+  // urutkan sesuai PLAFON_RK_CODES (CIMB IDR, CIMB USD, OCBC)
+  items.sort((a, b) => PLAFON_RK_CODES.indexOf(a.code) - PLAFON_RK_CODES.indexOf(b.code));
+
   return { total: items.reduce((s, i) => s + i.hutang, 0), items };
 }
 
 export async function bankBalanceSummary() {
   // Akun bank = 1-11xx + 1-1010 (BCA-N), lihat EXTRA_BANK_COA_CODES.
   const accounts = await listBankCoaAccounts({ activeOnly: true });
-  if (!accounts.length) return { total: 0, items: [] };
+  if (!accounts.length) return { total: 0, bankTotal: 0, hutangPlafon: 0, plafonLevel: 'ok', items: [] };
 
   const codes = accounts.map(a => a.code);
 
@@ -129,33 +221,8 @@ export async function bankBalanceSummary() {
   //    Diambil dari currency_code BARIS jurnal, bukan header jurnal, supaya
   //    jurnal campuran (USD + IDR dalam satu jurnal) tetap terhitung benar.
   //    Hanya baris NON-IDR yang diambil (baris IDR tidak perlu: nominalnya
-  //    sudah sama dengan rupiah buku besar) + baris lama yang currency_code-nya
-  //    masih NULL (ikut valuta header jurnal). Diambil bertahap karena
-  //    PostgREST membatasi 1000 baris per permintaan.
-  const nominal = new Map();      // account_id -> Map(valuta -> nominal)
-  const PAGE = 1000;
-  for (let from = 0; ; from += PAGE) {
-    const { data, error } = await supabase
-      .from('journal_lines')
-      .select('id, account_id, debit, credit, currency_code, journals!inner(currency_code)')
-      .in('account_id', accounts.map(a => a.id))
-      .or('currency_code.is.null,currency_code.neq.IDR')
-      .order('id', { ascending: true })
-      .range(from, from + PAGE - 1);
-    if (error) {
-      console.warn('[bankBalanceSummary] nominal valas:', error.message);
-      break;
-    }
-    for (const l of (data || [])) {
-      const cur = String(l.currency_code || l.journals?.currency_code || 'IDR')
-        .trim().toUpperCase() || 'IDR';
-      if (cur === 'IDR') continue;                            // nominal IDR = rupiah
-      const per = nominal.get(l.account_id) || new Map();
-      per.set(cur, (per.get(cur) || 0) + Number(l.debit || 0) - Number(l.credit || 0));
-      nominal.set(l.account_id, per);
-    }
-    if (!data || data.length < PAGE) break;
-  }
+  //    sudah sama dengan rupiah buku besar). Lihat nativeNominalByAccount().
+  const nominal = await nativeNominalByAccount(accounts.map(a => a.id));
 
   // Valuta dominan dari baris jurnal (nominal absolut terbesar, selain IDR).
   function lineCurrency(accountId) {
@@ -175,6 +242,15 @@ export async function bankBalanceSummary() {
     const plafon = isPlafonRk(a.code);
     const per = nominal.get(a.id) || new Map();
     const nominalAsli = per.has(cur) ? per.get(cur) : null;   // stok valuta akun
+
+    // Plafon RK per akun (accounts.plafon_rk, SQL-v11.35). Bisa NULL bila
+    // belum diisi / migrasi belum dijalankan.
+    const plafonAmount = Number(a.plafon_rk || 0);
+    const plafonCurrency = String(a.plafon_rk_currency || 'IDR').trim().toUpperCase();
+    const hutang = plafon && saldoAkun < 0 ? -saldoAkun : 0;   // minus plafon = hutang bank
+    // Plafon valas dibandingkan dengan hutang VALAS (nominal negatif = hutang)
+    const hutangNative = per.has(plafonCurrency) ? -Number(per.get(plafonCurrency) || 0) : null;
+
     return {
       code: a.code,
       name: a.name,
@@ -184,7 +260,13 @@ export async function bankBalanceSummary() {
       balance: saldoAkun,
       balance_native: nominalAsli,                            // nominal asli (USD) kalau valas
       plafon,                                                 // akun plafon rekening koran
-      hutang: plafon && saldoAkun < 0 ? -saldoAkun : 0,        // minus plafon = hutang bank
+      hutang,                                                 // minus plafon = hutang bank
+      hutang_native: hutangNative,                            // hutang dalam valuta plafon
+      plafon_amount: plafonAmount || null,                    // nilai plafon (null = belum diisi)
+      plafon_currency: plafonCurrency,
+      plafon_info: plafon
+        ? plafonUsage({ plafonAmount, plafonCurrency, hutangIdr: hutang, hutangNative })
+        : null,                                               // pemakaian plafon (%) + level
       amount_usd: cur === 'USD' ? nominalAsli : null           // kompatibilitas pemakai lama
     };
   });
@@ -192,10 +274,18 @@ export async function bankBalanceSummary() {
   const total = items.reduce((s, i) => s + i.balance, 0);
   const hutangPlafon = items.reduce((s, i) => s + i.hutang, 0);
 
+  // Level peringatan plafon terburuk dari seluruh akun (ok < warn < crit < over).
+  const tingkat = { ok: 0, warn: 1, crit: 2, over: 3 };
+  const plafonLevel = items.reduce((worst, i) => {
+    const lv = i.plafon_info?.level;
+    return lv && (tingkat[lv] || 0) > (tingkat[worst] || 0) ? lv : worst;
+  }, 'ok');
+
   return {
     total,                 // saldo bersih (aset - hutang plafon) = penjumlahan semua baris
     bankTotal: total + hutangPlafon,   // aset bank: minus plafon RK dikeluarkan (jadi hutang)
     hutangPlafon,          // total minus akun plafon RK (nilai positif)
+    plafonLevel,           // level peringatan plafon terburuk: ok/warn/crit/over
     items
   };
 }
