@@ -308,10 +308,17 @@ tbody tr:hover { background: #f9fafb; }
 /* ==== Aksi jurnal dari Buku Besar (v11.34) ====
    Tombol kecil Edit/Reversal/Hapus ada di halaman Jurnal; di sini hanya
    tombol pembuka ("Kelola") + hapus cepat superadmin. Container tombol
-   memakai .row-actions yang sudah ada (lihat bagian Rekonsiliasi Bank). */
+   memakai .row-actions yang sudah ada (lihat bagian Rekonsiliasi Bank).
+   CATATAN: .row-actions global punya min-width 150px, sedangkan lebar sel
+   dikurangi padding hanya ±134px -> tombol terakhir meluber ke kanan dan
+   terpotong oleh .ledger-scroll ("Hap"). Karena itu min-width direset dan
+   .col-act dilebarkan; kalau tetap tidak muat, .row-actions membungkus
+   tombol ke baris kedua (flex-wrap), tidak memotong teks. */
 .btn.btn-xs { padding: 4px 10px; font-size: 12px; font-weight: 600; border-radius: 6px; }
 a.btn { display: inline-block; text-decoration: none; text-align: center; }
-.tbl-ledger th.col-act, .tbl-ledger td.col-act { width: 150px; white-space: nowrap; }
+.tbl-ledger th.col-act, .tbl-ledger td.col-act { width: 168px; white-space: nowrap; }
+.tbl-ledger .col-act .row-actions { min-width: 0; justify-content: flex-start; }
+.tbl-ledger .col-act .btn { flex: 0 0 auto; }
 .tbl-ledger tr.row-focus td { background: #fffbeb; }
 .tbl-ledger tr.row-focus td:first-child { box-shadow: inset 3px 0 0 #f59e0b; }
 
