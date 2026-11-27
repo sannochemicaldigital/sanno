@@ -10,7 +10,12 @@
   <div class="container">
     <div class="topbar">
       <h1>Input Jurnal</h1>
-      <button class="btn btn-danger" id="logoutBtn">Keluar</button>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+        <!-- v11.34 — muncul hanya jika dibuka dari halaman lain (mis. Buku Besar
+             lewat ?back=...), agar bisa kembali ke akun & periode yang sama. -->
+        <a class="btn btn-secondary" id="backBtn" href="#" style="display:none;text-decoration:none;text-align:center;">← Kembali</a>
+        <button class="btn btn-danger" id="logoutBtn">Keluar</button>
+      </div>
     </div>
 
     <nav class="nav" id="mainNav"></nav>
@@ -88,6 +93,6 @@
 
   <div class="toast" id="toast"></div>
 
-  <script type="module" src="./js/journal-form.js?v=11.33"></script>
+  <script type="module" src="./js/journal-form.js?v=11.34"></script>
 </body>
 </html>
