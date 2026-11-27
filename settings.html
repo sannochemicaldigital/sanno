@@ -280,6 +280,18 @@
         <h3 style="margin-top:0;font-size:16px;">Daftar Rekening Bank</h3>
         <div id="bankList"></div>
       </div>
+
+      <div class="card">
+        <h3 style="margin-top:0;font-size:16px;">Plafon Rekening Koran (Overdraft)</h3>
+        <p style="font-size:13px;color:#6b7280;margin-top:0;">
+          Nilai plafon tiap akun dipakai dashboard untuk menghitung pemakaian
+          fasilitas kredit dan memunculkan <strong>peringatan otomatis</strong>
+          bila saldo hutang bank mendekati plafon:
+          kuning ≥ 80%, merah ≥ 95%, merah tua bila ≥ 100%.
+          Kosongkan nilai untuk menghapus plafon.
+        </p>
+        <div id="plafonList"></div>
+      </div>
     </section>
 
     <!-- ==================== TAB PERIODE ==================== -->
@@ -393,6 +405,6 @@
 
   <div class="toast" id="toast"></div>
 
-  <script type="module" src="./js/settings-page.js?v=11.28.0"></script>
+  <script type="module" src="./js/settings-page.js?v=11.37"></script>
 </body>
 </html>
