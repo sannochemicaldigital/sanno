@@ -6,7 +6,8 @@ import { supabase } from './supabase-client.js';
 // ============================================================
 // BACA: antrian + invoice + sisa hutang
 // ============================================================
-// Mengembalikan array urut sort_order, tiap baris:
+// Mengembalikan array urut TANGGAL RENCANA (terdekat di atas), lalu sort_order
+// (prioritas manual antar invoice bertanggal sama), lalu id:
 //   { id, invoice_id, plan_date, plan_amount, currency, sort_order, note,
 //     invoice: { invoice_no, currency, subtotal, total_idr, total_usd,
 //                due_date, status, partner: { name } },
@@ -23,7 +24,9 @@ export async function listPaymentPlans() {
         partner:partners!inner(name)
       )
     `)
-    .order('sort_order', { ascending: true });
+    .order('plan_date', { ascending: true })
+    .order('sort_order', { ascending: true })
+    .order('id', { ascending: true });
 
   if (error) throw error;
 

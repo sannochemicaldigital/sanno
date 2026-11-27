@@ -8,7 +8,7 @@ import { getValasBookRate } from './bank-accounts.js';
 import {
   listPaymentPlans, addPaymentPlan, updatePaymentPlan,
   movePaymentPlan, deletePaymentPlan
-} from './payment-plans.js';
+} from './payment-plans.js?v=11.34';
 
 // ============================================================
 // UTIL
@@ -897,13 +897,23 @@ async function deletePayment(paymentId, paymentNo) {
 // Grand Total kumulatif PER CURRENCY: total rencana bayar dengan
 // plan_date <= tanggal baris ini. Baris bertanggal sama dihitung
 // berurutan mengikuti sort_order (urutan antrian).
-function planGrandTotals(plans) {
-  const sorted = [...plans].sort((a, b) => {
+// Urutan tampil antrian = TANGGAL RENCANA (terdekat di atas), lalu sort_order
+// (prioritas manual antar invoice bertanggal SAMA), lalu id sebagai penentu
+// terakhir. Konsekuensi: begitu tanggal diubah, baris langsung pindah posisi.
+function sortPlansForDisplay(plans) {
+  return [...(plans || [])].sort((a, b) => {
     const da = a.plan_date || '';
     const db = b.plan_date || '';
     if (da !== db) return da < db ? -1 : 1;
-    return (Number(a.sort_order) || 0) - (Number(b.sort_order) || 0);
+    const sa = Number(a.sort_order) || 0;
+    const sb = Number(b.sort_order) || 0;
+    if (sa !== sb) return sa - sb;
+    return (Number(a.id) || 0) - (Number(b.id) || 0);
   });
+}
+
+function planGrandTotals(plans) {
+  const sorted = sortPlansForDisplay(plans);
   const cum = { IDR: 0, USD: 0 };
   const map = {};
   sorted.forEach(p => {
@@ -935,8 +945,11 @@ function renderPlans() {
 
   const canEdit = state.canManagePlan;
   const lastIdx = plans.length - 1;
+  const sameDate = (x, y) => ((x?.plan_date || '') === (y?.plan_date || ''));
 
   tbody.innerHTML = plans.map((p, idx) => {
+    const upAllowed = idx > 0 && sameDate(p, plans[idx - 1]);
+    const downAllowed = idx < lastIdx && sameDate(p, plans[idx + 1]);
     const cur = p.currency === 'USD' ? 'USD' : 'IDR';
     const g = grand[p.id] || { IDR: 0, USD: 0 };
     const gVal = cur === 'USD' ? g.USD : g.IDR;
@@ -951,9 +964,11 @@ function renderPlans() {
           ${canEdit ? `
             <span class="plan-move">
               <button type="button" class="plan-move-btn" data-move="${p.id}" data-dir="up"
-                      title="Naikkan prioritas" ${idx === 0 ? 'disabled' : ''}>▲</button>
+                      title="${upAllowed ? 'Naikkan prioritas (tanggal sama)' : 'Tidak ada invoice bertanggal sama di atasnya'}"
+                      ${upAllowed ? '' : 'disabled'}>▲</button>
               <button type="button" class="plan-move-btn" data-move="${p.id}" data-dir="down"
-                      title="Turunkan prioritas" ${idx === lastIdx ? 'disabled' : ''}>▼</button>
+                      title="${downAllowed ? 'Turunkan prioritas (tanggal sama)' : 'Tidak ada invoice bertanggal sama di bawahnya'}"
+                      ${downAllowed ? '' : 'disabled'}>▼</button>
             </span>` : ''}
         </td>
         <td data-label="Invoice" style="font-family:monospace;font-size:12px;">${esc(inv.invoice_no || '—')}</td>
@@ -1021,7 +1036,7 @@ async function loadPlans() {
   tbody.innerHTML = '<tr><td colspan="13" style="text-align:center;color:#9ca3af;padding:16px;">Memuat...</td></tr>';
 
   try {
-    state.plans = await listPaymentPlans();
+    state.plans = sortPlansForDisplay(await listPaymentPlans());
     state.plansLoaded = true;
     renderPlans();
     try {
@@ -1213,7 +1228,9 @@ async function savePlanInline(planId) {
       plan_amount: amount,
       note: plan.note || null
     });
-    toast('Rencana bayar diperbarui');
+    toast(sameDate
+      ? 'Rencana bayar diperbarui'
+      : '✓ Tanggal diubah — antrian diurutkan ulang menurut tanggal');
     await loadPlans();
   } catch (err) {
     toast('Gagal simpan: ' + (err.message || err), true);
