@@ -22,6 +22,7 @@
     <div class="tabs">
       <button data-tab="invoice" class="active">Invoice</button>
       <button data-tab="payment">Pembayaran</button>
+      <button data-tab="plan">Rencana Bayar</button>
       <button data-tab="aging">Aging</button>
       <button data-tab="clearing">Clearing</button>
     </div>
@@ -231,6 +232,85 @@
       </div>
     </section>
 
+    <!-- ==================== TAB: RENCANA BAYAR ==================== -->
+    <section id="tab-plan" class="tab-panel" style="display:none;">
+
+      <!-- FORM: masukkan invoice ke antrian -->
+      <div class="card" id="planFormCard" style="display:none;">
+        <h3 style="margin-top:0;font-size:16px;">Masukkan Invoice ke Antrian</h3>
+        <p style="font-size:13px;color:#6b7280;margin-top:0;">
+          Antrian ini hanya pengingat prioritas (tidak membuat jurnal).
+          Nominal boleh parsial (≤ sisa hutang) dan bisa diubah kapan saja.
+          Baris antrian otomatis hilang bila invoice sudah lunas.
+        </p>
+
+        <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;">
+          <div class="form-row" style="flex:3;min-width:260px;margin:0;">
+            <label for="plInvoice">Invoice <span style="color:#dc2626;">*</span></label>
+            <select id="plInvoice" class="input">
+              <option value="">— pilih invoice —</option>
+            </select>
+            <div id="plInvoiceHint" style="font-size:11px;color:#6b7280;margin-top:4px;"></div>
+          </div>
+          <div class="form-row" style="flex:1;min-width:150px;margin:0;">
+            <label for="plDate">Tanggal Rencana <span style="color:#dc2626;">*</span></label>
+            <input type="date" id="plDate" class="input">
+          </div>
+          <div class="form-row" style="flex:1;min-width:170px;margin:0;">
+            <label for="plAmount">Rencana Bayar (<span id="plCurLabel">IDR</span>) <span style="color:#dc2626;">*</span></label>
+            <input type="text" id="plAmount" class="input" inputmode="decimal" placeholder="boleh parsial">
+          </div>
+          <div class="form-row" style="flex:2;min-width:180px;margin:0;">
+            <label for="plNote">Catatan</label>
+            <input type="text" id="plNote" class="input" placeholder="(opsional)">
+          </div>
+        </div>
+
+        <div class="form-actions" style="margin-top:16px;">
+          <button type="button" class="btn btn-primary" id="plSaveBtn">Tambah ke Antrian</button>
+          <button type="button" class="btn btn-secondary" id="plResetBtn">Reset</button>
+        </div>
+      </div>
+
+      <!-- DAFTAR ANTRIAN -->
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
+          <h3 style="margin:0;font-size:16px;">Antrian Rencana Bayar</h3>
+          <button type="button" class="btn btn-secondary" id="planRefreshBtn"
+                  style="padding:6px 12px;font-size:12px;">Muat ulang</button>
+        </div>
+        <p style="font-size:12px;color:#6b7280;">
+          Urutan menentukan prioritas pembayaran (▲▼). <b>Grand Total</b> = total kumulatif
+          rencana bayar dengan tanggal ≤ tanggal baris, dihitung terpisah untuk IDR dan USD.
+        </p>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th style="width:64px;">No</th>
+                <th>Invoice</th>
+                <th>Vendor</th>
+                <th>Curr</th>
+                <th>Jatuh Tempo</th>
+                <th class="num">Subtotal</th>
+                <th class="num">Sudah Bayar</th>
+                <th class="num">Sisa</th>
+                <th>Tgl Rencana</th>
+                <th class="num">Rencana Bayar</th>
+                <th class="num">Grand Total</th>
+                <th>Catatan</th>
+                <th>Aksi</th>
+              </tr>
+            </thead>
+            <tbody id="tbody-plans">
+              <tr><td colspan="13" style="text-align:center;color:#9ca3af;padding:16px;">Pilih tab Rencana Bayar untuk memuat.</td></tr>
+            </tbody>
+            <tfoot id="tfoot-plans"></tfoot>
+          </table>
+        </div>
+      </div>
+    </section>
+
     <!-- ==================== TAB: AGING ==================== -->
     <section id="tab-aging" class="tab-panel" style="display:none;">
       <div class="card">
@@ -374,6 +454,6 @@
 
   <div class="toast" id="toast"></div>
 
-  <script type="module" src="./js/hutang-page.js?v=11.12"></script>
+  <script type="module" src="./js/hutang-page.js?v=11.13"></script>
 </body>
 </html>
