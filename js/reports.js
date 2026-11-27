@@ -201,6 +201,42 @@ export async function bankBalanceSummary() {
 }
 
 // ============================================================
+// SALDO KAS — tunai di tangan (1-1000) + tunai di ATM (1-1001)
+// ------------------------------------------------------------
+// Dulu dashboard hanya mengambil dashboard_mapping 'kas' -> 1-1000,
+// sehingga uang tunai yang disimpan lewat ATM (akun 1-1001 "Kas ATM",
+// dibuat di SQL-v11.29 untuk buku kas ATM 2020-2026) tidak pernah tampil.
+//
+// Akun dibaca LANGSUNG dari v_account_balance, bukan dari dashboard_mapping,
+// supaya tetap benar walau baris mapping 'kas_atm' belum ada di DB.
+// v_account_balance = LEFT JOIN accounts -> akun tanpa jurnal tetap muncul
+// (saldo 0), jadi tidak ada akun yang "hilang".
+// Saldo selalu rupiah (debit_base/credit_base), jadi sah dijumlahkan.
+// Akun yang belum ada di COA tidak dikembalikan (bukan Rp 0 palsu).
+// ============================================================
+export const KAS_COA_CODES = ['1-1000', '1-1001'];
+
+export async function kasBalanceSummary() {
+  const { data, error } = await supabase
+    .from('v_account_balance')
+    .select('code, name, balance')
+    .in('code', KAS_COA_CODES);
+  if (error) throw error;
+
+  const rows = data || [];
+  // urutan mengikuti KAS_COA_CODES: Kas dulu, lalu Kas ATM
+  const items = KAS_COA_CODES
+    .map(code => rows.find(r => r.code === code))
+    .filter(Boolean)
+    .map(r => ({ code: r.code, name: r.name, balance: Number(r.balance || 0) }));
+
+  return {
+    total: items.reduce((s, i) => s + i.balance, 0),
+    items
+  };
+}
+
+// ============================================================
 // PIUTANG PER PELANGGAN
 // ============================================================
 export async function piutangPerPelanggan() {

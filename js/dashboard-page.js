@@ -3,7 +3,7 @@ import './input-clear.js';
 import { requireAuth, logout } from './auth.js';
 import { renderNav, requirePageAccess } from './access.js';
 import { preloadPermissions, hasPermission } from './permissions.js';
-import { dashboardBalances, bankBalanceSummary, plafonRkHutang } from './reports.js';
+import { dashboardBalances, bankBalanceSummary, plafonRkHutang, kasBalanceSummary } from './reports.js?v=11.36';
 import { supabase } from './supabase-client.js';
 
 // ============================================================
@@ -183,12 +183,26 @@ async function renderSalesDashboard(container) {
 // KASIR
 // ============================================================
 async function renderKasirDashboard(container) {
-  const { data: kas } = await supabase
-    .from('v_account_balance')
-    .select('balance')
-    .eq('code', '1-1000')
-    .single();
-  const saldoKas = Number(kas?.balance || 0);
+  // Kas tunai di tangan (1-1000) + Kas ATM (1-1001) — dulu hanya 1-1000.
+  // Dibaca lewat helper data layer; kalau gagal, jatuh ke 1-1000 seperti lama.
+  let kasItems = [];
+  try {
+    const ringkas = await kasBalanceSummary();
+    kasItems = ringkas.items || [];
+  } catch (err) {
+    console.warn('[dashboard] kasBalanceSummary:', err.message || err);
+    const { data: kas } = await supabase
+      .from('v_account_balance')
+      .select('code, name, balance')
+      .eq('code', '1-1000')
+      .maybeSingle();
+    if (kas) kasItems = [{ code: kas.code, name: kas.name, balance: Number(kas.balance || 0) }];
+  }
+
+  const kasRow   = code => kasItems.find(i => i.code === code);
+  const saldoKas = Number(kasRow('1-1000')?.balance || 0);
+  const adaAtm   = !!kasRow('1-1001');
+  const saldoAtm = Number(kasRow('1-1001')?.balance || 0);
 
   const today = new Date().toISOString().slice(0, 10);
   const { data: { session } } = await supabase.auth.getSession();
@@ -208,6 +222,11 @@ async function renderKasirDashboard(container) {
       <div style="font-size:12px;color:#666;margin-bottom:6px;">Saldo Kas Fisik</div>
       <div style="font-size:22px;font-weight:600;">${fmt(saldoKas)}</div>
     </div>
+    ${adaAtm ? `
+    <div class="card">
+      <div style="font-size:12px;color:#666;margin-bottom:6px;">Saldo Kas ATM</div>
+      <div style="font-size:22px;font-weight:600;">${fmt(saldoAtm)}</div>
+    </div>` : ''}
     <div class="card">
       <div style="font-size:12px;color:#666;margin-bottom:6px;">Transaksi Tunai Hari Ini</div>
       <div style="font-size:22px;font-weight:600;">${cashList.length}</div>
@@ -444,6 +463,73 @@ async function renderBankCard() {
 }
 
 // ============================================================
+// SALDO KAS CARD — Kas tunai (1-1000) + Kas ATM (1-1001)
+// ------------------------------------------------------------
+// Sebelumnya kartu ini hanya 1 angka dari dashboard_mapping 'kas' -> 1-1000,
+// sehingga saldo akun 1-1001 "Kas ATM" (dibuat SQL-v11.29 untuk buku kas ATM
+// 2020-2026) tidak pernah muncul di dashboard.
+// Sekarang DUA kartu sejajar: "Saldo Kas" (1-1000) dan "Saldo Kas ATM"
+// (1-1001), masing-masing angka besar, plus total gabungan di kartu ATM.
+// Nama akun bisa diklik -> Buku Besar akun tsb (reports.html?tab=bb).
+// Saldo tetap rupiah buku besar (debit_base/credit_base), konsisten dengan
+// laporan & Trial Balance. Akun yang belum ada di COA tidak ditampilkan
+// (kartu Kas ATM hanya muncul kalau akun 1-1001 ada).
+// ============================================================
+function kasCardHtml({ code, name, balance }, label, footer = '') {
+  const ledgerUrl = `./reports.html?tab=bb&akun=${encodeURIComponent(code)}`;
+  const warna = balance < 0 ? '#b91c1c' : '#059669';
+  return `
+    <div class="card" style="border-left:4px solid #059669;">
+      <div style="font-size:12px;color:#666;margin-bottom:6px;">${label}</div>
+      <div style="font-size:22px;font-weight:700;color:${warna};">${fmtShort(balance)}</div>
+      <div style="font-size:11px;color:#6b7280;margin-top:6px;line-height:1.5;">
+        <a href="${ledgerUrl}" title="Buka Buku Besar ${esc(code)}" style="color:#374151;text-decoration:none;border-bottom:1px dotted #9ca3af;">${esc(name || label)}</a>
+        <span style="color:#9ca3af;">· akun ${esc(code)}</span>
+        ${footer}
+      </div>
+    </div>`;
+}
+
+async function renderKasCards(saldoMapping) {
+  let ringkas = null;
+  try {
+    ringkas = await kasBalanceSummary();
+  } catch (err) {
+    console.warn('[dashboard] kasBalanceSummary:', err.message || err);
+  }
+
+  const items = ringkas?.items || [];
+
+  // Fallback: kalau view/akun gagal dibaca, tampilkan angka mapping lama
+  // (dashboard_mapping 'kas') supaya kartu tidak hilang sama sekali.
+  if (!items.length) {
+    return kasCardHtml(
+      { code: '1-1000', name: 'Kas', balance: Number(saldoMapping || 0) },
+      'Saldo Kas',
+      '<br>Akun 1-1000/1-1001 belum bisa dibaca — angka dari pemetaan dashboard.'
+    );
+  }
+
+  const total  = Number(ringkas.total || 0);
+  const kas    = items.find(i => i.code === '1-1000') || { code: '1-1000', name: 'Kas', balance: 0 };
+  const atm    = items.find(i => i.code === '1-1001');
+
+  // Kartu 1: Saldo Kas (tunai di tangan)
+  let html = kasCardHtml(kas, 'Saldo Kas');
+
+  // Kartu 2: Saldo Kas ATM — hanya kalau akun 1-1001 ada di bagan akun
+  if (atm) {
+    html += kasCardHtml(
+      atm,
+      'Saldo Kas ATM',
+      `<br><span style="color:#9ca3af;">Total kas (1-1000 + 1-1001): </span><strong style="color:#111827;">${fmtShort(total)}</strong>`
+    );
+  }
+
+  return html;
+}
+
+// ============================================================
 // HUTANG BANK CARD — akun 2-1000 + saldo minus akun plafon rekening koran
 // ------------------------------------------------------------
 // 1-1110 (CIMB IDR), 1-1120 (CIMB USD), 1-1130 (OCBC) adalah fasilitas
@@ -510,7 +596,9 @@ async function renderFinanceDashboard(container) {
   const cards = [];
 
   if (await hasPermission('finance.cash.view')) {
-    cards.push(card('Saldo Kas', map.kas?.balance));
+    // Dua kartu: Kas tunai (1-1000) + Kas ATM (1-1001) + total gabungannya.
+    // Bukan lagi hanya dashboard_mapping 'kas' -> 1-1000.
+    cards.push(await renderKasCards(map.kas?.balance));
   }
   if (await hasPermission('finance.bank.view')) {
     // Satu kartu untuk SEMUA rekening bank (BCA, CIMB IDR, CIMB USD, OCBC, ...)
