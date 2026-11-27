@@ -305,6 +305,20 @@ tbody tr:hover { background: #f9fafb; }
 .tbl-ledger th.col-cur,  .tbl-ledger td.col-cur  { width: 54px; }
 .tbl-ledger th.col-rate, .tbl-ledger td.col-rate { width: 80px; white-space: nowrap; }
 
+/* ==== Aksi jurnal dari Buku Besar (v11.34) ====
+   Tombol kecil Edit/Reversal/Hapus ada di halaman Jurnal; di sini hanya
+   tombol pembuka ("Kelola") + hapus cepat superadmin. Container tombol
+   memakai .row-actions yang sudah ada (lihat bagian Rekonsiliasi Bank). */
+.btn.btn-xs { padding: 4px 10px; font-size: 12px; font-weight: 600; border-radius: 6px; }
+a.btn { display: inline-block; text-decoration: none; text-align: center; }
+.tbl-ledger th.col-act, .tbl-ledger td.col-act { width: 150px; white-space: nowrap; }
+.tbl-ledger tr.row-focus td { background: #fffbeb; }
+.tbl-ledger tr.row-focus td:first-child { box-shadow: inset 3px 0 0 #f59e0b; }
+.journal-list-item.focus {
+  background: #fffbeb; border-left: 3px solid #f59e0b;
+  border-radius: 6px; padding-left: 10px;
+}
+
 
 /* ==== Laba Rugi & Neraca ==== */
 .report-section-title {
