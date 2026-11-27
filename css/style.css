@@ -314,6 +314,46 @@ a.btn { display: inline-block; text-decoration: none; text-align: center; }
 .tbl-ledger th.col-act, .tbl-ledger td.col-act { width: 150px; white-space: nowrap; }
 .tbl-ledger tr.row-focus td { background: #fffbeb; }
 .tbl-ledger tr.row-focus td:first-child { box-shadow: inset 3px 0 0 #f59e0b; }
+
+/* ==== Buku Besar: header tabel dibekukan (v11.34) ====
+   .table-wrap hanya mengatur overflow-x sehingga judul kolom ikut hilang
+   saat daftar digulir. Di sini wadah diberi tinggi maksimum + overflow:auto
+   supaya <thead> bisa position: sticky (pola sama dengan Kartu Stok di
+   inventory.html). Baris TOTAL (tfoot) ikut ditempel di bawah. */
+.ledger-scroll {
+  max-height: 64vh;
+  overflow: auto;
+  border: 1px solid #eef0f3;
+  border-radius: 8px;
+  overscroll-behavior: contain;
+}
+.tbl-ledger thead th {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background: #f3f4f6;
+  box-shadow: inset 0 -1px 0 #e5e7eb;
+}
+.tbl-ledger tfoot td {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  background: #f9fafb;
+  box-shadow: inset 0 1px 0 #d0d5dd;
+}
+@media (max-width: 640px) {
+  /* <=640px tabel berubah jadi kartu (thead disembunyikan), jadi biarkan
+     mengalir biasa — jangan dipotong kotak bertinggi maksimum. */
+  .ledger-scroll { max-height: none; border: 0; }
+}
+@media print {
+  .ledger-scroll {
+    max-height: none !important; overflow: visible !important; border: 0;
+  }
+  .tbl-ledger thead th, .tbl-ledger tfoot td {
+    position: static; box-shadow: none;
+  }
+}
 .journal-list-item.focus {
   background: #fffbeb; border-left: 3px solid #f59e0b;
   border-radius: 6px; padding-left: 10px;
