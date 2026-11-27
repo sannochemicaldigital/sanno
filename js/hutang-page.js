@@ -5,6 +5,10 @@ import { renderNav, requirePageAccess } from './access.js';
 import { hasPermission, preloadPermissions } from './permissions.js';
 import { agingHutang } from './reports.js';
 import { getValasBookRate } from './bank-accounts.js';
+import {
+  listPaymentPlans, addPaymentPlan, updatePaymentPlan,
+  movePaymentPlan, deletePaymentPlan
+} from './payment-plans.js';
 
 // ============================================================
 // UTIL
@@ -61,6 +65,49 @@ function downloadCSV(filename, headers, rows) {
   document.body.appendChild(a); a.click();
   document.body.removeChild(a); URL.revokeObjectURL(url);
 }
+// Parser angka tahan format: "1500000", "1.500.000", "1500,5", "1.500,50",
+// "7,371.50", "7371.5", "USD 7.371,50". Pemisah desimal ditentukan dari posisi
+// pemisah terakhir supaya tidak salah baca (mis. 7,371.50 jangan jadi 7,37).
+function parseAmountSmart(raw, defaultDecimal) {
+  let t = String(raw ?? '').trim().replace(/[\s']/g, '');
+  if (!t) return NaN;
+  t = t.replace(/^(rp|usd|\$)/i, '').replace(/(rp|usd)$/i, '');
+  if (!t) return NaN;
+
+  const lastDot = t.lastIndexOf('.');
+  const lastComma = t.lastIndexOf(',');
+  let decSep = null;
+
+  if (lastDot >= 0 && lastComma >= 0) {
+    decSep = lastDot > lastComma ? '.' : ',';
+  } else if (lastDot >= 0 || lastComma >= 0) {
+    const sep = lastDot >= 0 ? '.' : ',';
+    const sepPos = lastDot >= 0 ? lastDot : lastComma;
+    const digitsAfter = t.length - sepPos - 1;
+    const occurrences = t.split(sep).length - 1;
+    if (occurrences > 1) decSep = null;                      // 1.500.000 = ribuan
+    else if (digitsAfter === 3 && sep !== defaultDecimal) decSep = null; // 1.500 / 7,371 = ribuan
+    else decSep = sep;
+  }
+
+  let norm = t;
+  if (decSep) {
+    const thousands = decSep === '.' ? ',' : '.';
+    norm = norm.split(thousands).join('');
+    if (decSep === ',') norm = norm.replace(',', '.');
+  } else {
+    norm = norm.replace(/[.,]/g, '');
+  }
+  return Number(norm);
+}
+// IDR: koma = desimal (default), titik = ribuan.
+function parseNumberId(s) {
+  return parseAmountSmart(s, ',');
+}
+// USD: titik = desimal (default), koma = ribuan.
+function parseNumberUsd(s) {
+  return parseAmountSmart(s, '.');
+}
 
 // ============================================================
 // STATE
@@ -88,7 +135,12 @@ const state = {
   // Kurs buku rata-rata stok valas (auto-fill, boleh diubah manual)
   bookRate: null,
   bookRateReq: 0,
-  payRateTouched: false
+  payRateTouched: false,
+  // Rencana Bayar (antrian prioritas, SQL-v11.33)
+  canViewPlan: false,
+  canManagePlan: false,
+  plans: [],
+  plansLoaded: false
 };
 
 // ============================================================
@@ -143,6 +195,8 @@ function bindTabs() {
           state.paymentsLoaded = true;
         }
         await loadPayments();
+      } else if (state.activeTab === 'plan' && state.canViewPlan) {
+        await loadPlans();
       } else if (state.activeTab === 'clearing' && state.canManage) {
         wireClearingForm();
         if (!state.clearingLoaded) {
@@ -837,6 +891,336 @@ async function deletePayment(paymentId, paymentNo) {
 }
 
 // ============================================================
+// TAB RENCANA BAYAR (antrian prioritas hutang)
+// ============================================================
+// Grand Total kumulatif PER CURRENCY: total rencana bayar dengan
+// plan_date <= tanggal baris ini. Baris bertanggal sama dihitung
+// berurutan mengikuti sort_order (urutan antrian).
+function planGrandTotals(plans) {
+  const sorted = [...plans].sort((a, b) => {
+    const da = a.plan_date || '';
+    const db = b.plan_date || '';
+    if (da !== db) return da < db ? -1 : 1;
+    return (Number(a.sort_order) || 0) - (Number(b.sort_order) || 0);
+  });
+  const cum = { IDR: 0, USD: 0 };
+  const map = {};
+  sorted.forEach(p => {
+    const cur = p.currency === 'USD' ? 'USD' : 'IDR';
+    cum[cur] += Number(p.plan_amount) || 0;
+    map[p.id] = { IDR: cum.IDR, USD: cum.USD };
+  });
+  return map;
+}
+
+function renderPlans() {
+  const tbody = document.getElementById('tbody-plans');
+  const tfoot = document.getElementById('tfoot-plans');
+  if (!tbody) return;
+
+  const plans = state.plans || [];
+
+  if (!plans.length) {
+    tbody.innerHTML = '<tr><td colspan="13" style="text-align:center;color:#9ca3af;padding:16px;">Belum ada invoice di antrian rencana bayar.</td></tr>';
+    if (tfoot) tfoot.innerHTML = '';
+    return;
+  }
+
+  const grand = planGrandTotals(plans);
+  const totals = { IDR: 0, USD: 0 };
+  plans.forEach(p => {
+    totals[p.currency === 'USD' ? 'USD' : 'IDR'] += Number(p.plan_amount) || 0;
+  });
+
+  const canEdit = state.canManagePlan;
+  const lastIdx = plans.length - 1;
+
+  tbody.innerHTML = plans.map((p, idx) => {
+    const cur = p.currency === 'USD' ? 'USD' : 'IDR';
+    const g = grand[p.id] || { IDR: 0, USD: 0 };
+    const gVal = cur === 'USD' ? g.USD : g.IDR;
+    const inv = p.invoice || {};
+    const partner = inv.partner || {};
+    const amountValue = String(Number(p.plan_amount || 0));
+
+    return `
+      <tr data-plan-row="${p.id}">
+        <td data-label="No" class="plan-seq">
+          <span class="plan-num">${idx + 1}</span>
+          ${canEdit ? `
+            <span class="plan-move">
+              <button type="button" class="plan-move-btn" data-move="${p.id}" data-dir="up"
+                      title="Naikkan prioritas" ${idx === 0 ? 'disabled' : ''}>▲</button>
+              <button type="button" class="plan-move-btn" data-move="${p.id}" data-dir="down"
+                      title="Turunkan prioritas" ${idx === lastIdx ? 'disabled' : ''}>▼</button>
+            </span>` : ''}
+        </td>
+        <td data-label="Invoice" style="font-family:monospace;font-size:12px;">${esc(inv.invoice_no || '—')}</td>
+        <td data-label="Vendor">${esc(partner.name || '—')}</td>
+        <td data-label="Curr">${esc(cur)}</td>
+        <td data-label="Jatuh Tempo">${fmtDate(inv.due_date)}</td>
+        <td data-label="Subtotal" class="num">${fmt(inv.subtotal)}</td>
+        <td data-label="Sudah Bayar" class="num" style="color:#6b7280;">${fmt(p.paid_amount)}</td>
+        <td data-label="Sisa" class="num" style="color:#b45309;font-weight:600;">${fmt(p.sisa)}</td>
+        <td data-label="Tgl Rencana">
+          ${canEdit
+            ? `<input type="date" class="input plan-date-input" data-plan-id="${p.id}" value="${esc(p.plan_date || '')}">`
+            : fmtDate(p.plan_date)}
+        </td>
+        <td data-label="Rencana Bayar" class="num">
+          ${canEdit
+            ? `<input type="text" class="input plan-amount-input" data-plan-id="${p.id}"
+                      inputmode="decimal" value="${amountValue}">`
+            : fmt(p.plan_amount)}
+        </td>
+        <td data-label="Grand Total" class="num plan-grand"
+            title="Kumulatif s/d tanggal ini — IDR: ${fmt(g.IDR)} · USD: ${fmt(g.USD)}">${fmt(gVal)}</td>
+        <td data-label="Catatan" style="font-size:12px;color:#6b7280;">${esc(p.note || '')}</td>
+        <td data-label="Aksi">
+          ${canEdit
+            ? `<button type="button" class="btn-plan-del" data-plan-del="${p.id}"
+                       title="Keluarkan dari antrian">Hapus</button>`
+            : '—'}
+        </td>
+      </tr>`;
+  }).join('');
+
+  if (tfoot) {
+    const parts = [];
+    if (totals.IDR) parts.push('IDR ' + fmt(totals.IDR));
+    if (totals.USD) parts.push('USD ' + fmt(totals.USD));
+    tfoot.innerHTML = `
+      <tr style="background:#f9fafb;">
+        <td colspan="9" style="text-align:right;font-weight:600;">Total rencana bayar</td>
+        <td colspan="2" class="num" style="font-weight:700;">${parts.join(' · ') || '—'}</td>
+        <td colspan="2"></td>
+      </tr>`;
+  }
+
+  tbody.querySelectorAll('[data-move]').forEach(btn => {
+    btn.addEventListener('click', () => movePlan(Number(btn.dataset.move), btn.dataset.dir));
+  });
+  tbody.querySelectorAll('[data-plan-del]').forEach(btn => {
+    btn.addEventListener('click', () => deletePlan(Number(btn.dataset.planDel)));
+  });
+  tbody.querySelectorAll('.plan-date-input').forEach(inp => {
+    inp.addEventListener('change', () => savePlanInline(Number(inp.dataset.planId)));
+  });
+  tbody.querySelectorAll('.plan-amount-input').forEach(inp => {
+    inp.addEventListener('change', () => savePlanInline(Number(inp.dataset.planId)));
+    inp.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); inp.blur(); }
+    });
+  });
+}
+
+async function loadPlans() {
+  const tbody = document.getElementById('tbody-plans');
+  if (!tbody) return;
+  tbody.innerHTML = '<tr><td colspan="13" style="text-align:center;color:#9ca3af;padding:16px;">Memuat...</td></tr>';
+
+  try {
+    state.plans = await listPaymentPlans();
+    state.plansLoaded = true;
+    renderPlans();
+    try {
+      await fillPlanInvoiceOptions();
+    } catch (optErr) {
+      console.warn('opsi invoice rencana bayar:', optErr);
+    }
+  } catch (err) {
+    console.error('loadPlans:', err);
+    tbody.innerHTML = `<tr><td colspan="13" style="text-align:center;color:#dc2626;padding:16px;">Error: ${esc(err.message || err)}</td></tr>`;
+    const tfoot = document.getElementById('tfoot-plans');
+    if (tfoot) tfoot.innerHTML = '';
+  }
+}
+
+// Dropdown invoice: hanya invoice bersisa > 0 yang BELUM ada di antrian.
+async function fillPlanInvoiceOptions() {
+  const sel = document.getElementById('plInvoice');
+  if (!sel) return;
+
+  if (!(state.payInvoicesCache || []).length) {
+    await loadPaymentInvoices();
+  }
+
+  const queued = new Set((state.plans || []).map(p => Number(p.invoice_id)));
+  const candidates = (state.payInvoicesCache || []).filter(i =>
+    Number(i.sisa) > 0.01 && !queued.has(Number(i.id))
+  );
+  const prev = sel.value;
+
+  sel.innerHTML = '<option value="">— pilih invoice —</option>' + candidates.map(i =>
+    `<option value="${i.id}" data-curr="${esc(i.currency || 'IDR')}" data-sisa="${Number(i.sisa) || 0}">` +
+    `${esc(i.invoice_no)} — ${esc(i.partner?.name || '')} — sisa ${esc(i.currency || 'IDR')} ${fmt(i.sisa)}</option>`
+  ).join('');
+
+  if (prev && candidates.some(c => String(c.id) === prev)) sel.value = prev;
+  onPlanInvoiceChange();
+}
+
+function onPlanInvoiceChange() {
+  const sel = document.getElementById('plInvoice');
+  const hint = document.getElementById('plInvoiceHint');
+  const curLabel = document.getElementById('plCurLabel');
+  const amountEl = document.getElementById('plAmount');
+  if (!sel) return;
+
+  const opt = (sel.selectedOptions && sel.selectedOptions[0]) || null;
+  const cur = opt?.dataset?.curr || '';
+  const sisa = Number(opt?.dataset?.sisa || 0);
+
+  if (curLabel) curLabel.textContent = cur || 'IDR';
+  if (opt && opt.value) {
+    if (hint) hint.textContent = `Sisa hutang ${cur} ${fmt(sisa)} — nominal boleh parsial.`;
+    if (amountEl) amountEl.placeholder = `maks ${fmt(sisa)}`;
+  } else {
+    if (hint) hint.textContent = '';
+    if (amountEl) amountEl.placeholder = 'boleh parsial';
+  }
+}
+
+function resetPlanForm() {
+  const sel = document.getElementById('plInvoice');
+  if (sel) sel.value = '';
+  const amountEl = document.getElementById('plAmount');
+  if (amountEl) amountEl.value = '';
+  const noteEl = document.getElementById('plNote');
+  if (noteEl) noteEl.value = '';
+  const dateEl = document.getElementById('plDate');
+  if (dateEl) dateEl.value = new Date().toISOString().slice(0, 10);
+  onPlanInvoiceChange();
+}
+
+async function submitPlan() {
+  if (!state.canManagePlan) { toast('Tidak ada akses mengelola rencana bayar', true); return; }
+
+  const sel = document.getElementById('plInvoice');
+  const dateEl = document.getElementById('plDate');
+  const amountEl = document.getElementById('plAmount');
+  const noteEl = document.getElementById('plNote');
+
+  const invoiceId = Number(sel?.value || 0);
+  const planDate = dateEl?.value || '';
+  const currency = sel?.selectedOptions?.[0]?.dataset?.curr || 'IDR';
+  const amountRaw = amountEl?.value || '';
+  const amount = currency === 'USD' ? parseNumberUsd(amountRaw) : parseNumberId(amountRaw);
+  const note = (noteEl?.value || '').trim() || null;
+
+  if (!invoiceId) { toast('Pilih invoice dulu', true); return; }
+  if (!planDate) { toast('Tanggal rencana wajib diisi', true); return; }
+  if (!amount || isNaN(amount) || amount <= 0) { toast('Jumlah rencana bayar harus > 0', true); return; }
+
+  const btn = document.getElementById('plSaveBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Memproses...'; }
+
+  try {
+    await addPaymentPlan({
+      invoice_id: invoiceId,
+      plan_date: planDate,
+      plan_amount: amount,
+      note
+    });
+    toast(`✓ Invoice masuk antrian rencana bayar (${currency} ${fmt(amount)})`);
+    resetPlanForm();
+    await loadPlans();
+  } catch (err) {
+    toast('Gagal: ' + (err.message || err), true);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Tambah ke Antrian'; }
+  }
+}
+
+// Simpan perubahan inline (tanggal / nominal) satu baris antrian.
+async function savePlanInline(planId) {
+  if (!state.canManagePlan) return;
+
+  const plan = (state.plans || []).find(p => Number(p.id) === planId);
+  if (!plan) return;
+
+  const tr = document.querySelector(`#tbody-plans tr[data-plan-row="${planId}"]`);
+  if (!tr) return;
+
+  const dateVal = tr.querySelector('.plan-date-input')?.value || '';
+  const amountRaw = tr.querySelector('.plan-amount-input')?.value || '';
+  const currency = plan.currency === 'USD' ? 'USD' : 'IDR';
+  const amount = currency === 'USD' ? parseNumberUsd(amountRaw) : parseNumberId(amountRaw);
+
+  if (!dateVal) {
+    toast('Tanggal rencana wajib diisi', true);
+    renderPlans();
+    return;
+  }
+  if (!amount || isNaN(amount) || amount <= 0) {
+    toast('Jumlah rencana bayar harus > 0', true);
+    renderPlans();
+    return;
+  }
+
+  const sameDate = dateVal === (plan.plan_date || '');
+  const sameAmount = Math.abs(amount - Number(plan.plan_amount || 0)) < 0.005;
+  if (sameDate && sameAmount) return;
+
+  try {
+    await updatePaymentPlan({
+      id: planId,
+      plan_date: dateVal,
+      plan_amount: amount,
+      note: plan.note || null
+    });
+    toast('Rencana bayar diperbarui');
+    await loadPlans();
+  } catch (err) {
+    toast('Gagal simpan: ' + (err.message || err), true);
+    await loadPlans(); // kembalikan nilai dari server
+  }
+}
+
+async function movePlan(planId, direction) {
+  if (!state.canManagePlan) { toast('Tidak ada akses mengubah urutan', true); return; }
+  try {
+    await movePaymentPlan(planId, direction);
+    await loadPlans();
+  } catch (err) {
+    toast('Gagal geser urutan: ' + (err.message || err), true);
+  }
+}
+
+async function deletePlan(planId) {
+  if (!state.canManagePlan) { toast('Tidak ada akses menghapus antrian', true); return; }
+
+  const plan = (state.plans || []).find(p => Number(p.id) === planId);
+  const label = plan?.invoice?.invoice_no || `#${planId}`;
+  if (!confirm(`Keluarkan ${label} dari antrian rencana bayar?`)) return;
+
+  try {
+    await deletePaymentPlan(planId);
+    toast(`✓ ${label} keluar dari antrian`);
+    await loadPlans();
+  } catch (err) {
+    toast('Gagal hapus: ' + (err.message || err), true);
+  }
+}
+
+function bindPlanTab() {
+  const dateEl = document.getElementById('plDate');
+  if (dateEl && !dateEl.value) dateEl.value = new Date().toISOString().slice(0, 10);
+
+  const formCard = document.getElementById('planFormCard');
+  if (formCard) formCard.style.display = state.canManagePlan ? 'block' : 'none';
+
+  document.getElementById('plInvoice')?.addEventListener('change', onPlanInvoiceChange);
+  document.getElementById('plSaveBtn')?.addEventListener('click', submitPlan);
+  document.getElementById('plResetBtn')?.addEventListener('click', resetPlanForm);
+  document.getElementById('planRefreshBtn')?.addEventListener('click', async () => {
+    state.plansLoaded = false;
+    await loadPlans();
+  });
+}
+
+
+// ============================================================
 // AGING
 // ============================================================
 async function loadAging() {
@@ -1244,10 +1628,13 @@ function bindFilters() {
   state.canCreatePayment = await hasPermission('finance.hutang.payment.create');
   state.canDeletePayment = await hasPermission('finance.hutang.payment.delete');
   state.canManage        = await hasPermission('finance.hutang.manage');
+  state.canManagePlan    = await hasPermission('finance.hutang.plan.manage');
+  state.canViewPlan      = state.canManagePlan || await hasPermission('finance.hutang.plan.view');
 
   const tabPerms = {
     invoice: state.canViewInvoice,
     payment: state.canViewInvoice,
+    plan:    state.canViewPlan,
     aging:   state.canViewAging,
     clearing: state.canManage
   };
@@ -1272,6 +1659,7 @@ function bindFilters() {
   bindTabs();
   bindFilters();
   bindPaymentTab();
+  bindPlanTab();
 
   const formCard = document.getElementById('paymentFormCard');
   formCard.style.display = state.canCreatePayment ? 'block' : 'none';
@@ -1293,6 +1681,7 @@ function bindFilters() {
 
   if (state.activeTab === 'invoice') await loadInvoices();
   else if (state.activeTab === 'aging') await loadAging();
+  else if (state.activeTab === 'plan') await loadPlans();
   else if (state.activeTab === 'payment') {
     await loadPaymentInvoices();
     state.paymentsLoaded = true;
