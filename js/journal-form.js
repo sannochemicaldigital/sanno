@@ -37,6 +37,9 @@ const state = {
   userMap: new Map(),
   lineCount: 0,
   editingId: null,
+  // v11.34 — tautan dari halaman lain (Buku Besar)
+  focusId: null,          // journals.id yang kartunya disorot
+  cameFromLedger: false,  // ada ?back= -> form tidak auto-terbuka
   // v11.33 — filter daftar jurnal
   journalQ: '',
   journalFrom: '',
@@ -133,9 +136,28 @@ function currencyOptions(selected = BASE_CURRENCY) {
   // v11.33 — pencarian jurnal (No. jurnal / keterangan / rentang tanggal).
   // Daftar default hanya N jurnal terbaru, jadi jurnal lama (KAS-*, KASADJ-*)
   // hanya bisa ditemukan lewat pencarian ini atau tautan journal.html?q=KASADJ.
-  const qParam = new URLSearchParams(location.search).get('q') || '';
+  // v11.34 — parameter dari halaman lain:
+  //   ?q=<no jurnal>  langsung DIJALANKAN sebagai pencarian (dulu hanya mengisi
+  //                   kotak, daftar tetap 20 jurnal terbaru sehingga jurnal
+  //                   yang dituju tidak muncul)
+  //   ?id=<id>        jurnal yang dibuka -> kartunya disorot
+  //   ?back=<url>     tombol "← Kembali" ke halaman asal (Buku Besar)
+  const urlParams = new URLSearchParams(location.search);
+  const qParam   = urlParams.get('q') || '';
+  const deepId   = Number(urlParams.get('id') || 0);
+  const backUrl  = urlParams.get('back') || '';
   const searchEl = document.getElementById('journalSearch');
-  if (qParam) searchEl.value = qParam;
+  if (qParam) {
+    searchEl.value = qParam;
+    state.journalQ = qParam;
+  }
+  state.focusId = deepId > 0 ? deepId : null;
+  state.cameFromLedger = !!backUrl;
+  if (backUrl) {
+    const backBtn = document.getElementById('backBtn');
+    backBtn.href = backUrl;
+    backBtn.style.display = 'inline-block';
+  }
   document.getElementById('journalSearchBtn').addEventListener('click', onJournalSearch);
   document.getElementById('journalResetBtn').addEventListener('click', onJournalSearchReset);
   searchEl.addEventListener('keydown', e => {
@@ -149,8 +171,11 @@ function currencyOptions(selected = BASE_CURRENCY) {
 
   // v11.12 — tautan langsung dari halaman lain: journal.html?id=<id>
   // (dipakai tombol "Edit Jurnal" di Rekonsiliasi Bank). Hanya bila punya hak edit.
-  const deepId = Number(new URLSearchParams(location.search).get('id') || 0);
-  if (deepId > 0 && state.perms.edit) await loadEdit(deepId);
+  // v11.34 — kalau datang dari Buku Besar (?back=), form TIDAK dibuka otomatis:
+  // user diarahkan ke kartu jurnal yang disorot supaya bisa memilih sendiri
+  // Edit / Reversal / Hapus. Tanpa ?back= perilaku lama dipertahankan.
+  if (deepId > 0 && state.perms.edit && !state.cameFromLedger) await loadEdit(deepId);
+  if (state.cameFromLedger) scrollToFocusedJournal();
 })();
 
 async function loadMaster() {
@@ -623,6 +648,14 @@ function onJournalSearchReset() {
   renderJournals();
 }
 
+// v11.34 — dipakai saat halaman dibuka dari Buku Besar (?back=...): gulir ke
+// kartu jurnal yang disorot supaya tombol Edit / Reversal / Hapus langsung
+// terlihat tanpa harus mencari.
+function scrollToFocusedJournal() {
+  const el = document.querySelector('#journalList .journal-list-item.focus');
+  if (el) el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+}
+
 async function renderJournals() {
   const wrap = document.getElementById('journalList');
   const titleEl = document.getElementById('journalListTitle');
@@ -630,12 +663,26 @@ async function renderJournals() {
   const limit = isSearch ? 100 : 20;
   if (titleEl) titleEl.textContent = isSearch ? 'Hasil Pencarian Jurnal' : 'Jurnal Terakhir';
   try {
-    const list = await listJournals({
+    let list = await listJournals({
       q: state.journalQ || null,
       from: state.journalFrom || null,
       to: state.journalTo || null,
       limit
     });
+
+    // v11.34 — pastikan jurnal yang dituju (?id=, dari tombol "Kelola" di Buku
+    // Besar) selalu ikut tampil, walau di luar 20 terbaru / hasil pencarian.
+    // getJournal mengembalikan header + lines; yang dipakai di sini hanya
+    // field header, jadi aman disisipkan ke daftar.
+    if (state.focusId && !list.some(j => Number(j.id) === Number(state.focusId))) {
+      try {
+        const focus = await getJournal(state.focusId);
+        list = [focus, ...list];
+      } catch (e) {
+        // jurnal sudah dihapus / tidak bisa dibaca -> cukup tampilkan daftar
+      }
+    }
+
     if (!list.length) {
       wrap.innerHTML = isSearch
         ? '<div style="color:#9ca3af;font-size:14px;">Tidak ada jurnal yang cocok. Coba kata kunci lain (mis. <b>KASADJ</b> atau <b>KAS-202611</b>) atau longgarkan rentang tanggal.</div>'
@@ -694,7 +741,7 @@ async function renderJournals() {
         : '—';
 
       return `
-        <div class="journal-list-item">
+        <div class="journal-list-item${Number(j.id) === Number(state.focusId) ? ' focus' : ''}" data-jid="${j.id}">
           <div><b>${esc(j.journal_no)}</b>${badge} — ${esc(j.description || '')}</div>
           <div class="meta">${j.journal_date}${cur} · Debit ${fmt(s.d)} · Kredit ${fmt(s.c)} · Input: ${creator}</div>
           ${buttonsHtml}
@@ -791,6 +838,8 @@ async function onDelete(journalId, journalNo) {
     await deleteJournal(journalId);
     toast(`✓ Jurnal ${journalNo} dihapus permanen`);
     if (state.editingId === journalId) resetForm();
+    // jurnal yang disorot sudah tidak ada -> hentikan penyorotan
+    if (Number(state.focusId) === Number(journalId)) state.focusId = null;
     await renderJournals();
   } catch (err) {
     toast('Gagal hapus: ' + (err.message || err), true);

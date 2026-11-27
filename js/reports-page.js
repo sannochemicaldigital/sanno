@@ -1,12 +1,16 @@
 // js/reports-page.js
 import { requireAuth, logout } from './auth.js';
-import { renderNav, requirePageAccess } from './access.js';
+import { renderNav, requirePageAccess, canAccess } from './access.js';
 import { hasPermission } from './permissions.js';
 import {
   trialBalance, cashflow, agingPiutang, agingHutang,
   salesReport, labaRugi, neraca,
   ledgerAccountList, ledgerByAccount
-} from './reports.js';
+} from './reports.js?v=11.34';
+// v11.34 — hapus cepat jurnal dari Buku Besar (khusus superadmin).
+// Fungsi data layer ini sama dengan yang dipakai halaman Jurnal
+// (RPC delete_journal_with_lock, guard periode di server).
+import { deleteJournal } from './journals.js';
 
 // ============================================================
 // STATE
@@ -17,7 +21,9 @@ const state = {
   activeTab: 'tb',
   lastData: null,
   perms: {},
-  bb: { code: null, list: null, data: null }
+  role: null,
+  // focusLine = line_id yang disorot saat kembali dari halaman Jurnal
+  bb: { code: null, list: null, data: null, focusLine: null }
 };
 
 // ============================================================
@@ -82,6 +88,23 @@ function periodLabel(from, to) {
   state.perms.labaRugi         = await hasPermission('reports.laba_rugi');
   state.perms.neraca           = await hasPermission('reports.neraca');
 
+  // v11.34 — aksi jurnal dari Buku Besar.
+  // Edit/Reversal/Hapus tetap dikerjakan di journal.html (satu tempat, sudah
+  // teruji: cek periode, double confirm, RPC). Di sini hanya butuh tahu
+  // apakah kolom "Aksi" perlu ditampilkan.
+  state.perms.journalEdit     = await hasPermission('finance.journal.edit');
+  state.perms.journalReversal = await hasPermission('finance.journal.reversal');
+  state.perms.journalDelete   = await hasPermission('finance.journal.delete');
+  // Hapus permanen langsung dari Buku Besar HANYA superadmin.
+  // Admin biasa tetap bisa menghapus lewat halaman Jurnal (izin yang sama).
+  state.perms.quickDelete = role === 'superadmin' && state.perms.journalDelete;
+  // Tombol "Kelola" mengarah ke journal.html -> hanya berguna kalau role ini
+  // memang punya akses halaman Jurnal (page_access). Contoh: supervisor punya
+  // finance.journal.reversal tetapi TIDAK punya akses halaman journal, jadi
+  // kolom Aksi tidak ditampilkan untuknya.
+  state.perms.canJournalPage = await canAccess('journal', role);
+  state.role = role;
+
   if (!state.perms.export) {
     document.getElementById('exportCsv').style.display = 'none';
     document.getElementById('printReportBtn').style.display = 'none';
@@ -126,6 +149,9 @@ function periodLabel(from, to) {
   const wantAkun = urlParams.get('akun');
   const wantFrom = urlParams.get('from');
   const wantTo   = urlParams.get('to');
+  // line = line_id jurnal yang terakhir dibuka (dari tombol Kelola) supaya
+  // saat kembali baris tersebut bisa disorot & di-scroll.
+  const wantLine = Number(urlParams.get('line') || 0);
   if (wantFrom) {
     document.getElementById('filterFrom').value = wantFrom;
     state.from = wantFrom;
@@ -136,6 +162,7 @@ function periodLabel(from, to) {
   }
   if (wantTab && tabPerms[wantTab]) firstAllowed = wantTab;
   state.bb.code = wantAkun || null;
+  state.bb.focusLine = wantLine > 0 ? wantLine : null;
 
   // Aktifkan tab pertama yang berhak
   if (firstAllowed) {
@@ -203,6 +230,9 @@ function periodLabel(from, to) {
   // ===== BUKU BESAR =====
   document.getElementById('bbAccount').addEventListener('change', e => {
     state.bb.code = e.target.value || null;
+    // v11.34 — sorotan baris hanya untuk baris yang tadi dibuka dari tombol
+    // Kelola; ganti akun = konteks baru, jangan menyorot apa pun.
+    state.bb.focusLine = null;
     if (state.bb.code) loadLedger();
     else resetLedgerPanel();
   });
@@ -235,15 +265,90 @@ async function loadActive() {
 // Valuta & nominal per baris berasal dari journal_lines (currency_code,
 // debit, credit); kolom rupiah memakai nilai dasar historis (_base).
 // ============================================================
+// Kode valuta yang muncul di NAMA akun ("Bank CIMB USD", "Piutang Dagang USD").
+// CATATAN: accounts.is_fx_monetary TIDAK dipakai sebagai penanda "akun valas",
+// karena SQL-v10.1 menandai semua akun moneter (termasuk bank IDR 1-1100/1-1110)
+// dengan true — flag itu hanya berarti "direvaluasi di TB kurs pajak".
+const CURRENCY_HINTS = ['USD', 'SGD', 'EUR', 'JPY', 'CNY', 'GBP', 'AUD'];
+function accountCurrencyHint(name) {
+  const nm = String(name || '').toUpperCase();
+  return CURRENCY_HINTS.find(c => nm.includes(c)) || null;
+}
+
+// ============================================================
+// AKSI JURNAL DARI BUKU BESAR (v11.34)
+// ------------------------------------------------------------
+// Edit / Reversal / Hapus TIDAK diduplikasi di halaman laporan. Tombol
+// "Kelola" membuka journal.html yang sudah memuat form edit, reversal,
+// hapus, guard periode, dan double confirm. Parameter yang dikirim:
+//   id   = journals.id  -> kartu jurnal disorot
+//   q    = journal_no   -> langsung dicari supaya kartu pasti muncul
+//   back = URL laporan ini (akun + periode + line) -> tombol "← Kembali"
+// ============================================================
+function ledgerBackUrl(code, lineId = null) {
+  const p = new URLSearchParams();
+  p.set('tab', 'bb');
+  if (code) p.set('akun', code);
+  if (state.from) p.set('from', state.from);
+  if (state.to) p.set('to', state.to);
+  if (lineId) p.set('line', lineId);
+  return './reports.html?' + p.toString();
+}
+
+function ledgerActionButtons(row, code) {
+  const p = new URLSearchParams();
+  p.set('id', row.journal_id);
+  p.set('q', row.journal_no);
+  p.set('back', ledgerBackUrl(code, row.line_id));
+
+  const btns = [
+    `<a class="btn btn-secondary btn-xs" href="./journal.html?${p.toString()}"`
+    + ` title="Buka jurnal ${esc(row.journal_no)} di halaman Jurnal (edit, reversal, hapus)">Kelola</a>`
+  ];
+  // Hapus permanen langsung dari tabel: khusus superadmin, dan hanya untuk
+  // jurnal biasa — jurnal REVERSAL tidak boleh dihapus (sama seperti halaman
+  // Jurnal) supaya pasangan asli-reversal tetap utuh sebagai jejak audit.
+  if (state.perms.quickDelete && !row.reversal_of) {
+    btns.push(
+      `<button type="button" class="btn btn-danger btn-xs"`
+      + ` data-quick-delete="${row.journal_id}" data-no="${esc(row.journal_no)}">Hapus</button>`
+    );
+  }
+  return `<div class="row-actions">${btns.join('')}</div>`;
+}
+
+async function onQuickDelete(journalId, journalNo) {
+  if (!state.perms.quickDelete) {
+    toast('Hanya superadmin yang boleh menghapus jurnal permanen', true);
+    return;
+  }
+  if (!confirm(
+    `HAPUS PERMANEN jurnal ${journalNo}?\n\n` +
+    `Tindakan ini tidak bisa dibatalkan. Untuk koreksi normal, gunakan ` +
+    `tombol Kelola -> Reversal di halaman Jurnal.`
+  )) return;
+  if (!confirm(`Konfirmasi sekali lagi: hapus permanen ${journalNo}?`)) return;
+
+  try {
+    await deleteJournal(journalId);
+    toast(`✓ Jurnal ${journalNo} dihapus permanen`);
+    state.bb.focusLine = null;
+    await loadLedger();
+  } catch (err) {
+    toast('Gagal hapus: ' + (err.message || err), true);
+  }
+}
+
 async function ensureLedgerAccounts() {
   if (state.bb.list) return state.bb.list;
   const list = await ledgerAccountList();
   state.bb.list = list;
   const sel = document.getElementById('bbAccount');
-  sel.innerHTML = '<option value="">— pilih akun —</option>' + list.map(a =>
-    `<option value="${esc(a.code)}">${esc(a.code)} · ${esc(a.name)}`
-    + `${a.is_fx_monetary ? ' (valas)' : ''}</option>`
-  ).join('');
+  sel.innerHTML = '<option value="">— pilih akun —</option>' + list.map(a => {
+    const hint = accountCurrencyHint(a.name);
+    return `<option value="${esc(a.code)}">${esc(a.code)} · ${esc(a.name)}`
+      + `${hint ? ` (${hint})` : ''}</option>`;
+  }).join('');
   return list;
 }
 
@@ -283,14 +388,38 @@ async function loadLedger() {
     state.bb.data = d;
     state.lastData = { type: 'bb', data: d };
     const cur = d.currency;
-    const cols = d.is_valas
-      ? ['Tanggal', 'No. Jurnal', 'Keterangan', 'Valuta', 'Kurs',
-         `Debit (${cur})`, `Kredit (${cur})`, `Saldo (${cur})`,
-         'Debit (Rp)', 'Kredit (Rp)', 'Saldo (Rp)']
-      : ['Tanggal', 'No. Jurnal', 'Keterangan', 'Debit', 'Kredit', 'Saldo'];
+    // Kolom Valuta hanya ditampilkan kalau satu akun benar-benar memuat >1 valuta
+    // (kasus normal: semua baris sevaluta -> kolom mubazir dihilangkan).
+    const mixed = new Set(d.rows.map(r => r.currency)).size > 1;
+    // Kolom "Aksi" hanya untuk user yang berhak mengubah jurnal DAN punya akses
+    // ke halaman Jurnal (tempat tombol Kelola bermuara).
+    const showActions = state.perms.canJournalPage
+      && !!(state.perms.journalEdit || state.perms.journalReversal
+        || state.perms.journalDelete);
 
-    thead.innerHTML = '<tr>' + cols.map((c, i) =>
-      `<th${i >= 3 ? ' class="num"' : ''}>${esc(c)}</th>`).join('') + '</tr>';
+    const cols = [
+      { t: 'Tanggal',    cls: 'col-date' },
+      { t: 'No. Jurnal', cls: '' },
+      { t: 'Keterangan', cls: '' }
+    ];
+    if (d.is_valas) {
+      if (mixed) cols.push({ t: 'Valuta', cls: 'col-cur' });
+      cols.push({ t: 'Kurs', cls: 'col-rate num' });
+      cols.push({ t: `Debit (${cur})`,  cls: 'num' });
+      cols.push({ t: `Kredit (${cur})`, cls: 'num' });
+      cols.push({ t: `Saldo (${cur})`,  cls: 'num' });
+      cols.push({ t: 'Debit (Rp)',  cls: 'num' });
+      cols.push({ t: 'Kredit (Rp)', cls: 'num' });
+      cols.push({ t: 'Saldo (Rp)',  cls: 'num' });
+    } else {
+      cols.push({ t: 'Debit',  cls: 'num' });
+      cols.push({ t: 'Kredit', cls: 'num' });
+      cols.push({ t: 'Saldo',  cls: 'num' });
+    }
+
+    thead.innerHTML = '<tr>' + cols.map(c =>
+      `<th class="${c.cls}">${esc(c.t)}</th>`).join('')
+      + (showActions ? '<th class="col-act">Aksi</th>' : '') + '</tr>';
 
     // Ringkasan: saldo awal / mutasi periode / saldo akhir
     const saldoAwal = d.is_valas
@@ -323,7 +452,7 @@ async function loadLedger() {
 
     tbody.innerHTML = d.rows.map(r => {
       const tds = [
-        `<td data-label="Tanggal">${tgl(r.journal_date)}</td>`,
+        `<td class="col-date" data-label="Tanggal">${tgl(r.journal_date)}</td>`,
         `<td data-label="Jurnal">${esc(r.journal_no)}</td>`,
         `<td data-label="Keterangan">${esc(r.description)}</td>`
       ];
@@ -334,8 +463,10 @@ async function loadLedger() {
         // Baris valuta lain (bukan valuta akun) diberi label valutanya sendiri
         const nat = v => (!v ? ''
           : (r.currency === d.currency ? fmtValas(v) : `${esc(r.currency)} ${fmt(v)}`));
-        tds.push(`<td data-label="Valuta">${esc(r.currency)}</td>`);
-        tds.push(`<td data-label="Kurs" class="num">${r.exchange_rate ? fmt(r.exchange_rate) : '—'}</td>`);
+        if (mixed) {
+          tds.push(`<td class="col-cur" data-label="Valuta">${esc(r.currency)}</td>`);
+        }
+        tds.push(`<td class="col-rate num" data-label="Kurs">${r.exchange_rate ? fmt(r.exchange_rate) : '—'}</td>`);
         tds.push(`<td data-label="Debit" class="num">${nat(r.debit)}</td>`);
         tds.push(`<td data-label="Kredit" class="num">${nat(r.credit)}</td>`);
         tds.push(`<td data-label="Saldo Valuta" class="num">${saldoNat}</td>`);
@@ -347,29 +478,49 @@ async function loadLedger() {
         tds.push(`<td data-label="Kredit" class="num">${r.credit_base ? fmt(r.credit_base) : ''}</td>`);
         tds.push(`<td data-label="Saldo" class="num ${r.balance < 0 ? 'neg' : ''}">${fmt(r.balance)}</td>`);
       }
-      return `<tr>${tds.join('')}</tr>`;
-    }).join('') || `<tr><td colspan="${cols.length}" style="text-align:center;color:#9ca3af;">`
+      if (showActions) {
+        tds.push(`<td class="col-act" data-label="Aksi">${ledgerActionButtons(r, code)}</td>`);
+      }
+      const focusCls = r.line_id === state.bb.focusLine ? ' class="row-focus"' : '';
+      return `<tr${focusCls}>${tds.join('')}</tr>`;
+    }).join('') || `<tr><td colspan="${cols.length + (showActions ? 1 : 0)}" style="text-align:center;color:#9ca3af;">`
       + 'Tidak ada mutasi pada periode ini</td></tr>';
 
-    tfoot.innerHTML = d.is_valas
-      ? `<tr class="report-total">
-           <td colspan="8">TOTAL</td>
-           <td class="num">${fmt(d.totals.debit)}</td>
-           <td class="num">${fmt(d.totals.credit)}</td>
-           <td class="num">${fmt(d.totals.closing_base)}</td>
-         </tr>`
-      : `<tr class="report-total">
-           <td colspan="3">TOTAL</td>
-           <td class="num">${fmt(d.totals.debit)}</td>
-           <td class="num">${fmt(d.totals.credit)}</td>
-           <td class="num">${fmt(d.totals.closing_base)}</td>
-         </tr>`;
+    const spanTotal = cols.length - 3;
+    tfoot.innerHTML = `<tr class="report-total">
+        <td colspan="${spanTotal}">TOTAL</td>
+        <td class="num">${fmt(d.totals.debit)}</td>
+        <td class="num">${fmt(d.totals.credit)}</td>
+        <td class="num">${fmt(d.totals.closing_base)}</td>
+        ${showActions ? '<td></td>' : ''}
+      </tr>`;
 
     note.innerHTML = d.is_valas
-      ? 'Nominal debit/kredit ditampilkan dalam mata uang asli tiap baris (lihat kolom <b>Valuta</b>). '
+      ? 'Nominal debit/kredit ditampilkan dalam mata uang asli tiap baris'
+        + `${mixed ? ' (lihat kolom <b>Valuta</b>)' : ''}. `
         + `Saldo valuta hanya mengakumulasi baris sevaluta <b>${esc(cur)}</b>; baris valuta lain diberi tanda "—". `
         + 'Kolom Rupiah memakai nilai dasar historis (kurs saat jurnal), bukan kurs ulang.'
       : 'Seluruh nominal dalam Rupiah (nilai dasar historis saat jurnal dibuat).';
+    if (showActions) {
+      note.innerHTML += '<br>Kolom <b>Aksi</b>: tombol <b>Kelola</b> membuka jurnal di halaman '
+        + 'Jurnal (edit / reversal / hapus) — setelah selesai klik <b>← Kembali</b> untuk '
+        + 'kembali ke akun &amp; periode ini.'
+        + (state.perms.quickDelete
+          ? ' Tombol <b>Hapus</b> = hapus permanen (khusus superadmin).'
+          : '');
+    }
+
+    // Hapus cepat (superadmin) — listener dipasang ulang setiap render.
+    tbody.querySelectorAll('[data-quick-delete]').forEach(btn => {
+      btn.addEventListener('click', () =>
+        onQuickDelete(Number(btn.dataset.quickDelete), btn.dataset.no));
+    });
+
+    // Kembali dari halaman Jurnal: sorot + scroll ke baris yang tadi dibuka.
+    const focusRow = tbody.querySelector('tr.row-focus');
+    if (focusRow) {
+      setTimeout(() => focusRow.scrollIntoView({ block: 'center', behavior: 'smooth' }), 80);
+    }
   } catch (err) {
     thead.innerHTML = '';
     tbody.innerHTML = `<tr><td style="color:#b91c1c;">${esc(err.message)}</td></tr>`;

@@ -549,7 +549,8 @@ export async function ledgerByAccount({ accountCode, from = null, to = null } = 
       .from('journal_lines')
       .select('id, journal_id, debit, credit, debit_base, credit_base, '
         + 'currency_code, exchange_rate, memo, '
-        + 'journals!inner(journal_no, journal_date, description, currency_code, exchange_rate)')
+        + 'journals!inner(journal_no, journal_date, description, currency_code, '
+        + 'exchange_rate, reversed_by, reversal_of)')
       .eq('account_id', acc.id)
       .order('id', { ascending: true })
       .range(offset, offset + PAGE - 1);
@@ -620,6 +621,11 @@ export async function ledgerByAccount({ accountCode, from = null, to = null } = 
       journal_date:   jd,
       journal_no:     l.journals?.journal_no || '',
       description:    l.memo || l.journals?.description || '',
+      // v11.34 — status reversal ikut dikirim supaya tombol Hapus cepat di
+      // Buku Besar bisa mengikuti aturan halaman Jurnal (jurnal reversal
+      // TIDAK boleh dihapus; jejak audit harus tetap ada).
+      reversed_by:    l.journals?.reversed_by ?? null,
+      reversal_of:    l.journals?.reversal_of ?? null,
       currency:       cur,
       exchange_rate:  Number(l.exchange_rate) || Number(l.journals?.exchange_rate) || null,
       debit:          d,
