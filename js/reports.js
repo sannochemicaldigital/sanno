@@ -639,6 +639,14 @@ export async function salesReport({ from = null, to = null } = {}) {
 //   - saldo valuta asli -> hanya baris yang valutanya = valuta akun
 //   - saldo rupiah      -> seluruh baris (kolom base)
 // Saldo awal = akumulasi baris bertanggal < `from`.
+//
+// v11.51 — DEFINISI SALDO (keputusan pemilik 28-11-2026):
+//   saldo pada tiap baris = SALDO AWAL PERIODE + debit - kredit (kumulatif),
+//   jadi baris pertama sudah memuat saldo awal dan baris terakhir = saldo
+//   akhir (angka yang sama dengan "Saldo Akhir" di ringkasan / footer TOTAL).
+//   Sebelumnya kolom saldo mulai dari 0 (hanya mutasi periode) sehingga bisa
+//   negatif walau saldo akun positif - membingungkan. runBase/runNative tetap
+//   MURNI mutasi periode (dipakai menghitung total debit/kredit).
 // ============================================================
 export async function ledgerAccountList() {
   const { data, error } = await supabase
@@ -717,6 +725,11 @@ export async function ledgerByAccount({ accountCode, from = null, to = null } = 
   let openBase = 0;
   let runNative = 0;
   let runBase = 0;
+  // v11.51 — saldo berjalan yang DITAMPILKAN: mulai dari saldo awal periode
+  // (definisi umum: saldo = saldo sebelumnya + debit - kredit).
+  let balNative = 0;
+  let balBase = 0;
+  let balSeeded = false;
   let sumDebitBase = 0;
   let sumCreditBase = 0;
   const rows = [];
@@ -736,8 +749,17 @@ export async function ledgerByAccount({ accountCode, from = null, to = null } = 
       continue;
     }
 
+    // v11.51 — baris pertama periode: saldo berjalan dimulai dari saldo awal.
+    if (!balSeeded) {
+      balBase   = openBase;
+      balNative = openNative;   // hanya berisi baris sevaluta akun
+      balSeeded = true;
+    }
+
     runBase += dB - cB;
     if (same) runNative += d - c;
+    balBase += dB - cB;
+    if (same) balNative += d - c;
     sumDebitBase  += dB;
     sumCreditBase += cB;
 
@@ -758,8 +780,9 @@ export async function ledgerByAccount({ accountCode, from = null, to = null } = 
       credit:         c,
       debit_base:     dB,
       credit_base:    cB,
-      balance:        runBase,
-      balance_native: same ? runNative : null
+      // v11.51 — saldo = saldo awal periode + debit - kredit (kumulatif)
+      balance:        balBase,
+      balance_native: same ? balNative : null
     });
   }
 

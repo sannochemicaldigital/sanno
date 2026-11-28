@@ -6,7 +6,7 @@ import {
   trialBalance, cashflow, agingPiutang, agingHutang,
   salesReport, labaRugi, neraca,
   ledgerAccountList, ledgerByAccount
-} from './reports.js?v=11.34';
+} from './reports.js?v=11.51';
 // v11.34 — hapus cepat jurnal dari Buku Besar (khusus superadmin).
 // Fungsi data layer ini sama dengan yang dipakai halaman Jurnal
 // (RPC delete_journal_with_lock, guard periode di server).
@@ -495,12 +495,15 @@ async function loadLedger() {
         ${showActions ? '<td></td>' : ''}
       </tr>`;
 
-    note.innerHTML = d.is_valas
+    const definisiSaldo = ' <b>Saldo</b> tiap baris = saldo awal periode + debit − kredit'
+      + ' (baris terakhir = Saldo Akhir).';
+    note.innerHTML = (d.is_valas
       ? 'Nominal debit/kredit ditampilkan dalam mata uang asli tiap baris'
         + `${mixed ? ' (lihat kolom <b>Valuta</b>)' : ''}. `
         + `Saldo valuta hanya mengakumulasi baris sevaluta <b>${esc(cur)}</b>; baris valuta lain diberi tanda "—". `
         + 'Kolom Rupiah memakai nilai dasar historis (kurs saat jurnal), bukan kurs ulang.'
-      : 'Seluruh nominal dalam Rupiah (nilai dasar historis saat jurnal dibuat).';
+      : 'Seluruh nominal dalam Rupiah (nilai dasar historis saat jurnal dibuat).')
+      + definisiSaldo;
     if (showActions) {
       note.innerHTML += '<br>Kolom <b>Aksi</b>: tombol <b>Kelola</b> membuka jurnal di halaman '
         + 'Jurnal (edit / reversal / hapus) — setelah selesai klik <b>← Kembali</b> untuk '
